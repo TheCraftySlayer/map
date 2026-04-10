@@ -46,7 +46,7 @@ input[type="file"]{display:none}
 
 <div class="header">
   <h1>Upload Map Data</h1>
-  <a href="index.html">Open Map &rarr;</a>
+  <a href="index.html" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#185FA5;color:#fff;padding:8px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">&#127758; Open Map &rarr;</a>
 </div>
 
 <div class="container">
@@ -148,39 +148,79 @@ function parseCSV(text){
 
 function parseDBF(buf){
   const dv=new DataView(buf);
+  if(buf.byteLength<32)throw new Error('File too small to be a valid DBF');
   const numRecords=dv.getUint32(4,true);
   const headerLen=dv.getUint16(8,true);
   const recordLen=dv.getUint16(10,true);
+  if(numRecords<=0||headerLen<33||recordLen<1)throw new Error('Invalid DBF header');
   const fields=[];
   let pos=32;
-  while(pos<headerLen-1&&dv.getUint8(pos)!==0x0D){
-    let name='';for(let i=0;i<11;i++){const c=dv.getUint8(pos+i);if(c)name+=String.fromCharCode(c);}
+  while(pos<headerLen-1&&pos+32<=buf.byteLength){
+    const firstByte=dv.getUint8(pos);
+    if(firstByte===0x0D||firstByte===0x00)break;
+    let name='';
+    for(let i=0;i<11;i++){const c=dv.getUint8(pos+i);if(c>0x20&&c<0x7F)name+=String.fromCharCode(c);} // skip nulls and control chars
     name=name.trim();
+    if(!name){pos+=32;continue;}
     const type=String.fromCharCode(dv.getUint8(pos+11));
     const len=dv.getUint8(pos+16);
+    if(len<=0){pos+=32;continue;}
     fields.push({name,type,len});pos+=32;
   }
-  if(!fields.length)throw new Error('No fields found in DBF');
+  if(!fields.length)throw new Error('No fields found in DBF ('+numRecords+' records, header '+headerLen+' bytes)');
+  // Flexible coordinate field matching
   const lowerNames=fields.map(f=>f.name.toLowerCase());
-  const latIdx=lowerNames.findIndex(n=>/^(lat|latitude|la|y|ycoord|y_coord)$/.test(n));
-  const lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord)$/.test(n));
-  if(latIdx<0||lonIdx<0)throw new Error('DBF needs lat/lon fields');
-  const decoder=new TextDecoder('utf-8');
+  let latIdx=lowerNames.findIndex(n=>/^(lat|latitude|la|y|ycoord|y_coord|point_y|lat_dd)$/.test(n));
+  let lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord|point_x|long_dd|lon_dd)$/.test(n));
+  // Fallback: scan for first two numeric fields with values in lat/lon range
+  if(latIdx<0||lonIdx<0){
+    const numFields=fields.map((f,i)=>({i,name:f.name,type:f.type})).filter(f=>f.type==='N'||f.type==='F');
+    if(numFields.length>=2){
+      // Try to read first record and find plausible lat/lon values
+      if(headerLen+recordLen<=buf.byteLength){
+        const decoder=new TextDecoder('latin1');
+        const recStart=headerLen;
+        let offset=recStart+1;
+        const testVals={};
+        for(let f=0;f<fields.length;f++){
+          const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
+          offset+=fields[f].len;
+          testVals[f]=parseFloat(raw);
+        }
+        for(const nf of numFields){
+          const v=testVals[nf.i];
+          if(!isNaN(v)){
+            if(v>=-90&&v<=90&&latIdx<0)latIdx=nf.i;
+            else if(v>=-180&&v<=180&&lonIdx<0)lonIdx=nf.i;
+          }
+        }
+      }
+    }
+  }
+  if(latIdx<0||lonIdx<0){
+    const fieldList=fields.map(f=>f.name).join(', ');
+    throw new Error('No lat/lon fields found in DBF. Fields: '+fieldList);
+  }
+  // Use latin1 decoder — most shapefiles use Windows-1252/Latin-1
+  const decoder=new TextDecoder('latin1');
   const features=[];
-  for(let r=0;r<numRecords;r++){
+  const maxRec=Math.min(numRecords,500000); // safety cap
+  for(let r=0;r<maxRec;r++){
     const recStart=headerLen+r*recordLen;
-    if(dv.getUint8(recStart)===0x2A)continue;
+    if(recStart+recordLen>buf.byteLength)break;
+    if(dv.getUint8(recStart)===0x2A)continue; // deleted record
     let offset=recStart+1;const props={};let lat=NaN,lon=NaN;
     for(let f=0;f<fields.length;f++){
+      if(offset+fields[f].len>buf.byteLength)break;
       const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
       offset+=fields[f].len;
       if(f===latIdx){lat=parseFloat(raw);continue;}
       if(f===lonIdx){lon=parseFloat(raw);continue;}
-      props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?parseFloat(raw)||raw:raw;
+      if(raw)props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?(parseFloat(raw)||(parseFloat(raw)===0?0:raw)):raw;
     }
-    if(!isNaN(lat)&&!isNaN(lon))features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+    if(!isNaN(lat)&&!isNaN(lon)&&lat!==0&&lon!==0)features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
   }
-  if(!features.length)throw new Error('No valid coordinates found in DBF');
+  if(!features.length)throw new Error('No valid coordinates found in DBF ('+numRecords+' records, fields: '+fields.map(f=>f.name).join(', ')+')');
   return{type:'FeatureCollection',features};
 }
 
