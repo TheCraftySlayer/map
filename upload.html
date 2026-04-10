@@ -127,8 +127,22 @@ function parseCSV(text){
   const headers=firstLine.split(delim).map(h=>h.trim().toLowerCase().replace(/"/g,''));
   let latIdx=headers.findIndex(h=>/^(lat|latitude|la|y|ycoord|y_coord)$/i.test(h));
   let lonIdx=headers.findIndex(h=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord)$/i.test(h));
-  if(latIdx<0||lonIdx<0)throw new Error('Needs lat/lon columns (lat/latitude/la/y/ycoord and lon/lng/longitude/long/ln/x/xcoord)');
   const rawHeaders=firstLine.split(delim).map(h=>h.trim().replace(/"/g,''));
+  if(latIdx<0||lonIdx<0){
+    // Check for neighborhood field — allow tabular-only data
+    const hasNbhd=headers.some(h=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/.test(h));
+    if(!hasNbhd)throw new Error('Needs lat/lon columns (lat/latitude/la/y/ycoord and lon/lng/longitude/long/ln/x/xcoord)');
+    const features=[];
+    for(let i=1;i<lines.length;i++){
+      if(!lines[i].trim())continue;
+      const vals=lines[i].split(delim).map(v=>v.trim().replace(/"/g,''));
+      const props={};
+      rawHeaders.forEach((h,j)=>{props[h]=isNaN(vals[j])?vals[j]:(vals[j]===''?'':parseFloat(vals[j]));});
+      features.push({type:'Feature',properties:props,geometry:null});
+    }
+    if(!features.length)throw new Error('No records found');
+    return{type:'FeatureCollection',features};
+  }
   const features=[];
   for(let i=1;i<lines.length;i++){
     if(!lines[i].trim())continue;
@@ -187,7 +201,29 @@ function parseDBF(buf){
       }
     }
   }
-  if(latIdx<0||lonIdx<0)throw new Error('No lat/lon fields found. Fields: '+fields.map(f=>f.name).join(', '));
+  if(latIdx<0||lonIdx<0){
+    // Check if this file has a neighborhood field — allow tabular-only data for choropleth aggregation
+    const hasNbhd=lowerNames.some(n=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/.test(n));
+    if(!hasNbhd)throw new Error('No lat/lon fields found. Fields: '+fields.map(f=>f.name).join(', '));
+    // Parse as tabular data with null geometries
+    const decoder=new TextDecoder('latin1');
+    const features=[];
+    for(let r=0;r<Math.min(numRecords,500000);r++){
+      const recStart=headerLen+r*recordLen;
+      if(recStart+recordLen>buf.byteLength)break;
+      if(dv.getUint8(recStart)===0x2A)continue;
+      let offset=recStart+1;const props={};
+      for(let f=0;f<fields.length;f++){
+        if(offset+fields[f].len>buf.byteLength)break;
+        const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
+        offset+=fields[f].len;
+        if(raw)props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?(parseFloat(raw)||(parseFloat(raw)===0?0:raw)):raw;
+      }
+      features.push({type:'Feature',properties:props,geometry:null});
+    }
+    if(!features.length)throw new Error('No records found in DBF');
+    return{type:'FeatureCollection',features};
+  }
   const decoder=new TextDecoder('latin1');
   const features=[];
   for(let r=0;r<Math.min(numRecords,500000);r++){
@@ -299,6 +335,14 @@ function createPreview(containerId,geojson,color){
   setTimeout(()=>{
     const el=document.getElementById(containerId);
     if(!el)return;
+    // Skip preview for tabular-only data (no geometries)
+    const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
+    const hasGeom=feats.some(f=>f.geometry!=null);
+    if(!hasGeom){
+      el.style.height='auto';el.style.padding='12px';el.style.textAlign='center';el.style.fontSize='12px';el.style.color='#888';
+      el.innerHTML='&#128202; Tabular data &mdash; no map preview (aggregated by neighborhood on the map)';
+      return;
+    }
     const m=L.map(el,{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false});
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(m);
     const layer=L.geoJSON(geojson,{
@@ -375,7 +419,10 @@ function addLayer(geojson,fileName){
       geojson,_sizeEstimate:JSON.stringify(geojson).length};
     dbPut(entry).then(()=>{
       notifyMap();
-      showMsg(analysis.count+' feature'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':''),'success');
+      const isTabular=analysis.geomTypes.length===0;
+      const hasNbhd=analysis.fields.some(f=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/i.test(f));
+      const tabNote=isTabular?(hasNbhd?' (tabular \u2014 will aggregate by neighborhood on the map)':' (tabular \u2014 no coordinates)'):'';
+      showMsg(analysis.count+' record'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':'')+tabNote,'success');
       renderLayers();
     }).catch(err=>showMsg('Failed to save: '+err.message,'error'));
   });
