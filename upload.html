@@ -7,8 +7,6 @@
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;color:#333}
 .header{background:#185FA5;color:#fff;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
 .header h1{margin:0;font-size:18px;font-weight:600}
-.header a{color:rgba(255,255,255,.85);text-decoration:none;font-size:13px;font-weight:500;padding:6px 14px;border:1px solid rgba(255,255,255,.3);border-radius:6px}
-.header a:hover{background:rgba(255,255,255,.1);color:#fff}
 .container{max-width:960px;margin:0 auto;padding:24px}
 .upload-zone{border:2px dashed #c5cad3;border-radius:12px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .2s;background:#fff;margin-bottom:24px}
 .upload-zone:hover,.upload-zone.dragover{border-color:#185FA5;background:#f0f4ff;box-shadow:0 0 0 4px rgba(24,95,165,.08)}
@@ -40,13 +38,12 @@ input[type="file"]{display:none}
 .section-title{font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid #e8eaed}
 .status-bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e8eaed;padding:10px 24px;font-size:12px;color:#888;display:flex;align-items:center;justify-content:space-between;z-index:100}
 .status-bar .size{font-weight:600}
-.status-bar .size.warn{color:#b91c1c}
 </style>
 </head><body>
 
 <div class="header">
   <h1>Upload Map Data</h1>
-  <a href="index.html" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:#185FA5;color:#fff;padding:8px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">&#127758; Open Map &rarr;</a>
+  <a href="index.html" target="_blank" style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);color:#fff;padding:8px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;border:1px solid rgba(255,255,255,.3)">&#127758; Open Map &rarr;</a>
 </div>
 
 <div class="container">
@@ -63,13 +60,13 @@ input[type="file"]{display:none}
 </div>
 
 <div class="status-bar">
-  <span>Layers sync to the map automatically via localStorage</span>
-  <span>Storage: <span class="size" id="storageSize">0 KB</span> / 5 MB</span>
+  <span>Layers sync to the map automatically</span>
+  <span>Stored: <span class="size" id="storageSize">0 KB</span></span>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// ── Parsers (shared logic with index.html) ────────────────────────────────────
+// ── Parsers ──────────────────────────────────────────────────────────────────
 function parseGeoJSON(text){
   const obj=JSON.parse(text);
   if(obj.type==='FeatureCollection'||obj.type==='Feature'||(obj.type&&obj.coordinates))return obj;
@@ -159,7 +156,7 @@ function parseDBF(buf){
     const firstByte=dv.getUint8(pos);
     if(firstByte===0x0D||firstByte===0x00)break;
     let name='';
-    for(let i=0;i<11;i++){const c=dv.getUint8(pos+i);if(c>0x20&&c<0x7F)name+=String.fromCharCode(c);} // skip nulls and control chars
+    for(let i=0;i<11;i++){const c=dv.getUint8(pos+i);if(c>0x20&&c<0x7F)name+=String.fromCharCode(c);}
     name=name.trim();
     if(!name){pos+=32;continue;}
     const type=String.fromCharCode(dv.getUint8(pos+11));
@@ -167,48 +164,36 @@ function parseDBF(buf){
     if(len<=0){pos+=32;continue;}
     fields.push({name,type,len});pos+=32;
   }
-  if(!fields.length)throw new Error('No fields found in DBF ('+numRecords+' records, header '+headerLen+' bytes)');
-  // Flexible coordinate field matching
+  if(!fields.length)throw new Error('No fields found in DBF');
   const lowerNames=fields.map(f=>f.name.toLowerCase());
   let latIdx=lowerNames.findIndex(n=>/^(lat|latitude|la|y|ycoord|y_coord|point_y|lat_dd)$/.test(n));
   let lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord|point_x|long_dd|lon_dd)$/.test(n));
-  // Fallback: scan for first two numeric fields with values in lat/lon range
   if(latIdx<0||lonIdx<0){
     const numFields=fields.map((f,i)=>({i,name:f.name,type:f.type})).filter(f=>f.type==='N'||f.type==='F');
-    if(numFields.length>=2){
-      // Try to read first record and find plausible lat/lon values
-      if(headerLen+recordLen<=buf.byteLength){
-        const decoder=new TextDecoder('latin1');
-        const recStart=headerLen;
-        let offset=recStart+1;
-        const testVals={};
-        for(let f=0;f<fields.length;f++){
-          const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
-          offset+=fields[f].len;
-          testVals[f]=parseFloat(raw);
-        }
-        for(const nf of numFields){
-          const v=testVals[nf.i];
-          if(!isNaN(v)){
-            if(v>=-90&&v<=90&&latIdx<0)latIdx=nf.i;
-            else if(v>=-180&&v<=180&&lonIdx<0)lonIdx=nf.i;
-          }
+    if(numFields.length>=2&&headerLen+recordLen<=buf.byteLength){
+      const decoder=new TextDecoder('latin1');
+      let offset=headerLen+1;
+      const testVals={};
+      for(let f=0;f<fields.length;f++){
+        testVals[f]=parseFloat(decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim());
+        offset+=fields[f].len;
+      }
+      for(const nf of numFields){
+        const v=testVals[nf.i];
+        if(!isNaN(v)){
+          if(v>=-90&&v<=90&&latIdx<0)latIdx=nf.i;
+          else if(v>=-180&&v<=180&&lonIdx<0)lonIdx=nf.i;
         }
       }
     }
   }
-  if(latIdx<0||lonIdx<0){
-    const fieldList=fields.map(f=>f.name).join(', ');
-    throw new Error('No lat/lon fields found in DBF. Fields: '+fieldList);
-  }
-  // Use latin1 decoder — most shapefiles use Windows-1252/Latin-1
+  if(latIdx<0||lonIdx<0)throw new Error('No lat/lon fields found. Fields: '+fields.map(f=>f.name).join(', '));
   const decoder=new TextDecoder('latin1');
   const features=[];
-  const maxRec=Math.min(numRecords,500000); // safety cap
-  for(let r=0;r<maxRec;r++){
+  for(let r=0;r<Math.min(numRecords,500000);r++){
     const recStart=headerLen+r*recordLen;
     if(recStart+recordLen>buf.byteLength)break;
-    if(dv.getUint8(recStart)===0x2A)continue; // deleted record
+    if(dv.getUint8(recStart)===0x2A)continue;
     let offset=recStart+1;const props={};let lat=NaN,lon=NaN;
     for(let f=0;f<fields.length;f++){
       if(offset+fields[f].len>buf.byteLength)break;
@@ -258,21 +243,19 @@ function detectFormat(name,text){
   return parseCSV(text);
 }
 
-// ── Data analysis ─────────────────────────────────────────────────────────────
+// ── Data analysis ────────────────────────────────────────────────────────────
 const COLORS=['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#a65628','#f781bf','#999','#1b9e77','#d95f02'];
 
 function analyzeData(geojson){
   const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
   const count=feats.length;
   const isPoint=feats.every(f=>f.geometry&&f.geometry.type==='Point');
-  // Detect years from properties
   const years=new Set();
   const fields=new Set();
   feats.forEach(f=>{
     if(!f.properties)return;
     Object.entries(f.properties).forEach(([k,v])=>{
       fields.add(k);
-      // Look for year values in common year fields
       const kl=k.toLowerCase();
       if(/^(yr|year|taxyr|tax_year|taxyear|y|date_year)$/.test(kl)){
         const yr=parseInt(v);
@@ -280,49 +263,38 @@ function analyzeData(geojson){
       }
     });
   });
-  // Also check if there's a TAXYR-style field
   const geomTypes=new Set(feats.map(f=>f.geometry?.type).filter(Boolean));
   return{count,isPoint,years:[...years].sort(),fields:[...fields],geomTypes:[...geomTypes]};
 }
 
-// ── localStorage layer store ──────────────────────────────────────────────────
-const STORE_KEY='mapUploadedLayers';
+// ── IndexedDB storage (no size limits like localStorage) ─────────────────────
+const DB_NAME='mapLayersDB',DB_VER=1,DB_STORE='layers';
+let _db=null;
 
-function loadStore(){
-  try{return JSON.parse(localStorage.getItem(STORE_KEY)||'[]');}
-  catch(e){return[];}
+function openDB(){
+  return new Promise((res,rej)=>{
+    if(_db)return res(_db);
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(DB_STORE))db.createObjectStore(DB_STORE,{keyPath:'id'});};
+    r.onsuccess=e=>{_db=e.target.result;res(_db);};
+    r.onerror=e=>rej(e.target.error);
+  });
 }
+function dbGetAll(){return openDB().then(db=>new Promise((res,rej)=>{const r=db.transaction(DB_STORE,'readonly').objectStore(DB_STORE).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=e=>rej(e.target.error);}));}
+function dbPut(entry){return openDB().then(db=>new Promise((res,rej)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(entry);tx.oncomplete=()=>res();tx.onerror=e=>rej(e.target.error);}));}
+function dbDelete(id){return openDB().then(db=>new Promise((res,rej)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).delete(id);tx.oncomplete=()=>res();tx.onerror=e=>rej(e.target.error);}));}
 
-function saveStore(layers){
-  try{
-    localStorage.setItem(STORE_KEY,JSON.stringify(layers));
-    updateStorageSize();
-  }catch(e){
-    showMsg('Storage full. Remove some layers to free space.','error');
-  }
-}
-
-function updateStorageSize(){
-  let total=0;
-  for(let i=0;i<localStorage.length;i++){
-    const key=localStorage.key(i);
-    total+=key.length+localStorage.getItem(key).length;
-  }
-  const kb=Math.round(total*2/1024);// UTF-16
-  const el=document.getElementById('storageSize');
-  el.textContent=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
-  el.className='size'+(kb>4096?' warn':'');
-}
+// Bump version counter so the map page knows to re-sync
+function notifyMap(){try{localStorage.setItem('mapLayersVersion',Date.now().toString());}catch(e){}}
 
 function showMsg(text,type){
   const el=document.getElementById('msg');
   el.textContent=text;el.className='msg '+type;
-  if(type==='success')setTimeout(()=>{el.className='msg';},4000);
+  if(type==='success')setTimeout(()=>{el.className='msg';},5000);
 }
 
-// ── Preview maps ──────────────────────────────────────────────────────────────
+// ── Preview maps ─────────────────────────────────────────────────────────────
 const previewMaps={};
-
 function createPreview(containerId,geojson,color){
   setTimeout(()=>{
     const el=document.getElementById(containerId);
@@ -338,102 +310,75 @@ function createPreview(containerId,geojson,color){
   },100);
 }
 
-// ── Render layer list ─────────────────────────────────────────────────────────
+// ── Render layer list ────────────────────────────────────────────────────────
 function renderLayers(){
-  const layers=loadStore();
-  const list=document.getElementById('layerList');
+  dbGetAll().then(layers=>{
+    const list=document.getElementById('layerList');
+    if(!layers.length){
+      list.innerHTML='<div class="empty-state"><div class="icon">&#128506;</div><p>No data uploaded yet.<br>Upload files above to add layers to the map.</p></div>';
+      document.getElementById('storageSize').textContent='0 KB';
+      return;
+    }
+    Object.keys(previewMaps).forEach(k=>{try{previewMaps[k].remove();}catch(e){}delete previewMaps[k];});
+    let totalBytes=0;layers.forEach(l=>{totalBytes+=(l._sizeEstimate||0);});
+    const kb=Math.round(totalBytes/1024);
+    document.getElementById('storageSize').textContent=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
 
-  if(!layers.length){
-    list.innerHTML='<div class="empty-state"><div class="icon">&#128506;</div><p>No data uploaded yet.<br>Upload files above to add layers to the map.</p></div>';
-    return;
-  }
+    list.innerHTML='<div class="section-title">Uploaded Layers ('+layers.length+')</div>'+
+      layers.map(l=>{
+        const info=l.analysis||{};const mapId='preview-'+l.id;
+        const sizeKB=l._sizeEstimate?Math.round(l._sizeEstimate/1024):0;
+        return '<div class="layer-card" data-id="'+l.id+'">'+
+          '<div class="top"><div class="dot" style="background:'+l.color+'"></div><div class="name" title="'+l.fileName+'">'+l.fileName+'</div></div>'+
+          '<div class="meta">'+
+            '<span>'+l.featureCount+' feature'+(l.featureCount!==1?'s':'')+'</span>'+
+            (info.geomTypes?'<span>'+info.geomTypes.join(', ')+'</span>':'')+
+            (info.fields?'<span>'+info.fields.length+' fields</span>':'')+
+            '<span>~'+sizeKB+' KB</span>'+
+          '</div>'+
+          (info.years&&info.years.length?'<div class="year-tags">'+info.years.map(y=>'<span class="year-tag">'+y+'</span>').join('')+'</div>':'')+
+          '<div class="actions">'+
+            '<button class="toggle-vis'+(l.visible?' active':'')+'">'+(l.visible?'&#128065; Visible':'&#128064; Hidden')+'</button>'+
+            '<button class="zoom-btn">&#9678; Zoom to</button>'+
+            '<button class="danger remove-btn">&times; Remove</button>'+
+          '</div>'+
+          '<div class="preview-map" id="'+mapId+'"></div>'+
+        '</div>';
+      }).join('');
 
-  // Clean up old preview maps
-  Object.keys(previewMaps).forEach(k=>{previewMaps[k].remove();delete previewMaps[k];});
-
-  list.innerHTML='<div class="section-title">Uploaded Layers ('+layers.length+')</div>'+
-    layers.map((l,i)=>{
-      const info=l.analysis||{};
-      const mapId='preview-'+l.id;
-      return '<div class="layer-card" data-idx="'+i+'">'+
-        '<div class="top">'+
-          '<div class="dot" style="background:'+l.color+'"></div>'+
-          '<div class="name" title="'+l.fileName+'">'+l.fileName+'</div>'+
-        '</div>'+
-        '<div class="meta">'+
-          '<span>'+l.featureCount+' feature'+(l.featureCount!==1?'s':'')+'</span>'+
-          (info.geomTypes?'<span>'+info.geomTypes.join(', ')+'</span>':'')+
-          (info.fields?'<span>'+info.fields.length+' fields</span>':'')+
-        '</div>'+
-        (info.years&&info.years.length?'<div class="year-tags">'+info.years.map(y=>'<span class="year-tag">'+y+'</span>').join('')+'</div>':'')+
-        '<div class="actions">'+
-          '<button class="toggle-vis'+(l.visible?' active':'')+'" title="'+(l.visible?'Visible on map':'Hidden on map')+'">'+(l.visible?'&#128065; Visible':'&#128064; Hidden')+'</button>'+
-          '<button class="zoom-btn">&#9678; Zoom to</button>'+
-          '<button class="danger remove-btn">&times; Remove</button>'+
-        '</div>'+
-        '<div class="preview-map" id="'+mapId+'"></div>'+
-      '</div>';
-    }).join('');
-
-  // Bind actions
-  list.querySelectorAll('.toggle-vis').forEach(btn=>{
-    btn.addEventListener('click',function(){
-      const idx=parseInt(this.closest('.layer-card').dataset.idx);
-      const store=loadStore();
-      store[idx].visible=!store[idx].visible;
-      saveStore(store);renderLayers();
-    });
-  });
-  list.querySelectorAll('.remove-btn').forEach(btn=>{
-    btn.addEventListener('click',function(){
-      const idx=parseInt(this.closest('.layer-card').dataset.idx);
-      const store=loadStore();
-      store.splice(idx,1);
-      saveStore(store);renderLayers();
-    });
-  });
-  list.querySelectorAll('.zoom-btn').forEach(btn=>{
-    btn.addEventListener('click',function(){
-      const idx=parseInt(this.closest('.layer-card').dataset.idx);
-      const store=loadStore();
-      const l=store[idx];
-      // Open map page and zoom
-      window.open('index.html#zoom-upload-'+l.id,'_blank');
-    });
-  });
-
-  // Create preview maps
-  layers.forEach(l=>{
-    const mapId='preview-'+l.id;
-    try{createPreview(mapId,l.geojson,l.color);}catch(e){}
+    list.querySelectorAll('.toggle-vis').forEach(btn=>btn.addEventListener('click',function(){
+      const id=parseInt(this.closest('.layer-card').dataset.id);
+      dbGetAll().then(all=>{const e=all.find(l=>l.id===id);if(!e)return;e.visible=!e.visible;dbPut(e).then(()=>{notifyMap();renderLayers();});});
+    }));
+    list.querySelectorAll('.remove-btn').forEach(btn=>btn.addEventListener('click',function(){
+      const id=parseInt(this.closest('.layer-card').dataset.id);
+      dbDelete(id).then(()=>{notifyMap();renderLayers();});
+    }));
+    list.querySelectorAll('.zoom-btn').forEach(btn=>btn.addEventListener('click',function(){
+      const id=this.closest('.layer-card').dataset.id;
+      window.open('index.html#zoom-upload-'+id,'_blank');
+    }));
+    layers.forEach(l=>{try{createPreview('preview-'+l.id,l.geojson,l.color);}catch(e){}});
   });
 }
 
-// ── File handling ─────────────────────────────────────────────────────────────
+// ── File handling ────────────────────────────────────────────────────────────
 let nextId=Date.now();
 
 function addLayer(geojson,fileName){
-  const store=loadStore();
   const id=nextId++;
-  const color=COLORS[store.length%COLORS.length];
-  const analysis=analyzeData(geojson);
-  const entry={
-    id,
-    fileName,
-    color,
-    visible:true,
-    featureCount:analysis.count,
-    analysis:{years:analysis.years,fields:analysis.fields,geomTypes:[...analysis.geomTypes],isPoint:analysis.isPoint},
-    geojson
-  };
-  store.push(entry);
-  try{
-    saveStore(store);
-    showMsg(analysis.count+' feature'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':''),'success');
-    renderLayers();
-  }catch(e){
-    showMsg('Storage full. File too large for localStorage (5MB limit). Try a smaller file or remove existing layers.','error');
-  }
+  dbGetAll().then(all=>{
+    const color=COLORS[all.length%COLORS.length];
+    const analysis=analyzeData(geojson);
+    const entry={id,fileName,color,visible:true,featureCount:analysis.count,
+      analysis:{years:analysis.years,fields:analysis.fields,geomTypes:[...analysis.geomTypes],isPoint:analysis.isPoint},
+      geojson,_sizeEstimate:JSON.stringify(geojson).length};
+    dbPut(entry).then(()=>{
+      notifyMap();
+      showMsg(analysis.count+' feature'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':''),'success');
+      renderLayers();
+    }).catch(err=>showMsg('Failed to save: '+err.message,'error'));
+  });
 }
 
 function handleFiles(files){
@@ -442,22 +387,16 @@ function handleFiles(files){
     const reader=new FileReader();
     reader.onerror=()=>showMsg('Failed to read '+file.name,'error');
     if(ext==='dbf'){
-      reader.onload=ev=>{
-        try{addLayer(parseDBF(ev.target.result),file.name);}
-        catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}
-      };
+      reader.onload=ev=>{try{addLayer(parseDBF(ev.target.result),file.name);}catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}};
       reader.readAsArrayBuffer(file);
     }else{
-      reader.onload=ev=>{
-        try{addLayer(detectFormat(file.name,ev.target.result),file.name);}
-        catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}
-      };
+      reader.onload=ev=>{try{addLayer(detectFormat(file.name,ev.target.result),file.name);}catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}};
       reader.readAsText(file);
     }
   });
 }
 
-// ── Event listeners ───────────────────────────────────────────────────────────
+// ── Event listeners ──────────────────────────────────────────────────────────
 const uploadZone=document.getElementById('uploadZone');
 const fileInput=document.getElementById('fileInput');
 uploadZone.addEventListener('click',()=>fileInput.click());
@@ -466,13 +405,10 @@ uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classLi
 uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('dragover'));
 uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('dragover');if(e.dataTransfer.files.length)handleFiles(e.dataTransfer.files);});
 
-// Listen for changes from other tabs (e.g. if map page removes a layer)
-window.addEventListener('storage',e=>{
-  if(e.key===STORE_KEY)renderLayers();
-});
+// Listen for changes from map page
+window.addEventListener('storage',e=>{if(e.key==='mapLayersVersion')renderLayers();});
 
-// Initial render
+// Init
 renderLayers();
-updateStorageSize();
 </script>
 </body></html>
