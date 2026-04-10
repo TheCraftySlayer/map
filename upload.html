@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Upload Data – Spatial Equity Map</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f5f6f8;color:#333}
+.header{background:#185FA5;color:#fff;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+.header h1{margin:0;font-size:18px;font-weight:600}
+.header a{color:rgba(255,255,255,.85);text-decoration:none;font-size:13px;font-weight:500;padding:6px 14px;border:1px solid rgba(255,255,255,.3);border-radius:6px}
+.header a:hover{background:rgba(255,255,255,.1);color:#fff}
+.container{max-width:960px;margin:0 auto;padding:24px}
+.upload-zone{border:2px dashed #c5cad3;border-radius:12px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .2s;background:#fff;margin-bottom:24px}
+.upload-zone:hover,.upload-zone.dragover{border-color:#185FA5;background:#f0f4ff;box-shadow:0 0 0 4px rgba(24,95,165,.08)}
+.upload-zone .icon{font-size:48px;margin-bottom:8px}
+.upload-zone h2{margin:0 0 4px;font-size:16px;color:#333}
+.upload-zone p{margin:4px 0;font-size:13px;color:#888}
+.upload-zone .formats{font-size:11px;color:#aaa;margin-top:8px}
+input[type="file"]{display:none}
+.msg{font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:16px;display:none}
+.msg.error{display:block;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+.msg.success{display:block;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+.empty-state{text-align:center;padding:48px 24px;color:#999;font-size:14px}
+.empty-state .icon{font-size:40px;margin-bottom:8px;opacity:.5}
+.layer-card{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:16px;margin-bottom:12px;border:1px solid #e8eaed}
+.layer-card .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.layer-card .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.layer-card .name{flex:1;font-weight:600;font-size:14px;color:#222;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layer-card .meta{font-size:11px;color:#888;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap}
+.layer-card .meta span{display:inline-flex;align-items:center;gap:3px}
+.layer-card .actions{display:flex;gap:6px;flex-wrap:wrap}
+.layer-card .actions button{padding:5px 12px;font-size:11px;font-weight:500;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;color:#555;transition:all .12s}
+.layer-card .actions button:hover{background:#f5f6f8;border-color:#bbb;color:#222}
+.layer-card .actions button.danger{color:#b91c1c;border-color:#fca5a5}
+.layer-card .actions button.danger:hover{background:#fef2f2}
+.layer-card .actions button.active{background:#185FA5;color:#fff;border-color:#185FA5}
+.preview-map{height:120px;border-radius:8px;margin-top:10px;border:1px solid #e8eaed}
+.year-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.year-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#eef2ff;color:#185FA5}
+.section-title{font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid #e8eaed}
+.status-bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e8eaed;padding:10px 24px;font-size:12px;color:#888;display:flex;align-items:center;justify-content:space-between;z-index:100}
+.status-bar .size{font-weight:600}
+.status-bar .size.warn{color:#b91c1c}
+</style>
+</head><body>
+
+<div class="header">
+  <h1>Upload Map Data</h1>
+  <a href="index.html">Open Map &rarr;</a>
+</div>
+
+<div class="container">
+  <div class="upload-zone" id="uploadZone">
+    <div class="icon">&#128206;</div>
+    <h2>Drop files here or click to browse</h2>
+    <p>Upload data to add layers to the map in real time</p>
+    <p class="formats">GeoJSON &middot; KML &middot; GPX &middot; CSV/TSV &middot; DBF &middot; JSON arrays</p>
+    <input type="file" id="fileInput" accept=".geojson,.json,.kml,.gpx,.csv,.tsv,.txt,.dbf" multiple/>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <div id="layerList"></div>
+</div>
+
+<div class="status-bar">
+  <span>Layers sync to the map automatically via localStorage</span>
+  <span>Storage: <span class="size" id="storageSize">0 KB</span> / 5 MB</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ── Parsers (shared logic with index.html) ────────────────────────────────────
+function parseGeoJSON(text){
+  const obj=JSON.parse(text);
+  if(obj.type==='FeatureCollection'||obj.type==='Feature'||(obj.type&&obj.coordinates))return obj;
+  throw new Error('Not valid GeoJSON');
+}
+
+function parseKML(text){
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(text,'text/xml');
+  if(doc.querySelector('parsererror'))throw new Error('Invalid KML');
+  const features=[];
+  doc.querySelectorAll('Placemark').forEach(pm=>{
+    const name=(pm.querySelector('name')||{}).textContent||'';
+    const desc=(pm.querySelector('description')||{}).textContent||'';
+    const props={name,description:desc};
+    const pt=pm.querySelector('Point coordinates');
+    if(pt){const c=pt.textContent.trim().split(',').map(Number);features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[c[0],c[1]]}});return;}
+    const ls=pm.querySelector('LineString coordinates');
+    if(ls){const coords=ls.textContent.trim().split(/\s+/).map(s=>{const c=s.split(',').map(Number);return[c[0],c[1]];});features.push({type:'Feature',properties:props,geometry:{type:'LineString',coordinates:coords}});return;}
+    const pg=pm.querySelector('Polygon outerBoundaryIs LinearRing coordinates');
+    if(pg){const coords=pg.textContent.trim().split(/\s+/).map(s=>{const c=s.split(',').map(Number);return[c[0],c[1]];});features.push({type:'Feature',properties:props,geometry:{type:'Polygon',coordinates:[coords]}});}
+  });
+  if(!features.length)throw new Error('No placemarks found in KML');
+  return{type:'FeatureCollection',features};
+}
+
+function parseGPX(text){
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(text,'text/xml');
+  if(doc.querySelector('parsererror'))throw new Error('Invalid GPX');
+  const features=[];
+  doc.querySelectorAll('wpt').forEach(wpt=>{
+    const lat=parseFloat(wpt.getAttribute('lat')),lon=parseFloat(wpt.getAttribute('lon'));
+    const name=(wpt.querySelector('name')||{}).textContent||'';
+    features.push({type:'Feature',properties:{name},geometry:{type:'Point',coordinates:[lon,lat]}});
+  });
+  doc.querySelectorAll('trk').forEach(trk=>{
+    const name=(trk.querySelector('name')||{}).textContent||'';
+    trk.querySelectorAll('trkseg').forEach(seg=>{
+      const coords=[];seg.querySelectorAll('trkpt').forEach(pt=>{coords.push([parseFloat(pt.getAttribute('lon')),parseFloat(pt.getAttribute('lat'))]);});
+      if(coords.length)features.push({type:'Feature',properties:{name},geometry:{type:'LineString',coordinates:coords}});
+    });
+  });
+  doc.querySelectorAll('rte').forEach(rte=>{
+    const name=(rte.querySelector('name')||{}).textContent||'';
+    const coords=[];rte.querySelectorAll('rtept').forEach(pt=>{coords.push([parseFloat(pt.getAttribute('lon')),parseFloat(pt.getAttribute('lat'))]);});
+    if(coords.length)features.push({type:'Feature',properties:{name},geometry:{type:'LineString',coordinates:coords}});
+  });
+  if(!features.length)throw new Error('No features found in GPX');
+  return{type:'FeatureCollection',features};
+}
+
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/);
+  if(lines.length<2)throw new Error('CSV/TSV must have a header and at least one row');
+  const firstLine=lines[0];
+  const delim=firstLine.includes('\t')?'\t':firstLine.includes(';')?';':',';
+  const headers=firstLine.split(delim).map(h=>h.trim().toLowerCase().replace(/"/g,''));
+  let latIdx=headers.findIndex(h=>/^(lat|latitude|la|y|ycoord|y_coord)$/i.test(h));
+  let lonIdx=headers.findIndex(h=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord)$/i.test(h));
+  if(latIdx<0||lonIdx<0)throw new Error('Needs lat/lon columns (lat/latitude/la/y/ycoord and lon/lng/longitude/long/ln/x/xcoord)');
+  const rawHeaders=firstLine.split(delim).map(h=>h.trim().replace(/"/g,''));
+  const features=[];
+  for(let i=1;i<lines.length;i++){
+    if(!lines[i].trim())continue;
+    const vals=lines[i].split(delim).map(v=>v.trim().replace(/"/g,''));
+    const lat=parseFloat(vals[latIdx]),lon=parseFloat(vals[lonIdx]);
+    if(isNaN(lat)||isNaN(lon))continue;
+    const props={};
+    rawHeaders.forEach((h,j)=>{if(j!==latIdx&&j!==lonIdx)props[h]=vals[j]||'';});
+    features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+  }
+  if(!features.length)throw new Error('No valid coordinates found');
+  return{type:'FeatureCollection',features};
+}
+
+function parseDBF(buf){
+  const dv=new DataView(buf);
+  const numRecords=dv.getUint32(4,true);
+  const headerLen=dv.getUint16(8,true);
+  const recordLen=dv.getUint16(10,true);
+  const fields=[];
+  let pos=32;
+  while(pos<headerLen-1&&dv.getUint8(pos)!==0x0D){
+    let name='';for(let i=0;i<11;i++){const c=dv.getUint8(pos+i);if(c)name+=String.fromCharCode(c);}
+    name=name.trim();
+    const type=String.fromCharCode(dv.getUint8(pos+11));
+    const len=dv.getUint8(pos+16);
+    fields.push({name,type,len});pos+=32;
+  }
+  if(!fields.length)throw new Error('No fields found in DBF');
+  const lowerNames=fields.map(f=>f.name.toLowerCase());
+  const latIdx=lowerNames.findIndex(n=>/^(lat|latitude|la|y|ycoord|y_coord)$/.test(n));
+  const lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord)$/.test(n));
+  if(latIdx<0||lonIdx<0)throw new Error('DBF needs lat/lon fields');
+  const decoder=new TextDecoder('utf-8');
+  const features=[];
+  for(let r=0;r<numRecords;r++){
+    const recStart=headerLen+r*recordLen;
+    if(dv.getUint8(recStart)===0x2A)continue;
+    let offset=recStart+1;const props={};let lat=NaN,lon=NaN;
+    for(let f=0;f<fields.length;f++){
+      const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
+      offset+=fields[f].len;
+      if(f===latIdx){lat=parseFloat(raw);continue;}
+      if(f===lonIdx){lon=parseFloat(raw);continue;}
+      props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?parseFloat(raw)||raw:raw;
+    }
+    if(!isNaN(lat)&&!isNaN(lon))features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+  }
+  if(!features.length)throw new Error('No valid coordinates found in DBF');
+  return{type:'FeatureCollection',features};
+}
+
+function parseJSONArray(text){
+  const arr=JSON.parse(text);
+  if(!Array.isArray(arr)||!arr.length)throw new Error('Empty JSON array');
+  const keys=Object.keys(arr[0]);
+  const lk=keys.map(k=>k.toLowerCase());
+  const latKey=keys[lk.findIndex(k=>/^(la|lat|latitude|y)$/.test(k))];
+  const lonKey=keys[lk.findIndex(k=>/^(ln|lon|lng|longitude|long|x)$/.test(k))];
+  if(!latKey||!lonKey)throw new Error('JSON array needs lat/lon keys');
+  const features=[];
+  arr.forEach(obj=>{
+    const lat=parseFloat(obj[latKey]),lon=parseFloat(obj[lonKey]);
+    if(isNaN(lat)||isNaN(lon))return;
+    const props={};Object.keys(obj).forEach(k=>{if(k!==latKey&&k!==lonKey)props[k]=obj[k];});
+    features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+  });
+  if(!features.length)throw new Error('No valid coordinates in JSON array');
+  return{type:'FeatureCollection',features};
+}
+
+function detectFormat(name,text){
+  const ext=name.split('.').pop().toLowerCase();
+  if(ext==='geojson')return parseGeoJSON(text);
+  if(ext==='kml')return parseKML(text);
+  if(ext==='gpx')return parseGPX(text);
+  if(ext==='csv'||ext==='tsv'||ext==='txt')return parseCSV(text);
+  if(ext==='json'){const t=text.trim();if(t.startsWith('['))return parseJSONArray(text);return parseGeoJSON(text);}
+  const t=text.trim();
+  if(t.startsWith('[')){try{return parseJSONArray(text);}catch(e){}}
+  if(t.startsWith('{'))return parseGeoJSON(text);
+  if(t.startsWith('<?xml')||t.startsWith('<kml'))return parseKML(text);
+  if(t.includes('<gpx'))return parseGPX(text);
+  return parseCSV(text);
+}
+
+// ── Data analysis ─────────────────────────────────────────────────────────────
+const COLORS=['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#a65628','#f781bf','#999','#1b9e77','#d95f02'];
+
+function analyzeData(geojson){
+  const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
+  const count=feats.length;
+  const isPoint=feats.every(f=>f.geometry&&f.geometry.type==='Point');
+  // Detect years from properties
+  const years=new Set();
+  const fields=new Set();
+  feats.forEach(f=>{
+    if(!f.properties)return;
+    Object.entries(f.properties).forEach(([k,v])=>{
+      fields.add(k);
+      // Look for year values in common year fields
+      const kl=k.toLowerCase();
+      if(/^(yr|year|taxyr|tax_year|taxyear|y|date_year)$/.test(kl)){
+        const yr=parseInt(v);
+        if(yr>=1990&&yr<=2099)years.add(yr);
+      }
+    });
+  });
+  // Also check if there's a TAXYR-style field
+  const geomTypes=new Set(feats.map(f=>f.geometry?.type).filter(Boolean));
+  return{count,isPoint,years:[...years].sort(),fields:[...fields],geomTypes:[...geomTypes]};
+}
+
+// ── localStorage layer store ──────────────────────────────────────────────────
+const STORE_KEY='mapUploadedLayers';
+
+function loadStore(){
+  try{return JSON.parse(localStorage.getItem(STORE_KEY)||'[]');}
+  catch(e){return[];}
+}
+
+function saveStore(layers){
+  try{
+    localStorage.setItem(STORE_KEY,JSON.stringify(layers));
+    updateStorageSize();
+  }catch(e){
+    showMsg('Storage full. Remove some layers to free space.','error');
+  }
+}
+
+function updateStorageSize(){
+  let total=0;
+  for(let i=0;i<localStorage.length;i++){
+    const key=localStorage.key(i);
+    total+=key.length+localStorage.getItem(key).length;
+  }
+  const kb=Math.round(total*2/1024);// UTF-16
+  const el=document.getElementById('storageSize');
+  el.textContent=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
+  el.className='size'+(kb>4096?' warn':'');
+}
+
+function showMsg(text,type){
+  const el=document.getElementById('msg');
+  el.textContent=text;el.className='msg '+type;
+  if(type==='success')setTimeout(()=>{el.className='msg';},4000);
+}
+
+// ── Preview maps ──────────────────────────────────────────────────────────────
+const previewMaps={};
+
+function createPreview(containerId,geojson,color){
+  setTimeout(()=>{
+    const el=document.getElementById(containerId);
+    if(!el)return;
+    const m=L.map(el,{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18}).addTo(m);
+    const layer=L.geoJSON(geojson,{
+      style:()=>({color:color,weight:2,fillColor:color,fillOpacity:0.25}),
+      pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:3,fillColor:color,color:'#fff',weight:1,fillOpacity:0.7})
+    }).addTo(m);
+    try{m.fitBounds(layer.getBounds(),{padding:[10,10]});}catch(e){m.setView([35.09,-106.55],11);}
+    previewMaps[containerId]=m;
+  },100);
+}
+
+// ── Render layer list ─────────────────────────────────────────────────────────
+function renderLayers(){
+  const layers=loadStore();
+  const list=document.getElementById('layerList');
+
+  if(!layers.length){
+    list.innerHTML='<div class="empty-state"><div class="icon">&#128506;</div><p>No data uploaded yet.<br>Upload files above to add layers to the map.</p></div>';
+    return;
+  }
+
+  // Clean up old preview maps
+  Object.keys(previewMaps).forEach(k=>{previewMaps[k].remove();delete previewMaps[k];});
+
+  list.innerHTML='<div class="section-title">Uploaded Layers ('+layers.length+')</div>'+
+    layers.map((l,i)=>{
+      const info=l.analysis||{};
+      const mapId='preview-'+l.id;
+      return '<div class="layer-card" data-idx="'+i+'">'+
+        '<div class="top">'+
+          '<div class="dot" style="background:'+l.color+'"></div>'+
+          '<div class="name" title="'+l.fileName+'">'+l.fileName+'</div>'+
+        '</div>'+
+        '<div class="meta">'+
+          '<span>'+l.featureCount+' feature'+(l.featureCount!==1?'s':'')+'</span>'+
+          (info.geomTypes?'<span>'+info.geomTypes.join(', ')+'</span>':'')+
+          (info.fields?'<span>'+info.fields.length+' fields</span>':'')+
+        '</div>'+
+        (info.years&&info.years.length?'<div class="year-tags">'+info.years.map(y=>'<span class="year-tag">'+y+'</span>').join('')+'</div>':'')+
+        '<div class="actions">'+
+          '<button class="toggle-vis'+(l.visible?' active':'')+'" title="'+(l.visible?'Visible on map':'Hidden on map')+'">'+(l.visible?'&#128065; Visible':'&#128064; Hidden')+'</button>'+
+          '<button class="zoom-btn">&#9678; Zoom to</button>'+
+          '<button class="danger remove-btn">&times; Remove</button>'+
+        '</div>'+
+        '<div class="preview-map" id="'+mapId+'"></div>'+
+      '</div>';
+    }).join('');
+
+  // Bind actions
+  list.querySelectorAll('.toggle-vis').forEach(btn=>{
+    btn.addEventListener('click',function(){
+      const idx=parseInt(this.closest('.layer-card').dataset.idx);
+      const store=loadStore();
+      store[idx].visible=!store[idx].visible;
+      saveStore(store);renderLayers();
+    });
+  });
+  list.querySelectorAll('.remove-btn').forEach(btn=>{
+    btn.addEventListener('click',function(){
+      const idx=parseInt(this.closest('.layer-card').dataset.idx);
+      const store=loadStore();
+      store.splice(idx,1);
+      saveStore(store);renderLayers();
+    });
+  });
+  list.querySelectorAll('.zoom-btn').forEach(btn=>{
+    btn.addEventListener('click',function(){
+      const idx=parseInt(this.closest('.layer-card').dataset.idx);
+      const store=loadStore();
+      const l=store[idx];
+      // Open map page and zoom
+      window.open('index.html#zoom-upload-'+l.id,'_blank');
+    });
+  });
+
+  // Create preview maps
+  layers.forEach(l=>{
+    const mapId='preview-'+l.id;
+    try{createPreview(mapId,l.geojson,l.color);}catch(e){}
+  });
+}
+
+// ── File handling ─────────────────────────────────────────────────────────────
+let nextId=Date.now();
+
+function addLayer(geojson,fileName){
+  const store=loadStore();
+  const id=nextId++;
+  const color=COLORS[store.length%COLORS.length];
+  const analysis=analyzeData(geojson);
+  const entry={
+    id,
+    fileName,
+    color,
+    visible:true,
+    featureCount:analysis.count,
+    analysis:{years:analysis.years,fields:analysis.fields,geomTypes:[...analysis.geomTypes],isPoint:analysis.isPoint},
+    geojson
+  };
+  store.push(entry);
+  try{
+    saveStore(store);
+    showMsg(analysis.count+' feature'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':''),'success');
+    renderLayers();
+  }catch(e){
+    showMsg('Storage full. File too large for localStorage (5MB limit). Try a smaller file or remove existing layers.','error');
+  }
+}
+
+function handleFiles(files){
+  Array.from(files).forEach(file=>{
+    const ext=file.name.split('.').pop().toLowerCase();
+    const reader=new FileReader();
+    reader.onerror=()=>showMsg('Failed to read '+file.name,'error');
+    if(ext==='dbf'){
+      reader.onload=ev=>{
+        try{addLayer(parseDBF(ev.target.result),file.name);}
+        catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}
+      };
+      reader.readAsArrayBuffer(file);
+    }else{
+      reader.onload=ev=>{
+        try{addLayer(detectFormat(file.name,ev.target.result),file.name);}
+        catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}
+      };
+      reader.readAsText(file);
+    }
+  });
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────────
+const uploadZone=document.getElementById('uploadZone');
+const fileInput=document.getElementById('fileInput');
+uploadZone.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',e=>{if(e.target.files.length)handleFiles(e.target.files);e.target.value='';});
+uploadZone.addEventListener('dragover',e=>{e.preventDefault();uploadZone.classList.add('dragover');});
+uploadZone.addEventListener('dragleave',()=>uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop',e=>{e.preventDefault();uploadZone.classList.remove('dragover');if(e.dataTransfer.files.length)handleFiles(e.dataTransfer.files);});
+
+// Listen for changes from other tabs (e.g. if map page removes a layer)
+window.addEventListener('storage',e=>{
+  if(e.key===STORE_KEY)renderLayers();
+});
+
+// Initial render
+renderLayers();
+updateStorageSize();
+</script>
+</body></html>
