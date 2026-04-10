@@ -132,12 +132,25 @@ function parseCSV(text){
     // Check for neighborhood field — allow tabular-only data
     const hasNbhd=headers.some(h=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/.test(h));
     if(!hasNbhd)throw new Error('Needs lat/lon columns (lat/latitude/la/y/ycoord and lon/lng/longitude/long/ln/x/xcoord)');
+    // For tabular data, keep only analysis-relevant fields to save memory
+    const keepFields=new Set();
+    rawHeaders.forEach((h,j)=>{
+      const lc=h.toLowerCase();
+      if(/^(nbhd|neighborhood|nbrhd|taxyr|yr|year|tax_year|taxyear|upc|parid|parcel|owner|own1)$/i.test(lc)||
+         /protest|val.?freeze|vf_|valfreeze|head.?of.?house|hoh|veteran|vet.*exemp|disabled.?vet|vet.?waiver|exemp|exemcode/i.test(lc)||
+         /totvalue|totalapp|nettaxable|landvalue|imptvalue|saleprice|yrbuilt|propclass|luc|rolltype|valclass/i.test(lc))
+        keepFields.add(j);
+    });
     const features=[];
     for(let i=1;i<lines.length;i++){
       if(!lines[i].trim())continue;
       const vals=lines[i].split(delim).map(v=>v.trim().replace(/"/g,''));
       const props={};
-      rawHeaders.forEach((h,j)=>{props[h]=isNaN(vals[j])?vals[j]:(vals[j]===''?'':parseFloat(vals[j]));});
+      rawHeaders.forEach((h,j)=>{
+        if(!keepFields.has(j))return;
+        const v=vals[j];
+        props[h]=(v===''||v==null)?'':(isNaN(v)?v:parseFloat(v));
+      });
       features.push({type:'Feature',properties:props,geometry:null});
     }
     if(!features.length)throw new Error('No records found');
@@ -205,7 +218,15 @@ function parseDBF(buf){
     // Check if this file has a neighborhood field — allow tabular-only data for choropleth aggregation
     const hasNbhd=lowerNames.some(n=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/.test(n));
     if(!hasNbhd)throw new Error('No lat/lon fields found. Fields: '+fields.map(f=>f.name).join(', '));
-    // Parse as tabular data with null geometries
+    // Parse as tabular data with null geometries — keep only analysis-relevant fields
+    const keepIdx=new Set();
+    fields.forEach((fld,i)=>{
+      const lc=fld.name.toLowerCase();
+      if(/^(nbhd|neighborhood|nbrhd|taxyr|yr|year|tax_year|taxyear|upc|parid|parcel|owner|own1)$/i.test(lc)||
+         /protest|val.?freeze|vf_|valfreeze|head.?of.?house|hoh|veteran|vet.*exemp|disabled.?vet|vet.?waiver|exemp|exemcode/i.test(lc)||
+         /totvalue|totalapp|nettaxable|landvalue|imptvalue|saleprice|yrbuilt|propclass|luc|rolltype|valclass/i.test(lc))
+        keepIdx.add(i);
+    });
     const decoder=new TextDecoder('latin1');
     const features=[];
     for(let r=0;r<Math.min(numRecords,500000);r++){
@@ -217,6 +238,7 @@ function parseDBF(buf){
         if(offset+fields[f].len>buf.byteLength)break;
         const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
         offset+=fields[f].len;
+        if(!keepIdx.has(f))continue;
         if(raw)props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?(parseFloat(raw)||(parseFloat(raw)===0?0:raw)):raw;
       }
       features.push({type:'Feature',properties:props,geometry:null});
