@@ -166,9 +166,13 @@ function parseCSV(text){
         if(!keepFields.has(j))return;
         const v=vals[j];
         if(v===''||v==null){props[h]='';return;}
+        // Keep identifiers as strings (UPC/PARID are 18+ digits, lose precision as float)
+        if(/^(upc|parid|parcel_id|parcelid|pid|tid|owner|own1)$/i.test(h)){props[h]=v;return;}
         // Strip commas, $, whitespace from potential numbers (e.g. "166,236" or "$45,000")
         const stripped=v.replace(/[$,\s]/g,'');
-        props[h]=isNaN(stripped)?v:parseFloat(stripped);
+        // Keep as string if >15 digits (float64 precision limit)
+        if(!isNaN(stripped)&&stripped.replace(/[.\-]/g,'').length<=15)props[h]=parseFloat(stripped);
+        else props[h]=v;
       });
       features.push({type:'Feature',properties:props,geometry:null});
     }
@@ -244,9 +248,13 @@ function parseDBF(buf){
       const lc=fld.name.toLowerCase();
       if(/^(nbhd|neighborhood|nbrhd|taxyr|yr|year|tax_year|taxyear|upc|parid|parcel|owner|own1)$/i.test(lc)||
          /protest|val.?freeze|vf_|valfreeze|head.?of.?house|hoh|veteran|vet.*exemp|disabled.?vet|vet.?waiver|exemp|exemcode/i.test(lc)||
-         /totvalue|totalapp|nettaxable|landvalue|imptvalue|saleprice|yrbuilt|propclass|luc|rolltype|valclass/i.test(lc))
+         /totvalue|tot_value|totalapp|nettaxable|net_taxable|landvalue|land_value|imptvalue|imp_value|saleprice|sale_price/i.test(lc)||
+         /yrbuilt|yr_built|propclass|luc|rolltype|valclass|totundroof|sqft|acres|newconst|totalexemp|total_exemp|tottxble/i.test(lc))
         keepIdx.add(i);
     });
+    // Fields that must stay as strings (identifiers — too long for float64 precision)
+    const _idFields=new Set();
+    fields.forEach((fld,i)=>{if(/^(upc|parid|parcel_id|parcelid|pid|tid|owner|own1)$/i.test(fld.name))_idFields.add(i);});
     const decoder=new TextDecoder('latin1');
     const features=[];
     for(let r=0;r<Math.min(numRecords,500000);r++){
@@ -259,7 +267,11 @@ function parseDBF(buf){
         const raw=decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim();
         offset+=fields[f].len;
         if(!keepIdx.has(f))continue;
-        if(raw)props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?(parseFloat(raw)||(parseFloat(raw)===0?0:raw)):raw;
+        if(!raw)continue;
+        // Keep identifiers as strings (UPC/PARID exceed float64 precision)
+        if(_idFields.has(f)){props[fields[f].name]=raw;continue;}
+        if((fields[f].type==='N'||fields[f].type==='F')&&raw.replace(/[.\-]/g,'').length<=15)props[fields[f].name]=parseFloat(raw)||(parseFloat(raw)===0?0:raw);
+        else props[fields[f].name]=raw;
       }
       features.push({type:'Feature',properties:props,geometry:null});
     }
@@ -493,13 +505,25 @@ function _buildLookupMap(geojson,fields){
 function _crossRefCoords(geojson,lookupMap){
   const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
   let matched=0,unmatched=0;
+  // Build normalized lookup (trim, strip leading zeros from numeric strings)
+  const normMap={};
+  Object.keys(lookupMap).forEach(k=>{
+    normMap[k]=lookupMap[k];
+    const nk=k.replace(/^0+/,'');
+    if(nk!==k)normMap[nk]=lookupMap[k];
+  });
   feats.forEach(f=>{
     if(f.geometry)return;// already has coordinates
     const p=f.properties||{};
     const pf=Object.keys(p).find(k=>/^(upc|parid|parcel_id|parcelid)$/i.test(k));
     if(!pf){unmatched++;return;}
-    const parid=String(p[pf]).trim();
-    const entries=lookupMap[parid];
+    let parid=String(p[pf]).trim();
+    // Try exact match, then stripped leading zeros, then numeric normalization
+    let entries=normMap[parid];
+    if(!entries){
+      const stripped=parid.replace(/^0+/,'');
+      entries=normMap[stripped];
+    }
     if(!entries||!entries.length){unmatched++;return;}
     const yrField=Object.keys(p).find(k=>/^(yr|year|taxyr|tax_year|taxyear)$/i.test(k));
     const yr=yrField?parseInt(p[yrField]):null;
