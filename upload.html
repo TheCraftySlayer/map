@@ -153,7 +153,8 @@ function parseCSV(text){
       const lc=h.toLowerCase();
       if(/^(nbhd|neighborhood|nbrhd|taxyr|yr|year|tax_year|taxyear|upc|parid|parcel|owner|own1)$/i.test(lc)||
          /protest|val.?freeze|vf_|valfreeze|head.?of.?house|hoh|veteran|vet.*exemp|disabled.?vet|vet.?waiver|exemp|exemcode/i.test(lc)||
-         /totvalue|totalapp|nettaxable|landvalue|imptvalue|saleprice|yrbuilt|propclass|luc|rolltype|valclass/i.test(lc))
+         /totvalue|tot_value|totalapp|nettaxable|net_taxable|landvalue|land_value|imptvalue|imp_value|saleprice|sale_price/i.test(lc)||
+         /yrbuilt|yr_built|propclass|luc|rolltype|valclass|totundroof|sqft|acres|newconst|totalexemp|total_exemp|tottxble/i.test(lc))
         keepFields.add(j);
     });
     const features=[];
@@ -164,7 +165,10 @@ function parseCSV(text){
       rawHeaders.forEach((h,j)=>{
         if(!keepFields.has(j))return;
         const v=vals[j];
-        props[h]=(v===''||v==null)?'':(isNaN(v)?v:parseFloat(v));
+        if(v===''||v==null){props[h]='';return;}
+        // Strip commas, $, whitespace from potential numbers (e.g. "166,236" or "$45,000")
+        const stripped=v.replace(/[$,\s]/g,'');
+        props[h]=isNaN(stripped)?v:parseFloat(stripped);
       });
       features.push({type:'Feature',properties:props,geometry:null});
     }
