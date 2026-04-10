@@ -140,8 +140,8 @@ function parseCSV(text){
   const firstLine=lines[0];
   const delim=firstLine.includes('\t')?'\t':firstLine.includes(';')?';':',';
   const headers=firstLine.split(delim).map(h=>h.trim().toLowerCase().replace(/"/g,''));
-  let latIdx=headers.findIndex(h=>/^(lat|latitude|la|y|ycoord|y_coord)$/i.test(h));
-  let lonIdx=headers.findIndex(h=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord)$/i.test(h));
+  let latIdx=headers.findIndex(h=>/^(lat|latitude|y|ycoord|y_coord|point_y|lat_dd)$/i.test(h));
+  let lonIdx=headers.findIndex(h=>/^(lon|lng|longitude|long|x|xcoord|x_coord|point_x|long_dd|lon_dd)$/i.test(h));
   const rawHeaders=firstLine.split(delim).map(h=>h.trim().replace(/"/g,''));
   if(latIdx<0||lonIdx<0){
     // Check for neighborhood field — allow tabular-only data
@@ -217,23 +217,31 @@ function parseDBF(buf){
   }
   if(!fields.length)throw new Error('No fields found in DBF');
   const lowerNames=fields.map(f=>f.name.toLowerCase());
-  let latIdx=lowerNames.findIndex(n=>/^(lat|latitude|la|y|ycoord|y_coord|point_y|lat_dd)$/.test(n));
-  let lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|ln|x|xcoord|x_coord|point_x|long_dd|lon_dd)$/.test(n));
+  let latIdx=lowerNames.findIndex(n=>/^(lat|latitude|ycoord|y_coord|point_y|lat_dd)$/.test(n));
+  let lonIdx=lowerNames.findIndex(n=>/^(lon|lng|longitude|long|xcoord|x_coord|point_x|long_dd|lon_dd)$/.test(n));
   if(latIdx<0||lonIdx<0){
-    const numFields=fields.map((f,i)=>({i,name:f.name,type:f.type})).filter(f=>f.type==='N'||f.type==='F');
-    if(numFields.length>=2&&headerLen+recordLen<=buf.byteLength){
-      const decoder=new TextDecoder('latin1');
-      let offset=headerLen+1;
-      const testVals={};
-      for(let f=0;f<fields.length;f++){
-        testVals[f]=parseFloat(decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim());
-        offset+=fields[f].len;
-      }
-      for(const nf of numFields){
-        const v=testVals[nf.i];
-        if(!isNaN(v)){
-          if(v>=-90&&v<=90&&latIdx<0)latIdx=nf.i;
-          else if(v>=-180&&v<=180&&lonIdx<0)lonIdx=nf.i;
+    // Skip numeric auto-detection for files with tax/assessment fields (NBHD, TOTVALUE, etc.)
+    // — small numeric values like ACRES, flags, ratios would be falsely matched as coordinates
+    const _isTaxRoll=lowerNames.some(n=>/^(nbhd|totvalue|landvalue|nettaxable|taxyr|imptvalue|saleprice)$/.test(n));
+    if(!_isTaxRoll){
+      const _skipNames=new Set(['nbhd','totvalue','landvalue','imptvalue','nettaxable','saleprice',
+        'totalexemp','totundroof','yrbuilt','taxyr','acres','newconst','propclass','luc','rolltype',
+        'valclass','hoh','veteran','protest','valfreeze']);
+      const numFields=fields.map((f,i)=>({i,name:f.name,type:f.type})).filter(f=>(f.type==='N'||f.type==='F')&&!_skipNames.has(f.name.toLowerCase()));
+      if(numFields.length>=2&&headerLen+recordLen<=buf.byteLength){
+        const decoder=new TextDecoder('latin1');
+        let offset=headerLen+1;
+        const testVals={};
+        for(let f=0;f<fields.length;f++){
+          testVals[f]=parseFloat(decoder.decode(new Uint8Array(buf,offset,fields[f].len)).trim());
+          offset+=fields[f].len;
+        }
+        for(const nf of numFields){
+          const v=testVals[nf.i];
+          if(!isNaN(v)){
+            if(v>=-90&&v<=90&&latIdx<0)latIdx=nf.i;
+            else if(v>=-180&&v<=180&&lonIdx<0)lonIdx=nf.i;
+          }
         }
       }
     }
