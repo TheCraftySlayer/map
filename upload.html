@@ -66,6 +66,21 @@ input[type="file"]{display:none}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+// ── UTM to WGS84 conversion (Zone 13N default for Bernalillo County, NM) ────
+function _utmToLatLon(easting,northing,zone,north){
+  const a=6378137,f=1/298.257223563,e2=2*f-f*f;
+  const e1=(1-Math.sqrt(1-e2))/(1+Math.sqrt(1-e2)),k0=0.9996;
+  const x=easting-500000,y=north?northing:northing-10000000;
+  const M=y/k0,mu=M/(a*(1-e2/4-3*e2*e2/64-5*e2*e2*e2/256));
+  const phi1=mu+(3*e1/2-27*e1*e1*e1/32)*Math.sin(2*mu)+(21*e1*e1/16-55*e1*e1*e1*e1/32)*Math.sin(4*mu)+(151*e1*e1*e1/96)*Math.sin(6*mu)+(1097*e1*e1*e1*e1/512)*Math.sin(8*mu);
+  const sp=Math.sin(phi1),cp=Math.cos(phi1),tp=Math.tan(phi1);
+  const N1=a/Math.sqrt(1-e2*sp*sp),T1=tp*tp,C1=(e2/(1-e2))*cp*cp;
+  const R1=a*(1-e2)/Math.pow(1-e2*sp*sp,1.5),D=x/(N1*k0);
+  const lat=phi1-(N1*tp/R1)*(D*D/2-(5+3*T1+10*C1-4*C1*C1-9*(e2/(1-e2)))*D*D*D*D/24+(61+90*T1+298*C1+45*T1*T1-252*(e2/(1-e2))-3*C1*C1)*D*D*D*D*D*D/720);
+  const lon=(D-(1+2*T1+C1)*D*D*D/6+(5-2*C1+28*T1-3*C1*C1+8*(e2/(1-e2))+24*T1*T1)*D*D*D*D*D/120)/cp;
+  return{lat:lat*180/Math.PI,lon:lon*180/Math.PI+((zone-1)*6-180+3)};
+}
+
 // ── Parsers ──────────────────────────────────────────────────────────────────
 function parseGeoJSON(text){
   const obj=JSON.parse(text);
@@ -160,8 +175,9 @@ function parseCSV(text){
   for(let i=1;i<lines.length;i++){
     if(!lines[i].trim())continue;
     const vals=lines[i].split(delim).map(v=>v.trim().replace(/"/g,''));
-    const lat=parseFloat(vals[latIdx]),lon=parseFloat(vals[lonIdx]);
+    let lat=parseFloat(vals[latIdx]),lon=parseFloat(vals[lonIdx]);
     if(isNaN(lat)||isNaN(lon))continue;
+    if(Math.abs(lat)>1000||Math.abs(lon)>1000){const rp=_utmToLatLon(lon,lat,13,true);if(rp.lat>=25&&rp.lat<=50&&rp.lon>=-125&&rp.lon<=-65){lat=rp.lat;lon=rp.lon;}else continue;}
     const props={};
     rawHeaders.forEach((h,j)=>{if(j!==latIdx&&j!==lonIdx)props[h]=vals[j]||'';});
     features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
@@ -261,7 +277,10 @@ function parseDBF(buf){
       if(f===lonIdx){lon=parseFloat(raw);continue;}
       if(raw)props[fields[f].name]=(fields[f].type==='N'||fields[f].type==='F')?(parseFloat(raw)||(parseFloat(raw)===0?0:raw)):raw;
     }
-    if(!isNaN(lat)&&!isNaN(lon)&&lat!==0&&lon!==0)features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+    if(!isNaN(lat)&&!isNaN(lon)&&lat!==0&&lon!==0){
+      if(Math.abs(lat)>1000||Math.abs(lon)>1000){const rp=_utmToLatLon(lon,lat,13,true);if(rp.lat>=25&&rp.lat<=50&&rp.lon>=-125&&rp.lon<=-65){lat=rp.lat;lon=rp.lon;}else continue;}
+      features.push({type:'Feature',properties:props,geometry:{type:'Point',coordinates:[lon,lat]}});
+    }
   }
   if(!features.length)throw new Error('No valid coordinates found in DBF ('+numRecords+' records, fields: '+fields.map(f=>f.name).join(', ')+')');
   return{type:'FeatureCollection',features};
@@ -378,19 +397,24 @@ function createPreview(containerId,geojson,color){
 
 // ── Render layer list ────────────────────────────────────────────────────────
 function renderLayers(){
-  dbGetAll().then(layers=>{
+  dbGetAll().then(allLayers=>{
+    const lookupEntry=allLayers.find(l=>l.id==='_coordLookup');
+    const layers=allLayers.filter(l=>l.id!=='_coordLookup');
     const list=document.getElementById('layerList');
-    if(!layers.length){
+    if(!layers.length&&!lookupEntry){
       list.innerHTML='<div class="empty-state"><div class="icon">&#128506;</div><p>No data uploaded yet.<br>Upload files above to add layers to the map.</p></div>';
       document.getElementById('storageSize').textContent='0 KB';
       return;
     }
     Object.keys(previewMaps).forEach(k=>{try{previewMaps[k].remove();}catch(e){}delete previewMaps[k];});
     let totalBytes=0;layers.forEach(l=>{totalBytes+=(l._sizeEstimate||0);});
+    if(lookupEntry)totalBytes+=(lookupEntry._sizeEstimate||0);
     const kb=Math.round(totalBytes/1024);
     document.getElementById('storageSize').textContent=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
 
-    list.innerHTML='<div class="section-title">Uploaded Layers ('+layers.length+')</div>'+
+    let lookupHtml='';
+    if(lookupEntry){const lkCount=Object.keys(lookupEntry.lookup||{}).length;lookupHtml='<div style="background:#f0f7ff;border:1px solid #bdd7ee;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#185FA5;display:flex;align-items:center;justify-content:space-between"><span>&#128205; Coordinate lookup: '+lkCount.toLocaleString()+' parcels from <b>'+(lookupEntry.sourceFileName||'?')+'</b></span><button id="removeLookup" style="background:none;border:1px solid #fca5a5;color:#b91c1c;border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer">&times; Remove</button></div>';}
+    list.innerHTML=lookupHtml+'<div class="section-title">Uploaded Layers ('+layers.length+')</div>'+
       layers.map(l=>{
         const info=l.analysis||{};const mapId='preview-'+l.id;
         const sizeKB=l._sizeEstimate?Math.round(l._sizeEstimate/1024):0;
@@ -425,29 +449,141 @@ function renderLayers(){
       window.open('index.html#zoom-upload-'+id,'_blank');
     }));
     layers.forEach(l=>{try{createPreview('preview-'+l.id,l.geojson,l.color);}catch(e){}});
+    const rlBtn=document.getElementById('removeLookup');
+    if(rlBtn)rlBtn.addEventListener('click',()=>{dbDelete('_coordLookup').then(()=>{notifyMap();renderLayers();});});
   });
+}
+
+// ── Coordinate lookup cross-reference ────────────────────────────────────────
+function _detectCoordLookup(geojson){
+  const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
+  if(feats.length<10)return null;
+  const sample=feats[0];
+  if(!sample.geometry||sample.geometry.type!=='Point')return null;
+  const keys=Object.keys(sample.properties||{});
+  const paridField=keys.find(k=>/^(parid|upc|parcel_id|parcelid)$/i.test(k));
+  if(!paridField)return null;
+  const earliestField=keys.find(k=>/^(earliest_yr|earliest|start_yr|begin_yr|from_yr)$/i.test(k));
+  const latestField=keys.find(k=>/^(latest_yr|latest|end_yr|to_yr)$/i.test(k));
+  // Must have year range fields OR very few properties (lookup table signature)
+  if(!earliestField&&!latestField&&keys.length>5)return null;
+  return{paridField,earliestField,latestField};
+}
+
+function _buildLookupMap(geojson,fields){
+  const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
+  const lk={};
+  feats.forEach(f=>{
+    const parid=String(f.properties[fields.paridField]||'').trim();
+    if(!parid||!f.geometry)return;
+    const [lon,lat]=f.geometry.coordinates;
+    const entry={x:lon,y:lat};
+    if(fields.earliestField)entry.earliest=parseInt(f.properties[fields.earliestField])||0;
+    if(fields.latestField)entry.latest=parseInt(f.properties[fields.latestField])||9999;
+    if(!lk[parid])lk[parid]=[];
+    lk[parid].push(entry);
+  });
+  return lk;
+}
+
+function _crossRefCoords(geojson,lookupMap){
+  const feats=geojson.type==='FeatureCollection'?geojson.features:[geojson];
+  let matched=0,unmatched=0;
+  feats.forEach(f=>{
+    if(f.geometry)return;// already has coordinates
+    const p=f.properties||{};
+    const pf=Object.keys(p).find(k=>/^(upc|parid|parcel_id|parcelid)$/i.test(k));
+    if(!pf){unmatched++;return;}
+    const parid=String(p[pf]).trim();
+    const entries=lookupMap[parid];
+    if(!entries||!entries.length){unmatched++;return;}
+    const yrField=Object.keys(p).find(k=>/^(yr|year|taxyr|tax_year|taxyear)$/i.test(k));
+    const yr=yrField?parseInt(p[yrField]):null;
+    let best=entries[0];
+    if(yr&&entries.length>1){
+      const inRange=entries.find(e=>yr>=(e.earliest||0)&&yr<=(e.latest||9999));
+      if(inRange)best=inRange;
+    }
+    f.geometry={type:'Point',coordinates:[best.x,best.y]};
+    matched++;
+  });
+  return{matched,unmatched};
 }
 
 // ── File handling ────────────────────────────────────────────────────────────
 let nextId=Date.now();
 
-function addLayer(geojson,fileName){
-  const id=nextId++;
-  dbGetAll().then(all=>{
-    const color=COLORS[all.length%COLORS.length];
-    const analysis=analyzeData(geojson);
-    const entry={id,fileName,color,visible:true,featureCount:analysis.count,
-      analysis:{years:analysis.years,fields:analysis.fields,geomTypes:[...analysis.geomTypes],isPoint:analysis.isPoint},
-      geojson,_sizeEstimate:JSON.stringify(geojson).length};
-    dbPut(entry).then(()=>{
+async function addLayer(geojson,fileName){
+  try{
+    const id=nextId++;
+    const all=await dbGetAll();
+    const regularLayers=all.filter(l=>l.id!=='_coordLookup');
+    const color=COLORS[regularLayers.length%COLORS.length];
+
+    // ── Detect coordinate lookup file (PARID + coords + year range) ──
+    const lookupInfo=_detectCoordLookup(geojson);
+    if(lookupInfo){
+      const lookupMap=_buildLookupMap(geojson,lookupInfo);
+      const lookupSize=Object.keys(lookupMap).length;
+      await dbPut({id:'_coordLookup',lookup:lookupMap,sourceFileName:fileName,_sizeEstimate:JSON.stringify(lookupMap).length});
+      // Re-process existing tabular layers that have UPC/PARID
+      let reprocessed=0,totalMatched=0;
+      for(const existing of regularLayers){
+        const gj=existing.geojson;if(!gj)continue;
+        const ff=gj.type==='FeatureCollection'?gj.features:[gj];
+        if(!ff.some(f=>f.geometry==null))continue;
+        if(!ff.some(f=>Object.keys(f.properties||{}).some(k=>/^(upc|parid|parcel_id|parcelid)$/i.test(k))))continue;
+        const result=_crossRefCoords(gj,lookupMap);
+        if(result.matched>0){
+          existing.analysis=analyzeData(gj);
+          existing._crossRef={matched:result.matched,unmatched:result.unmatched};
+          existing._sizeEstimate=JSON.stringify(gj).length;
+          await dbPut(existing);
+          reprocessed++;totalMatched+=result.matched;
+        }
+      }
       notifyMap();
-      const isTabular=analysis.geomTypes.length===0;
-      const hasNbhd=analysis.fields.some(f=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/i.test(f));
-      const tabNote=isTabular?(hasNbhd?' (tabular \u2014 will aggregate by neighborhood on the map)':' (tabular \u2014 no coordinates)'):'';
-      showMsg(analysis.count+' record'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':'')+tabNote,'success');
+      let msg=lookupSize.toLocaleString()+' coordinate records loaded from '+fileName;
+      if(reprocessed)msg+=' \u2014 '+totalMatched.toLocaleString()+' records in '+reprocessed+' file'+(reprocessed>1?'s':'')+' now have coordinates';
+      showMsg(msg,'success');
       renderLayers();
-    }).catch(err=>showMsg('Failed to save: '+err.message,'error'));
-  });
+      return;
+    }
+
+    // ── Cross-reference tabular data against stored lookup ──
+    const analysis=analyzeData(geojson);
+    const isTabular=analysis.geomTypes.length===0;
+    if(isTabular){
+      const lookupEntry=all.find(e=>e.id==='_coordLookup');
+      if(lookupEntry&&lookupEntry.lookup){
+        const result=_crossRefCoords(geojson,lookupEntry.lookup);
+        if(result.matched>0){
+          const newAnalysis=analyzeData(geojson);
+          await dbPut({id,fileName,color,visible:true,featureCount:newAnalysis.count,
+            analysis:{years:newAnalysis.years,fields:newAnalysis.fields,geomTypes:[...newAnalysis.geomTypes],isPoint:newAnalysis.isPoint},
+            geojson,_sizeEstimate:JSON.stringify(geojson).length,
+            _crossRef:{matched:result.matched,unmatched:result.unmatched}});
+          notifyMap();
+          showMsg(newAnalysis.count+' record'+(newAnalysis.count!==1?'s':'')+' loaded from '+fileName+
+            (newAnalysis.years.length?' (years: '+newAnalysis.years.join(', ')+')':'')+
+            ' \u2014 '+result.matched.toLocaleString()+' matched with coordinates'+
+            (result.unmatched>0?', '+result.unmatched.toLocaleString()+' unmatched':''),'success');
+          renderLayers();
+          return;
+        }
+      }
+    }
+
+    // ── Normal layer storage ──
+    await dbPut({id,fileName,color,visible:true,featureCount:analysis.count,
+      analysis:{years:analysis.years,fields:analysis.fields,geomTypes:[...analysis.geomTypes],isPoint:analysis.isPoint},
+      geojson,_sizeEstimate:JSON.stringify(geojson).length});
+    notifyMap();
+    const hasNbhd=analysis.fields.some(f=>/^(nbhd|neighborhood|nbrhd|neigh|hood|nghbrhd|nghbr)$/i.test(f));
+    const tabNote=isTabular?(hasNbhd?' (tabular \u2014 will aggregate by neighborhood on the map)':' (tabular \u2014 no coordinates)'):'';
+    showMsg(analysis.count+' record'+(analysis.count!==1?'s':'')+' loaded from '+fileName+(analysis.years.length?' (years: '+analysis.years.join(', ')+')':'')+tabNote,'success');
+    renderLayers();
+  }catch(err){showMsg('Failed to save: '+err.message,'error');}
 }
 
 function handleFiles(files){
@@ -456,10 +592,10 @@ function handleFiles(files){
     const reader=new FileReader();
     reader.onerror=()=>showMsg('Failed to read '+file.name,'error');
     if(ext==='dbf'){
-      reader.onload=ev=>{try{addLayer(parseDBF(ev.target.result),file.name);}catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}};
+      reader.onload=ev=>{try{addLayer(parseDBF(ev.target.result),file.name).catch(err=>showMsg('Error: '+file.name+' \u2014 '+err.message,'error'));}catch(err){showMsg('Error: '+file.name+' \u2014 '+err.message,'error');}};
       reader.readAsArrayBuffer(file);
     }else{
-      reader.onload=ev=>{try{addLayer(detectFormat(file.name,ev.target.result),file.name);}catch(err){showMsg('Error: '+file.name+' — '+err.message,'error');}};
+      reader.onload=ev=>{try{addLayer(detectFormat(file.name,ev.target.result),file.name).catch(err=>showMsg('Error: '+file.name+' \u2014 '+err.message,'error'));}catch(err){showMsg('Error: '+file.name+' \u2014 '+err.message,'error');}};
       reader.readAsText(file);
     }
   });
