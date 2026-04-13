@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Bernalillo County Assessor – Spatial Equity v2</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
 <link rel="preload" href="data/core.json" as="fetch" crossorigin>
 <link rel="preload" href="data/layers.json" as="fetch" crossorigin>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
@@ -224,19 +226,21 @@ document.getElementById("map").style.alignItems="center";
 document.getElementById("map").style.justifyContent="center";
 document.getElementById("map").innerHTML="<div style=\"font-family:system-ui;color:#666;font-size:16px\">Loading map data\u2026</div>";
 
-fetch("data/core.json").then(r=>r.json()).then(core=>{
+const _coreP=fetch("data/core.json").then(r=>r.json());
+const _layersP=fetch("data/layers.json").then(r=>r.json());
+_coreP.then(core=>{
   COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
   const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
-  fetch("data/layers.json").then(r=>r.json()).then(d=>{
-    SL=d.SL; TL=d.TL; EG=d.EG; EL=d.EL; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
-    VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
-    VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
-    PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
-    PRO_21=d.PRO_21; VF21_A=d.VF21_A; VF21_D=d.VF21_D; VF21_R=d.VF21_R; VETW_21=d.VETW_21;
-    _layersReady=true;
-    refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
-  });
+});
+_layersP.then(d=>{
+  SL=d.SL; TL=d.TL; EG=d.EG; EL=d.EL; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
+  VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
+  VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
+  PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
+  PRO_21=d.PRO_21; VF21_A=d.VF21_A; VF21_D=d.VF21_D; VF21_R=d.VF21_R; VETW_21=d.VETW_21;
+  _layersReady=true;
+  if(typeof refreshOL==='function')refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
 });
 
 function init() {
@@ -264,9 +268,9 @@ function interp(stops,v){
   return stops[stops.length-1][1];
 }
 function lerpHex(a,b,t){
-  const p=s=>parseInt(s.slice(1),16);
-  const r1=p(a)>>16,g1=(p(a)>>8)&255,b1=p(a)&255;
-  const r2=p(b)>>16,g2=(p(b)>>8)&255,b2=p(b)&255;
+  const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);
+  const r1=pa>>16,g1=(pa>>8)&255,b1=pa&255;
+  const r2=pb>>16,g2=(pb>>8)&255,b2=pb&255;
   const h=n=>n.toString(16).padStart(2,'0');
   return'#'+h(Math.round(r1+t*(r2-r1)))+h(Math.round(g1+t*(g2-g1)))+h(Math.round(b1+t*(b2-b1)));
 }
@@ -410,15 +414,14 @@ function updateLegendRange(layer){
 // ── Tooltip with sparkline ────────────────────────────────────────────────────
 const info=L.control({position:'topleft'});
 info.onAdd=function(){this._div=L.DomUtil.create('div','info');this.update();return this._div;};
-info.update=function(p){
-  if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
+const _tooltipCache={};
+info._buildHtml=function(p){
   const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
   const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
   const min=v=>v?v.toFixed(1)+' min':'\u2014';
-  // Sparkline: 6 bars for 20→21 through 25→26
   const vals=[p.chg_20_21||0, p.chg_21_22||0, p.chg_22_23||0, p.chg_23_24||0, p.chg_24_25||0, p.chg_25_26||0];
   const labs=["'20→'21","'21→'22","'22→'23","'23→'24","'24→'25","'25→'26"];
-  const maxAbs=Math.max(...vals.map(Math.abs),0.01);
+  let maxAbs=0.01;for(let i=0;i<6;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
   const bw=30,bh=40,svgW=bw*6,mid=50;
   const bars=vals.map((v,i)=>{
     const h=Math.round(Math.abs(v)/maxAbs*bh);
@@ -435,8 +438,7 @@ info.update=function(p){
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+22)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
-  this._div.innerHTML=
-    '<h4>Nbhd '+p.nbhd+(p.is_commercial?' <span style="font-size:10px;color:#888">[commercial]</span>':'')+'</h4>'+
+  return '<h4>Nbhd '+p.nbhd+(p.is_commercial?' <span style="font-size:10px;color:#888">[commercial]</span>':'')+'</h4>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Failures</span><span class="v">'+((p.total_failures||0).toLocaleString())+'</span></div>'+
@@ -458,6 +460,12 @@ info.update=function(p){
     (p.volatility!=null?'<div class="s"><span>Volatility (20\u219226)</span><span class="v">'+(p.volatility*100).toFixed(1)+'%</span></div>':'')+
     (p.hoh_20!=null?'<div class="s"><span>HOH 2020\u21922026</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
     (p.vet_20!=null?'<div class="s"><span>VET 2020\u21922026</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'');
+};
+info.update=function(p){
+  if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
+  const key=p.nbhd;
+  if(!_tooltipCache[key])_tooltipCache[key]=this._buildHtml(p);
+  this._div.innerHTML=_tooltipCache[key];
 };
 info.addTo(map);
 
@@ -723,12 +731,17 @@ document.getElementById('swipeLeft').addEventListener('change',()=>{if(swipeActi
 document.getElementById('swipeRight').addEventListener('change',()=>{if(swipeActive){disableSwipe();enableSwipe();}});
 
 // ── Opacity slider ─────────────────────────────────────────────────────────────
+let _opacRAF=null;
 document.getElementById('opacSlider').addEventListener('input',e=>{
   FILL_OPAC=parseInt(e.target.value)/100;
   document.getElementById('opacVal').textContent=e.target.value+'%';
-  if(nbhdLayer)nbhdLayer.setStyle({fillOpacity:FILL_OPAC});
-  if(swipeLayerL)swipeLayerL.setStyle({fillOpacity:FILL_OPAC});
-  if(swipeLayerR)swipeLayerR.setStyle({fillOpacity:FILL_OPAC});
+  if(_opacRAF)return;
+  _opacRAF=requestAnimationFrame(()=>{
+    if(nbhdLayer)nbhdLayer.setStyle({fillOpacity:FILL_OPAC});
+    if(swipeLayerL)swipeLayerL.setStyle({fillOpacity:FILL_OPAC});
+    if(swipeLayerR)swipeLayerR.setStyle({fillOpacity:FILL_OPAC});
+    _opacRAF=null;
+  });
 });
 
 // ── Commercial filter ─────────────────────────────────────────────────────────
@@ -828,11 +841,10 @@ function getOL(k){if(!OL[k])OL[k]=buildLayer(k);return OL[k];}
 
 function refreshOL(keys){
   keys.forEach(k=>{
-    if(!OL[k])return;
-    const wasOn=map.hasLayer(OL[k]);
-    if(wasOn)map.removeLayer(OL[k]);
+    if(!OL[k]||!map.hasLayer(OL[k]))return;
+    map.removeLayer(OL[k]);
     OL[k]=buildLayer(k);
-    if(wasOn)OL[k].addTo(map);
+    OL[k].addTo(map);
   });
 }
 
