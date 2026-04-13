@@ -2,13 +2,16 @@
 """
 build_data.py — Rebuild map JSON from .dbf tax roll files.
 
-Usage (two modes):
+Usage (three modes):
 
-  Mode A — enriched file (has coordinates + protest/freeze details):
-    python build_data.py --roll taxroll.dbf --enriched enriched.dbf
+  Mode A — roll only (updates neighborhood stats, preserves all point layers):
+    python build_data.py --roll taxroll.dbf
 
-  Mode B — separate coords file (PARID, XCOORD, YCOORD):
+  Mode B — roll + coords file (PARID, XCOORD, YCOORD):
     python build_data.py --roll taxroll.dbf --coords geocoding.dbf
+
+  Mode C — enriched file (has coordinates + protest/freeze details):
+    python build_data.py --roll taxroll.dbf --enriched enriched.dbf
 
 Reads existing data/core.json and data/layers.json to preserve:
   - Geometry (neighborhood polygons, county boundary, census tracts)
@@ -638,12 +641,16 @@ def main():
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     args = parser.parse_args()
 
-    if not args.enriched and not args.coords:
-        parser.error("Provide --enriched or --coords")
     if args.enriched and args.coords:
         parser.error("Provide --enriched or --coords, not both")
 
-    use_enriched = bool(args.enriched)
+    # Determine mode: enriched > coords > roll-only
+    if args.enriched:
+        mode = 'enriched'
+    elif args.coords:
+        mode = 'coords'
+    else:
+        mode = 'roll-only'
     outdir = Path(args.outdir)
     outdir.mkdir(exist_ok=True)
 
@@ -678,7 +685,17 @@ def main():
     print("\nComputing neighborhood stats...")
     nbhd_stats = compute_nbhd_stats(by_nbhd_yr, existing_core['DATA']['features'])
 
-    if use_enriched:
+    # All possible layer keys
+    all_layer_keys = [
+        'SL', 'TL', 'RPT', 'CO', 'VO', 'MC',
+        'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
+        'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+        'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
+        'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
+        'EG', 'EL',
+    ]
+
+    if mode == 'enriched':
         # ── Enriched mode: full rebuild ──
         print("\nReading enriched data...")
         enriched_records = read_dbf(args.enriched)
@@ -692,18 +709,15 @@ def main():
         print("\nBuilding point layers from enriched data...")
         new_layers = build_point_layers(enriched_by_yr)
 
-        # Layers rebuilt from enriched .dbf
         rebuilt_keys = [
             'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
             'VETW', 'VETW_21', 'EG', 'EL'
         ]
-        # Layers preserved from existing
-        preserved_keys = ['SL', 'TL', 'RPT', 'CO', 'VO', 'MC',
-                          'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO']
+        preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
 
-    else:
+    elif mode == 'coords':
         # ── Coords mode: join roll + geocoding, rebuild what we can ──
         print(f"\nReading coords file...")
         coord_records = read_dbf(args.coords)
@@ -720,15 +734,15 @@ def main():
         print("\nBuilding point layers from joined data...")
         new_layers = build_point_layers_from_roll(joined_by_yr)
 
-        # In coords mode, rebuild SL, EG, EL; preserve everything else from existing JSON
         rebuilt_keys = ['SL', 'EG', 'EL']
-        preserved_keys = [
-            'TL', 'RPT', 'CO', 'VO', 'MC',
-            'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
-            'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
-            'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
-            'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
-        ]
+        preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
+
+    else:
+        # ── Roll-only mode: just update neighborhood stats, preserve all layers ──
+        print("\nRoll-only mode: updating neighborhood stats, preserving all point layers.")
+        new_layers = {}
+        rebuilt_keys = []
+        preserved_keys = all_layer_keys
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
@@ -763,7 +777,7 @@ def main():
 
     # Summary
     print("\n── Summary ──")
-    print(f"Mode:           {'enriched' if use_enriched else 'coords (roll + geocoding)'}")
+    print(f"Mode:           {mode}")
     print(f"Neighborhoods:  {len(nbhd_stats)}")
     print(f"core.json:      {core_size/1024/1024:.1f} MB")
     print(f"layers.json:    {layers_size/1024/1024:.1f} MB")
