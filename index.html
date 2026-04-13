@@ -742,13 +742,15 @@ const heatLayers={};
 
 function makeCluster(pts,color,radius,popFn){
   const grp=L.markerClusterGroup({maxClusterRadius:40,showCoverageOnHover:false,
+    chunkedLoading:true,chunkInterval:100,chunkDelay:10,
     iconCreateFunction:c=>L.divIcon({html:'<div style="background:'+color+';color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;border:2px solid rgba(255,255,255,.8)">'+c.getChildCount()+'</div>',className:'',iconSize:[32,32]})
   });
-  pts.forEach(p=>{
+  const markers=pts.map(p=>{
     const m=L.circleMarker([p.la,p.ln],{radius:radius||3.5,fillColor:YRC[p.y]||color,color:'#fff',weight:.6,fillOpacity:.75});
     if(popFn)m.bindPopup(popFn(p));
-    grp.addLayer(m);
+    return m;
   });
+  grp.addLayers(markers);
   return grp;
 }
 
@@ -763,7 +765,7 @@ function makeHeat(pts,key){
     else if(['vf_denied','vf_inproc'].includes(key)&&p.v)w=Math.log10(Math.max(p.v,1));
     return [p.la,p.ln,w];
   });
-  maxW=Math.max(...weighted.map(d=>d[2]),1);
+  for(let i=0;i<weighted.length;i++){if(weighted[i][2]>maxW)maxW=weighted[i][2];}
   return L.heatLayer(weighted,{radius:25,blur:20,maxZoom:14,max:maxW,gradient:{0.4:'blue',0.65:'lime',1:'red'}});
 }
 
