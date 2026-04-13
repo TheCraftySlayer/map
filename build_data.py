@@ -5,7 +5,7 @@ build_data.py — Rebuild map JSON from .dbf tax roll files.
 Usage (three modes):
 
   Mode A — roll only (updates neighborhood stats, preserves all point layers):
-    python build_data.py --roll taxroll.dbf
+    python build_data.py --roll taxroll25.dbf taxroll24.dbf taxroll23.dbf ...
 
   Mode B — roll + coords file (PARID, XCOORD, YCOORD):
     python build_data.py --roll taxroll.dbf --coords geocoding.dbf
@@ -635,7 +635,7 @@ def main():
         epilog='Use --enriched OR --coords (not both). '
                '--coords mode joins the tax roll with a geocoding file on UPC=PARID.'
     )
-    parser.add_argument('--roll', required=True, help='Path to tax roll .dbf file')
+    parser.add_argument('--roll', required=True, nargs='+', help='Path(s) to tax roll .dbf file(s)')
     parser.add_argument('--enriched', help='Path to enriched parcel .dbf (has coords + protest/freeze)')
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
@@ -673,8 +673,11 @@ def main():
         existing_layers = {}
 
     # Read .dbf files
-    print("\nReading tax roll...")
-    roll_records = read_dbf(args.roll)
+    roll_records = []
+    for roll_path in args.roll:
+        print(f"\nReading tax roll: {roll_path}")
+        roll_records.extend(read_dbf(roll_path))
+    print(f"\nTotal tax roll records: {len(roll_records):,}")
 
     # Process tax roll by neighborhood
     print("\nProcessing tax roll by neighborhood...")
