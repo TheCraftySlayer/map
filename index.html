@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Bernalillo County Assessor – Spatial Equity v2</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="preload" href="data/core.json" as="fetch" crossorigin>
+<link rel="preload" href="data/layers.json" as="fetch" crossorigin>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
@@ -341,8 +343,13 @@ const LAYER_FIELD={
   volatility:'volatility',exstab:'exstab'
 };
 
+let _visFeatCache=null, _visFeatKey=null;
 function getVisibleFeatures(){
-  return DATA.features.filter(f=>!(hideCommercial&&f.properties.is_commercial));
+  const key=hideCommercial?'h':'a';
+  if(_visFeatKey===key&&_visFeatCache)return _visFeatCache;
+  _visFeatCache=DATA.features.filter(f=>!(hideCommercial&&f.properties.is_commercial));
+  _visFeatKey=key;
+  return _visFeatCache;
 }
 
 function formatStat(v,layer){
@@ -358,19 +365,17 @@ function updateStatsBar(layer){
   const bar=document.getElementById('statsBar');
   const feats=getVisibleFeatures();
   const totNbhd=feats.length;
-  const totParcels=feats.reduce((s,f)=>s+(f.properties.parcels||0),0);
-  const totContacts=feats.reduce((s,f)=>s+(f.properties.total_contacts||0),0);
-  const totCalls=feats.reduce((s,f)=>s+(f.properties.total_calls||0),0);
-  const totFailures=feats.reduce((s,f)=>s+(f.properties.total_failures||0),0);
+  let totParcels=0,totContacts=0,totCalls=0,totFailures=0;
+  for(let i=0;i<feats.length;i++){const p=feats[i].properties;totParcels+=(p.parcels||0);totContacts+=(p.total_contacts||0);totCalls+=(p.total_calls||0);totFailures+=(p.total_failures||0);}
 
   let rangeHtml='';
   const field=LAYER_FIELD[layer];
   if(field){
     const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
     if(vals.length){
-      const mn=Math.min(...vals),mx=Math.max(...vals);
-      const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
-      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(mn,layer)+' \u2013 '+formatStat(mx,layer)+' (avg '+formatStat(avg,layer)+')</span>';
+      let mn=vals[0],mx=vals[0],sum=0;
+      for(let i=0;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];sum+=vals[i];}
+      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(mn,layer)+' \u2013 '+formatStat(mx,layer)+' (avg '+formatStat(sum/vals.length,layer)+')</span>';
     }
   }
   bar.innerHTML=
@@ -396,7 +401,8 @@ function updateLegendRange(layer){
   const feats=getVisibleFeatures();
   const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
   if(!vals.length)return;
-  const mn=Math.min(...vals),mx=Math.max(...vals);
+  let mn=vals[0],mx=vals[0];
+  for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
   document.getElementById('lL').textContent=formatStat(mn,layer);
   document.getElementById('lH').textContent=formatStat(mx,layer);
 }
@@ -510,9 +516,15 @@ function nbhdStyle(f){
 function hiNbhd(e){e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
 function rhNbhd(e){nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
 function renderNbhd(){
-  if(nbhdLayer)map.removeLayer(nbhdLayer);
-  if(NBL==='none'){nbhdLayer=null;updateStatsBar(NBL);return;}
-  nbhdLayer=L.geoJSON(DATA,{style:nbhdStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd})}).addTo(map);
+  if(NBL==='none'){
+    if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
+    updateStatsBar(NBL);return;
+  }
+  if(nbhdLayer){
+    nbhdLayer.setStyle(nbhdStyle);
+  }else{
+    nbhdLayer=L.geoJSON(DATA,{style:nbhdStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd})}).addTo(map);
+  }
   if(!swipeActive){
     const g=LG[NBL];
     document.getElementById('lN').textContent=g.n;
@@ -668,7 +680,8 @@ function enableSwipe(){
     if(!field)return{lo:gL.l,hi:gL.h};
     const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
     if(!vals.length)return{lo:'—',hi:'—'};
-    return{lo:formatStat(Math.min(...vals),layer),hi:formatStat(Math.max(...vals),layer)};
+    let mn=vals[0],mx=vals[0];for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
+    return{lo:formatStat(mn,layer),hi:formatStat(mx,layer)};
   };
   const rL=rangeLabel(fL,lName), rR=rangeLabel(fR,rName);
   const lb=document.getElementById('lb');
