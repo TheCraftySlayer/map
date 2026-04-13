@@ -224,7 +224,7 @@ document.getElementById("map").innerHTML="<div style=\"font-family:system-ui;col
 
 fetch("data/core.json").then(r=>r.json()).then(core=>{
   COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
-  document.getElementById("map").innerHTML=""; document.getElementById("map").style.display="";
+  const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
   fetch("data/layers.json").then(r=>r.json()).then(d=>{
     SL=d.SL; TL=d.TL; EG=d.EG; EL=d.EL; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
