@@ -2,19 +2,25 @@
 """
 build_data.py — Rebuild map JSON from .dbf tax roll files.
 
-Usage:
+Usage (two modes):
+
+  Mode A — enriched file (has coordinates + protest/freeze details):
     python build_data.py --roll taxroll.dbf --enriched enriched.dbf
+
+  Mode B — separate coords file (PARID, XCOORD, YCOORD):
+    python build_data.py --roll taxroll.dbf --coords geocoding.dbf
 
 Reads existing data/core.json and data/layers.json to preserve:
   - Geometry (neighborhood polygons, county boundary, census tracts)
   - Contact center data (calls, visits, phone channel)
   - Visitor point layers (VET_V, VF_V, HOH_V, PRO_V, SP_GEO)
   - Phone channel layers (RPT, CO, VO, MC)
+  - Point layers that require enriched data (when using --coords mode)
 
 Rebuilds from .dbf files:
   - Neighborhood property stats (values, exemptions, year-over-year changes)
-  - Point layers: VF_DENIED, VF_INPROC, PRO_20, PRO_21, VF20_*, VF21_*, VETW*
-  - Exemption gained/lost layers (EG, EL)
+  - With --enriched: VF_DENIED, VF_INPROC, PRO_20, PRO_21, VF20_*, VF21_*, VETW*, EG, EL
+  - With --coords: HOH points, VET points, sale points, exemption gained/lost (EG, EL)
 
 Requirements:
     pip install dbfread pyproj
@@ -111,6 +117,151 @@ def process_enriched(records):
     if skipped:
         print(f"  Skipped {skipped:,} records without coords/year")
     return dict(by_yr)
+
+
+def process_coords(records):
+    """
+    Process geocoding .dbf records into a lookup dict by PARID.
+    Returns dict: { parid: (XCOORD, YCOORD, EARLIEST_YR, LATEST_YR) }
+    """
+    lookup = {}
+    skipped = 0
+    for r in records:
+        parid = str(r.get('PARID', '') or '').strip()
+        x = safe_float(r.get('XCOORD'))
+        y = safe_float(r.get('YCOORD'))
+        if parid and x and y:
+            earliest = safe_int(r.get('EARLIEST_YR'))
+            latest = safe_int(r.get('LATEST_YR'))
+            lookup[parid] = (x, y, earliest, latest)
+        else:
+            skipped += 1
+    if skipped:
+        print(f"  Skipped {skipped:,} records without PARID/coords")
+    return lookup
+
+
+def join_roll_with_coords(roll_records, coord_lookup):
+    """
+    Join tax roll records with coordinate lookup on UPC=PARID.
+    Returns dict: { year: [records_with_coords] }
+    """
+    by_yr = defaultdict(list)
+    matched = 0
+    unmatched = 0
+    for r in roll_records:
+        upc = str(r.get('UPC', '') or '').strip()
+        yr = safe_int(r.get('TAXYR'))
+        if not upc or not yr:
+            continue
+        if upc in coord_lookup:
+            x, y, earliest, latest = coord_lookup[upc]
+            r['XCOORD'] = x
+            r['YCOORD'] = y
+            r['EARLIEST_YR'] = earliest
+            r['LATEST_YR'] = latest
+            r['PARID'] = upc
+            by_yr[yr].append(r)
+            matched += 1
+        else:
+            unmatched += 1
+    print(f"  Matched: {matched:,}, unmatched: {unmatched:,}")
+    return dict(by_yr)
+
+
+def build_point_layers_from_roll(joined_by_yr):
+    """Build point layers from tax roll + coords (no enriched data needed)."""
+    layers = {}
+
+    all_recs = []
+    for yr, recs in joined_by_yr.items():
+        for r in recs:
+            r['_yr'] = yr
+        all_recs.extend(recs)
+
+    print(f"  Processing {len(all_recs):,} joined records...")
+
+    def ll(r):
+        return to_latlon(safe_float(r.get('XCOORD')), safe_float(r.get('YCOORD')))
+
+    # ── HOH exemption points (current year) ──
+    latest_yr = max(joined_by_yr.keys()) if joined_by_yr else 0
+    latest_recs = joined_by_yr.get(latest_yr, [])
+
+    hoh_pts = []
+    vet_pts = []
+    sale_pts = []
+    for r in latest_recs:
+        la, ln = ll(r)
+        v = safe_int(r.get('TOTVALUE'))
+
+        # HOH exemption
+        if safe_float(r.get('HOHEXEMP')) > 0:
+            hoh_pts.append({'la': la, 'ln': ln, 'v': v})
+
+        # Veteran exemption
+        if safe_float(r.get('VETEXEMP')) > 0:
+            vet_pts.append({'la': la, 'ln': ln, 'v': v})
+
+        # Recent sales
+        sp = safe_float(r.get('SALEPRICE'))
+        if sp > 0:
+            sd = str(r.get('SALEDATE', '') or '').strip()
+            sale_pts.append({'la': la, 'ln': ln, 'v': int(sp), 'd': sd})
+
+    layers['SL'] = sale_pts
+
+    # ── Exemption gained/lost (multi-year comparison) ──
+    by_parid = defaultdict(dict)
+    for r in all_recs:
+        parid = str(r.get('PARID', '') or r.get('UPC', '') or '').strip()
+        yr = r['_yr']
+        if parid:
+            by_parid[parid][yr] = r
+
+    eg_list, el_list = [], []
+    comparison_years = sorted(joined_by_yr.keys())
+    for i in range(len(comparison_years) - 1):
+        y1, y2 = comparison_years[i], comparison_years[i+1]
+        for parid, yrs in by_parid.items():
+            if y1 not in yrs or y2 not in yrs:
+                continue
+            r1, r2 = yrs[y1], yrs[y2]
+            x = safe_float(r2.get('XCOORD'))
+            y_coord = safe_float(r2.get('YCOORD'))
+            if not x or not y_coord:
+                continue
+
+            hoh1 = safe_float(r1.get('HOHEXEMP')) > 0
+            hoh2 = safe_float(r2.get('HOHEXEMP')) > 0
+            vet1 = safe_float(r1.get('VETEXEMP')) > 0
+            vet2 = safe_float(r2.get('VETEXEMP')) > 0
+
+            gained_h = (not hoh1 and hoh2)
+            gained_v = (not vet1 and vet2)
+            lost_h = (hoh1 and not hoh2)
+            lost_v = (vet1 and not vet2)
+
+            la, ln = to_latlon(x, y_coord)
+            if gained_h or gained_v:
+                eg_list.append({
+                    'la': la, 'ln': ln,
+                    'h': 1 if gained_h else 0,
+                    'v': 1 if gained_v else 0,
+                    'c': 1, 'y': y2
+                })
+            if lost_h or lost_v:
+                el_list.append({
+                    'la': la, 'ln': ln,
+                    'h': 1 if lost_h else 0,
+                    'v': 1 if lost_v else 0,
+                    'c': 1, 'y': y2
+                })
+
+    layers['EG'] = eg_list
+    layers['EL'] = el_list
+
+    return layers
 
 
 def compute_nbhd_stats(by_nbhd_yr, existing_props):
@@ -476,12 +627,23 @@ def build_nbhd_centers(core_data):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Rebuild map JSON from .dbf files')
+    parser = argparse.ArgumentParser(
+        description='Rebuild map JSON from .dbf files',
+        epilog='Use --enriched OR --coords (not both). '
+               '--coords mode joins the tax roll with a geocoding file on UPC=PARID.'
+    )
     parser.add_argument('--roll', required=True, help='Path to tax roll .dbf file')
-    parser.add_argument('--enriched', required=True, help='Path to enriched parcel .dbf file')
+    parser.add_argument('--enriched', help='Path to enriched parcel .dbf (has coords + protest/freeze)')
+    parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     args = parser.parse_args()
 
+    if not args.enriched and not args.coords:
+        parser.error("Provide --enriched or --coords")
+    if args.enriched and args.coords:
+        parser.error("Provide --enriched or --coords, not both")
+
+    use_enriched = bool(args.enriched)
     outdir = Path(args.outdir)
     outdir.mkdir(exist_ok=True)
 
@@ -507,55 +669,83 @@ def main():
     print("\nReading tax roll...")
     roll_records = read_dbf(args.roll)
 
-    print("\nReading enriched data...")
-    enriched_records = read_dbf(args.enriched)
-
-    # Process
+    # Process tax roll by neighborhood
     print("\nProcessing tax roll by neighborhood...")
     by_nbhd_yr = process_roll(roll_records)
     print(f"  {len(by_nbhd_yr)} neighborhoods found")
 
-    print("\nProcessing enriched data by year...")
-    enriched_by_yr = process_enriched(enriched_records)
-
+    # Compute neighborhood stats from roll
     print("\nComputing neighborhood stats...")
     nbhd_stats = compute_nbhd_stats(by_nbhd_yr, existing_core['DATA']['features'])
 
-    print("Updating stats from enriched data...")
-    update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr)
+    if use_enriched:
+        # ── Enriched mode: full rebuild ──
+        print("\nReading enriched data...")
+        enriched_records = read_dbf(args.enriched)
 
-    print("\nBuilding point layers...")
-    new_layers = build_point_layers(enriched_by_yr)
+        print("\nProcessing enriched data by year...")
+        enriched_by_yr = process_enriched(enriched_records)
+
+        print("Updating stats from enriched data...")
+        update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr)
+
+        print("\nBuilding point layers from enriched data...")
+        new_layers = build_point_layers(enriched_by_yr)
+
+        # Layers rebuilt from enriched .dbf
+        rebuilt_keys = [
+            'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+            'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
+            'VF21_A', 'VF21_D', 'VF21_R',
+            'VETW', 'VETW_21', 'EG', 'EL'
+        ]
+        # Layers preserved from existing
+        preserved_keys = ['SL', 'TL', 'RPT', 'CO', 'VO', 'MC',
+                          'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO']
+
+    else:
+        # ── Coords mode: join roll + geocoding, rebuild what we can ──
+        print(f"\nReading coords file...")
+        coord_records = read_dbf(args.coords)
+
+        print("\nBuilding coordinate lookup...")
+        coord_lookup = process_coords(coord_records)
+        print(f"  {len(coord_lookup):,} parcels with coordinates")
+
+        print("\nJoining tax roll with coordinates...")
+        joined_by_yr = join_roll_with_coords(roll_records, coord_lookup)
+        for yr in sorted(joined_by_yr.keys()):
+            print(f"  {yr}: {len(joined_by_yr[yr]):,} records")
+
+        print("\nBuilding point layers from joined data...")
+        new_layers = build_point_layers_from_roll(joined_by_yr)
+
+        # In coords mode, rebuild SL, EG, EL; preserve everything else from existing JSON
+        rebuilt_keys = ['SL', 'EG', 'EL']
+        preserved_keys = [
+            'TL', 'RPT', 'CO', 'VO', 'MC',
+            'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
+            'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+            'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
+            'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
+        ]
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
-    # Update DATA features with new stats, preserving geometry
     for feat in existing_core['DATA']['features']:
         nbhd = int(feat['properties'].get('nbhd', 0))
         if nbhd in nbhd_stats:
             feat['properties'] = nbhd_stats[nbhd]
 
-    # Recompute centers
     existing_core['NBHD_CENTERS'] = build_nbhd_centers(existing_core['DATA'])
 
     # ── Assemble layers.json ──
     print("Assembling layers.json...")
-    # Layers rebuilt from .dbf
-    dbf_layer_keys = [
-        'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
-        'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
-        'VF21_A', 'VF21_D', 'VF21_R',
-        'VETW', 'VETW_21', 'EG', 'EL'
-    ]
-    # Layers preserved from existing (contact center, visitor, phone)
-    preserved_keys = ['SL', 'TL', 'RPT', 'CO', 'VO', 'MC',
-                      'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO']
-
     final_layers = {}
     for k in preserved_keys:
         if k in existing_layers:
             final_layers[k] = existing_layers[k]
-    for k in dbf_layer_keys:
+    for k in rebuilt_keys:
         final_layers[k] = new_layers.get(k, [])
 
     # ── Write output ──
@@ -573,15 +763,17 @@ def main():
 
     # Summary
     print("\n── Summary ──")
+    print(f"Mode:           {'enriched' if use_enriched else 'coords (roll + geocoding)'}")
     print(f"Neighborhoods:  {len(nbhd_stats)}")
     print(f"core.json:      {core_size/1024/1024:.1f} MB")
     print(f"layers.json:    {layers_size/1024/1024:.1f} MB")
     print()
-    for k in sorted(dbf_layer_keys):
-        print(f"  {k}: {len(final_layers.get(k, [])):,} points")
+    for k in sorted(rebuilt_keys):
+        print(f"  {k}: {len(final_layers.get(k, [])):,} points (rebuilt)")
     print()
     for k in sorted(preserved_keys):
-        print(f"  {k}: {len(final_layers.get(k, [])):,} points (preserved)")
+        count = len(final_layers.get(k, []))
+        print(f"  {k}: {count:,} points (preserved)")
     print("\nDone! Commit and push to update the site.")
 
 
