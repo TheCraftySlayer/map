@@ -46,6 +46,12 @@ try:
 except ImportError:
     sys.exit("Install pyproj: pip install pyproj")
 
+try:
+    import openpyxl
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
 # NM State Plane Central (feet) → WGS84
 TRANSFORMER = Transformer.from_crs("EPSG:2903", "EPSG:4326", always_xy=True)
 
@@ -59,6 +65,23 @@ def read_dbf(path):
     """Read a .dbf file and return list of dicts."""
     print(f"  Reading {path}...")
     records = list(DBF(path, encoding='latin-1'))
+    print(f"  → {len(records):,} records")
+    return records
+
+
+def read_xlsx(path):
+    """Read an .xlsx file and return list of dicts."""
+    if not HAS_OPENPYXL:
+        sys.exit("Install openpyxl: pip install openpyxl")
+    print(f"  Reading {path}...")
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    headers = [str(h).strip() if h else '' for h in next(rows)]
+    records = []
+    for row in rows:
+        records.append(dict(zip(headers, row)))
+    wb.close()
     print(f"  → {len(records):,} records")
     return records
 
@@ -723,7 +746,10 @@ def main():
     elif mode == 'coords':
         # ── Coords mode: join roll + geocoding, rebuild what we can ──
         print(f"\nReading coords file...")
-        coord_records = read_dbf(args.coords)
+        if args.coords.lower().endswith('.xlsx'):
+            coord_records = read_xlsx(args.coords)
+        else:
+            coord_records = read_dbf(args.coords)
 
         print("\nBuilding coordinate lookup...")
         coord_lookup = process_coords(coord_records)
