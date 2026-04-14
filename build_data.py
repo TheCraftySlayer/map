@@ -230,22 +230,7 @@ def build_point_layers_from_roll(joined_by_yr):
     def ll(r):
         return to_latlon(safe_float(r.get('XCOORD')), safe_float(r.get('YCOORD')))
 
-    # ── Sale points (recent years, matching UI format: y, d, p) ──
-    sale_pts = []
-    for yr in recent_years:
-        for r in joined_by_yr[yr]:
-            sp = safe_float(r.get('SALEPRICE'))
-            if sp > 0:
-                la, ln = ll(r)
-                sale_pts.append({
-                    'la': la, 'ln': ln,
-                    'y': yr,
-                    'p': int(sp),
-                    'd': 0
-                })
-    layers['SL'] = sale_pts
-
-    # ── Exemption gained/lost (recent year-pairs only) ──
+    # ── Sale points: detect NEW sales by comparing consecutive years ──
     by_parid = defaultdict(dict)
     for r in recent_recs:
         parid = str(r.get('PARID', '') or r.get('UPC', '') or '').strip()
@@ -253,7 +238,32 @@ def build_point_layers_from_roll(joined_by_yr):
         if parid:
             by_parid[parid][yr] = r
 
-    eg_list, el_list = [], []
+    sale_pts = []
+    for i in range(len(recent_years) - 1):
+        y1, y2 = recent_years[i], recent_years[i+1]
+        for parid, yrs in by_parid.items():
+            if y1 not in yrs or y2 not in yrs:
+                continue
+            r1, r2 = yrs[y1], yrs[y2]
+            sp1 = safe_float(r1.get('SALEPRICE'))
+            sp2 = safe_float(r2.get('SALEPRICE'))
+            sd1 = str(r1.get('SALEDATE', '') or '').strip()
+            sd2 = str(r2.get('SALEDATE', '') or '').strip()
+            # New sale if price or date changed
+            if sp2 > 0 and (sp2 != sp1 or sd2 != sd1):
+                x = safe_float(r2.get('XCOORD'))
+                y_coord = safe_float(r2.get('YCOORD'))
+                if x and y_coord:
+                    la, ln = to_latlon(x, y_coord)
+                    sale_pts.append({
+                        'la': la, 'ln': ln,
+                        'y': y2,
+                        'p': int(sp2),
+                        'd': 0
+                    })
+    layers['SL'] = sale_pts
+
+    # ── Exemption gained/lost (recent year-pairs only) ──
     for i in range(len(recent_years) - 1):
         y1, y2 = recent_years[i], recent_years[i+1]
         for parid, yrs in by_parid.items():
