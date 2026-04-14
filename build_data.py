@@ -31,6 +31,7 @@ Requirements:
 
 import json
 import argparse
+import csv
 import sys
 import statistics
 from collections import defaultdict
@@ -82,6 +83,18 @@ def read_xlsx(path):
     for row in rows:
         records.append(dict(zip(headers, row)))
     wb.close()
+    print(f"  → {len(records):,} records")
+    return records
+
+
+def read_csv(path):
+    """Read a .csv file and return list of dicts."""
+    print(f"  Reading {path}...")
+    records = []
+    with open(path, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            records.append(row)
     print(f"  → {len(records):,} records")
     return records
 
@@ -740,8 +753,11 @@ def main():
     elif mode == 'coords':
         # ── Coords mode: join roll + geocoding, rebuild what we can ──
         print(f"\nReading coords file...")
-        if args.coords.lower().endswith('.xlsx'):
+        ext = args.coords.lower()
+        if ext.endswith('.xlsx'):
             coord_records = read_xlsx(args.coords)
+        elif ext.endswith('.csv'):
+            coord_records = read_csv(args.coords)
         else:
             coord_records = read_dbf(args.coords)
 
