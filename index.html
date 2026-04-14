@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Bernalillo County Assessor – Spatial Equity v2</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+<link rel="preload" href="data/core.json" as="fetch" crossorigin>
+<link rel="preload" href="data/layers.json" as="fetch" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}
+#map{width:100%;height:100vh}
+.info{padding:10px 14px;background:rgba(255,255,255,.95);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:13px;line-height:1.6;max-width:300px;max-height:calc(100vh - 130px);overflow-y:auto;z-index:1001}
+.info h4{margin:0 0 4px;font-size:14px;color:#222}
+.info .s{display:flex;justify-content:space-between;gap:12px}
+.info .s .v{font-weight:600;color:#185FA5}
+.ctrl{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(255,255,255,.97);border-radius:10px;padding:14px 18px;box-shadow:0 2px 12px rgba(0,0,0,.12);font-size:12px;max-width:280px;max-height:calc(100vh - 30px);overflow-y:auto}
+.ctrl h4{margin:0 0 6px;font-size:14px;font-weight:600;color:#222}
+.ctrl h5{margin:10px 0 4px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px}
+.ctrl label{display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer;color:#333;font-size:12px}
+.ctrl hr{margin:8px 0;border:none;border-top:1px solid #e5e5e5}
+.ctrl .note{font-size:10px;color:#999;margin-top:8px;line-height:1.4}
+.d{display:inline-block;border-radius:50%;flex-shrink:0}
+.sq{display:inline-block;border-radius:2px;flex-shrink:0}
+.lb{background:rgba(255,255,255,.95);border-radius:8px;padding:8px 16px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;color:#555}
+.lb .g{width:180px;height:10px;border-radius:3px}
+.tag{display:inline-block;background:#eef;border-radius:3px;padding:1px 5px;font-size:10px;color:#555;margin-left:4px}
+.toggle-btn{position:absolute;z-index:1000;background:rgba(255,255,255,.95);border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15);color:#333;display:flex;align-items:center;gap:6px}
+.toggle-btn:hover{background:#f0f0f0}
+.ctrl-slider{width:100%;margin:4px 0;accent-color:#185FA5}
+#searchBox{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;margin-top:4px}
+#searchBox:focus{outline:none;border-color:#185FA5}
+.swipe-divider{position:fixed;width:4px;background:rgba(255,255,255,.8);cursor:col-resize;z-index:9999;border-left:2px solid #185FA5;border-right:2px solid #185FA5;pointer-events:all;padding:0 14px;margin-left:-14px;background-clip:content-box}
+.swipe-handle{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;background:#185FA5;border-radius:50%;left:50%;margin-left:-16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;cursor:col-resize;box-shadow:0 2px 6px rgba(0,0,0,.3);pointer-events:all}
+.swipe-label{position:fixed;top:0;z-index:10000;pointer-events:none;padding:8px 16px;font-size:13px;font-weight:700;color:#fff;letter-spacing:.3px;text-shadow:0 1px 4px rgba(0,0,0,.5);background:rgba(0,0,0,.55);backdrop-filter:blur(4px);border-bottom-left-radius:8px;border-bottom-right-radius:8px}
+.heat-toggle{display:flex;align-items:center;gap:6px;margin:4px 0 6px;font-size:11px;color:#555}
+</style></head><body>
+<div id="map"></div>
+<div id="swipeOverlay" style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:9999;display:none"></div>
+
+<button class="toggle-btn" id="ctrlToggle" style="top:10px;right:296px">❮</button>
+<button class="toggle-btn" id="tileToggle" style="bottom:54px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
+
+<div class="ctrl">
+  <h4>Spatial equity analysis <span class="tag">v4 &middot; MDF v10 + 2020&ndash;2026 + TY 2021</span></h4>
+
+  <div style="margin-bottom:6px">
+    <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
+  </div>
+
+  <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026 &middot; 46,016 calls</span></h5>
+  <label><input type="radio" name="nbhd_layer" value="demand" checked> Caller demand</label>
+  <label><input type="radio" name="nbhd_layer" value="calls_per_parcel"> Call intensity</label>
+  <label><input type="radio" name="nbhd_layer" value="failure"> Service failure rate</label>
+  <label><input type="radio" name="nbhd_layer" value="avg_visit_min"> Avg visit duration</label>
+
+  <h5>Property characteristics <span style="font-weight:400;color:#aaa">2026 roll &middot; 256,463 parcels</span></h5>
+  <label><input type="radio" name="nbhd_layer" value="avg_appraised"> Avg appraised value</label>
+  <label><input type="radio" name="nbhd_layer" value="median_yrbuilt"> Median year built</label>
+  <label><input type="radio" name="nbhd_layer" value="valfreeze"> Value freeze rate</label>
+  <label><input type="radio" name="nbhd_layer" value="pct_vf_denied"> Value freeze denial rate</label>
+  <label><input type="radio" name="nbhd_layer" value="pct_hoh"> HOH exemption rate</label>
+  <label><input type="radio" name="nbhd_layer" value="pct_vet"> Veteran exemption rate</label>
+  <label><input type="radio" name="nbhd_layer" value="owner_turnover"> Owner turnover rate</label>
+  <label><input type="radio" name="nbhd_layer" value="hoh_churn"> HOH exemption churn</label>
+
+  <h5>Market activity <span style="font-weight:400;color:#aaa">tax rolls 2020&ndash;2026</span></h5>
+  <label><input type="radio" name="nbhd_layer" value="sales"> Recent sale density</label>
+  <label><input type="radio" name="nbhd_layer" value="taxlightning"> Sale contact rate</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_20_21"> Value change 2020&rarr;21</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_21_22"> Value change 2021&rarr;22</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_22_23"> Value change 2022&rarr;23</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_23_24"> Value change 2023&rarr;24</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_24_25"> Value change 2024&rarr;25</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_25_26"> Value change 2025&rarr;26</label>
+  <label><input type="radio" name="nbhd_layer" value="none"> None (off)</label>
+
+  <div style="margin:6px 0 2px;font-size:11px;color:#888">Opacity: <span id="opacVal">72%</span></div>
+  <input type="range" class="ctrl-slider" id="opacSlider" min="10" max="95" value="72">
+
+  <label style="margin-top:4px"><input type="checkbox" id="hideCommercial"> Hide commercial neighborhoods</label>
+
+  <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">2023 TIGER &middot; 105,922 addresses</span></h5>
+  <label><input type="radio" name="tract_layer" value="none" checked> Off</label>
+  <label><input type="radio" name="tract_layer" value="addr_density"> Geocoded address density</label>
+
+  <hr>
+  <div class="heat-toggle">
+    <label><input type="checkbox" id="heatMode"> Heatmap mode for point layers</label>
+  </div>
+
+  <h5>Compare choropleth layers</h5>
+  <label style="font-size:11px;color:#666">Left pane:</label>
+  <select id="swipeLeft" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="demand">Caller demand</option>
+    <option value="failure">Failure rate</option>
+    <option value="avg_visit_min">Avg visit duration</option>
+    <option value="avg_appraised">Avg appraised value</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet">Vet rate</option>
+    <option value="chg_20_21">Change 20&rarr;21</option>
+    <option value="chg_21_22">Change 21&rarr;22</option>
+    <option value="chg_22_23">Change 22&rarr;23</option>
+    <option value="chg_23_24">Change 23&rarr;24</option>
+    <option value="chg_24_25">Change 24&rarr;25</option>
+    <option value="chg_25_26">Change 25&rarr;26</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption stability</option>
+  </select>
+  <label style="font-size:11px;color:#666">Right pane:</label>
+  <select id="swipeRight" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="failure" selected>Failure rate</option>
+    <option value="demand">Caller demand</option>
+    <option value="avg_visit_min">Avg visit duration</option>
+    <option value="avg_appraised">Avg appraised value</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet">Vet rate</option>
+    <option value="chg_20_21">Change 20&rarr;21</option>
+    <option value="chg_21_22">Change 21&rarr;22</option>
+    <option value="chg_22_23">Change 22&rarr;23</option>
+    <option value="chg_23_24">Change 23&rarr;24</option>
+    <option value="chg_24_25">Change 24&rarr;25</option>
+    <option value="chg_25_26">Change 25&rarr;26</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption stability</option>
+  </select>
+  <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
+
+  <hr>
+  <h5>Value freeze pipeline <span style="font-weight:400;color:#aaa">2026 roll &middot; 4,947 applications</span></h5>
+  <label><input type="checkbox" class="ol" data-layer="vf_denied"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> Denied (4,807)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf_inproc"> <span class="d" style="width:8px;height:8px;background:#fdae61"></span> In-process (140)</label>
+
+  <h5>2020 tax roll snapshot <span style="font-weight:400;color:#aaa">TY 2020 &middot; 41,707 parcels</span></h5>
+  <label><input type="checkbox" class="ol" data-layer="pro_20"> <span class="d" style="width:8px;height:8px;background:#e31a1c"></span> Protests (639)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf_20_g"> <span class="d" style="width:8px;height:8px;background:#1a9850"></span> VF granted (981)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf_20_d"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> VF denied (876)</label>
+  <label><input type="checkbox" class="ol" data-layer="vetw"> <span class="d" style="width:8px;height:8px;background:#4a1486"></span> Disabled vet waiver (1,275)</label>
+
+  <h5>2021 tax roll snapshot <span style="font-weight:400;color:#aaa">TY 2021 &middot; 41,293 parcels</span></h5>
+  <label><input type="checkbox" class="ol" data-layer="pro_21"> <span class="d" style="width:8px;height:8px;background:#e31a1c"></span> Protests (590)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf21_a"> <span class="d" style="width:8px;height:8px;background:#1a9850"></span> VF active (1,000)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf21_d"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> VF denied (905)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf21_r"> <span class="d" style="width:8px;height:8px;background:#999"></span> VF removed (1,290)</label>
+  <label><input type="checkbox" class="ol" data-layer="vetw_21"> <span class="d" style="width:8px;height:8px;background:#4a1486"></span> Disabled vet waiver (1,252)</label>
+
+  <h5>In-person visitors <span style="font-weight:400;color:#aaa">Jan 2022&ndash;Apr 2026 &middot; 63,890 visits</span></h5>
+  <div style="display:flex;gap:8px;margin:4px 0 6px 2px;font-size:11px;flex-wrap:wrap">
+    <label style="margin:0"><input type="checkbox" class="visyrf" value="2022" checked> <span style="color:#984ea3;font-weight:600">2022</span></label>
+    <label style="margin:0"><input type="checkbox" class="visyrf" value="2023" checked> <span style="color:#2166ac;font-weight:600">2023</span></label>
+    <label style="margin:0"><input type="checkbox" class="visyrf" value="2024" checked> <span style="color:#f4a11d;font-weight:600">2024</span></label>
+    <label style="margin:0"><input type="checkbox" class="visyrf" value="2025" checked> <span style="color:#1a9850;font-weight:600">2025</span></label>
+    <label style="margin:0"><input type="checkbox" class="visyrf" value="2026" checked> <span style="color:#e41a1c;font-weight:600">2026</span></label>
+  </div>
+  <label><input type="checkbox" class="ol" data-layer="vet_v"> <span class="d" style="width:8px;height:8px;background:#2171b5"></span> Veterans exemption (3,041)</label>
+  <label><input type="checkbox" class="ol" data-layer="vf_v"> <span class="d" style="width:8px;height:8px;background:#D85A30"></span> Value freeze (998)</label>
+  <label><input type="checkbox" class="ol" data-layer="hoh_v"> <span class="d" style="width:8px;height:8px;background:#6a51a3"></span> HOH exemption (426)</label>
+  <label><input type="checkbox" class="ol" data-layer="pro_v"> <span class="d" style="width:8px;height:8px;background:#b10026"></span> Protest (152, avg 61 min)</label>
+  <label><input type="checkbox" class="ol" data-layer="sp_geo"> <span class="d" style="width:8px;height:8px;background:#e6ab02"></span> Spanish-speaking (222)</label>
+
+  <h5>Tax roll contacts <span style="font-weight:400;color:#aaa">sales 2023&ndash;Sep 2025</span></h5>
+  <div style="display:flex;gap:8px;margin:4px 0 6px 2px;font-size:11px;flex-wrap:wrap">
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2023" checked> <span style="color:#2166ac;font-weight:600">2023</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2024" checked> <span style="color:#f4a11d;font-weight:600">2024</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2025" checked> <span style="color:#1a9850;font-weight:600">2025</span></label>
+  </div>
+  <label><input type="checkbox" class="ol" data-layer="sl"> <span class="d" style="width:8px;height:8px;background:#888;border:1px solid #333"></span> Sale&rarr;contact lag (1,221: 561 in 2023 &middot; 507 in 2024 &middot; 153 in 2025)</label>
+  <label><input type="checkbox" class="ol" data-layer="tl"> <span class="d" style="width:8px;height:8px;background:#888"></span> Owner change contacts (2,993: 894 '23 &middot; 956 '24 &middot; 1,143 '25)</label>
+  <label><input type="checkbox" class="ol" data-layer="eg"> <span class="d" style="width:8px;height:8px;background:#888"></span> Exemption gained (10,989: 3,782 '23 &middot; 3,406 '24 &middot; 3,801 '25)</label>
+  <label><input type="checkbox" class="ol" data-layer="el"> <span class="d" style="width:8px;height:8px;background:#888"></span> Exemption lost (9,668: 3,118 '23 &middot; 3,291 '24 &middot; 3,259 '25)</label>
+
+  <h5>Phone channel <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
+  <label><input type="checkbox" class="ol" data-layer="rpt"> <span class="d" style="width:8px;height:8px;background:#b10026"></span> Repeat callers 5+ (558)</label>
+  <label><input type="checkbox" class="ol" data-layer="co"> <span class="d" style="width:8px;height:8px;background:#185FA5"></span> Phone only (2,185)</label>
+  <label><input type="checkbox" class="ol" data-layer="vo"> <span class="d" style="width:8px;height:8px;background:#1D9E75"></span> Walk-in only (4,920)</label>
+  <label><input type="checkbox" class="ol" data-layer="mc"> <span class="d" style="width:8px;height:8px;background:#BA7517"></span> Multichannel (1,238)</label>
+
+
+
+    <h5>Reference</h5>
+  <label><input type="checkbox" class="ol" data-layer="rings"> Distance rings (2/5/10/15 mi)</label>
+  <label><input type="checkbox" id="officeToggle" checked> <span class="sq" style="width:8px;height:8px;background:#ffff00"></span> Office location</label>
+  <div class="note" id="sidebarNote">598 neighborhoods &middot; 176 census tracts &middot; 256,463 parcels (2026)<br>TY 2021 snapshot: 41,293 parcels<br>
+  63,890 visitors &middot; 8,700 geocoded &middot; Tax rolls 2020&ndash;2026</div>
+  <div class="note" style="margin-top:4px"><a href="https://drive.google.com/drive/folders/1TMKlGEyFNZ-HjLkySqHTigic7CnFKMVN?usp=sharing" target="_blank" rel="noopener" style="color:#185FA5;text-decoration:none">Raw data files &rarr;</a></div>
+</div>
+<div id="bottomStack" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:6px">
+<div id="statsBar" style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;gap:16px;font-size:11px;color:#555"></div>
+<div class="lb" id="lb"><span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script>
+/*
+ (c) 2014, Vladimir Agafonkin
+ simpleheat, a tiny JavaScript library for drawing heatmaps with Canvas
+ https://github.com/mourner/simpleheat
+*/
+!function(){"use strict";function t(i){return this instanceof t?(this._canvas=i="string"==typeof i?document.getElementById(i):i,this._ctx=i.getContext("2d"),this._width=i.width,this._height=i.height,this._max=1,void this.clear()):new t(i)}t.prototype={defaultRadius:25,defaultGradient:{.4:"blue",.6:"cyan",.7:"lime",.8:"yellow",1:"red"},data:function(t,i){return this._data=t,this},max:function(t){return this._max=t,this},add:function(t){return this._data.push(t),this},clear:function(){return this._data=[],this},radius:function(t,i){i=i||15;var a=this._circle=document.createElement("canvas"),s=a.getContext("2d"),e=this._r=t+i;return a.width=a.height=2*e,s.shadowOffsetX=s.shadowOffsetY=200,s.shadowBlur=i,s.shadowColor="black",s.beginPath(),s.arc(e-200,e-200,t,0,2*Math.PI,!0),s.closePath(),s.fill(),this},gradient:function(t){var i=document.createElement("canvas"),a=i.getContext("2d"),s=a.createLinearGradient(0,0,0,256);i.width=1,i.height=256;for(var e in t)s.addColorStop(e,t[e]);return a.fillStyle=s,a.fillRect(0,0,1,256),this._grad=a.getImageData(0,0,1,256).data,this},draw:function(t){this._circle||this.radius(this.defaultRadius),this._grad||this.gradient(this.defaultGradient);var i=this._ctx;i.clearRect(0,0,this._width,this._height);for(var a,s=0,e=this._data.length;e>s;s++)a=this._data[s],i.globalAlpha=Math.max(a[2]/this._max,t||.05),i.drawImage(this._circle,a[0]-this._r,a[1]-this._r);var n=i.getImageData(0,0,this._width,this._height);return this._colorize(n.data,this._grad),i.putImageData(n,0,0),this},_colorize:function(t,i){for(var a,s=3,e=t.length;e>s;s+=4)a=4*t[s],a&&(t[s-3]=i[a],t[s-2]=i[a+1],t[s-1]=i[a+2])}},window.simpleheat=t}(),/*
+ (c) 2014, Vladimir Agafonkin
+ Leaflet.heat, a tiny and fast heatmap plugin for Leaflet.
+ https://github.com/Leaflet/Leaflet.heat
+*/
+L.HeatLayer=(L.Layer?L.Layer:L.Class).extend({initialize:function(t,i){this._latlngs=t,L.setOptions(this,i)},setLatLngs:function(t){return this._latlngs=t,this.redraw()},addLatLng:function(t){return this._latlngs.push(t),this.redraw()},setOptions:function(t){return L.setOptions(this,t),this._heat&&this._updateOptions(),this.redraw()},redraw:function(){return!this._heat||this._frame||this._map._animating||(this._frame=L.Util.requestAnimFrame(this._redraw,this)),this},onAdd:function(t){this._map=t,this._canvas||this._initCanvas(),t._panes.overlayPane.appendChild(this._canvas),t.on("moveend",this._reset,this),t.options.zoomAnimation&&L.Browser.any3d&&t.on("zoomanim",this._animateZoom,this),this._reset()},onRemove:function(t){t.getPanes().overlayPane.removeChild(this._canvas),t.off("moveend",this._reset,this),t.options.zoomAnimation&&t.off("zoomanim",this._animateZoom,this)},addTo:function(t){return t.addLayer(this),this},_initCanvas:function(){var t=this._canvas=L.DomUtil.create("canvas","leaflet-heatmap-layer leaflet-layer"),i=L.DomUtil.testProp(["transformOrigin","WebkitTransformOrigin","msTransformOrigin"]);t.style[i]="50% 50%";var a=this._map.getSize();t.width=a.x,t.height=a.y;var s=this._map.options.zoomAnimation&&L.Browser.any3d;L.DomUtil.addClass(t,"leaflet-zoom-"+(s?"animated":"hide")),this._heat=simpleheat(t),this._updateOptions()},_updateOptions:function(){this._heat.radius(this.options.radius||this._heat.defaultRadius,this.options.blur),this.options.gradient&&this._heat.gradient(this.options.gradient),this.options.max&&this._heat.max(this.options.max)},_reset:function(){var t=this._map.containerPointToLayerPoint([0,0]);L.DomUtil.setPosition(this._canvas,t);var i=this._map.getSize();this._heat._width!==i.x&&(this._canvas.width=this._heat._width=i.x),this._heat._height!==i.y&&(this._canvas.height=this._heat._height=i.y),this._redraw()},_redraw:function(){var t,i,a,s,e,n,h,o,r,d=[],_=this._heat._r,l=this._map.getSize(),m=new L.Bounds(L.point([-_,-_]),l.add([_,_])),c=void 0===this.options.max?1:this.options.max,u=void 0===this.options.maxZoom?this._map.getMaxZoom():this.options.maxZoom,f=1/Math.pow(2,Math.max(0,Math.min(u-this._map.getZoom(),12))),g=_/2,p=[],v=this._map._getMapPanePos(),w=v.x%g,y=v.y%g;for(t=0,i=this._latlngs.length;i>t;t++)if(a=this._map.latLngToContainerPoint(this._latlngs[t]),m.contains(a)){e=Math.floor((a.x-w)/g)+2,n=Math.floor((a.y-y)/g)+2;var x=void 0!==this._latlngs[t].alt?this._latlngs[t].alt:void 0!==this._latlngs[t][2]?+this._latlngs[t][2]:1;r=x*f,p[n]=p[n]||[],s=p[n][e],s?(s[0]=(s[0]*s[2]+a.x*r)/(s[2]+r),s[1]=(s[1]*s[2]+a.y*r)/(s[2]+r),s[2]+=r):p[n][e]=[a.x,a.y,r]}for(t=0,i=p.length;i>t;t++)if(p[t])for(h=0,o=p[t].length;o>h;h++)s=p[t][h],s&&d.push([Math.round(s[0]),Math.round(s[1]),Math.min(s[2],c)]);this._heat.data(d).draw(this.options.minOpacity),this._frame=null},_animateZoom:function(t){var i=this._map.getZoomScale(t.zoom),a=this._map._getCenterOffset(t.center)._multiplyBy(-i).subtract(this._map._getMapPanePos());L.DomUtil.setTransform?L.DomUtil.setTransform(this._canvas,a,i):this._canvas.style[L.DomUtil.TRANSFORM]=L.DomUtil.getTranslateString(a)+" scale("+i+")"}}),L.heatLayer=function(t,i){return new L.HeatLayer(t,i)};
+</script>
+<script>
+// ── Data variables (loaded from JSON) ──────────────────────────────────────────
+let COUNTY, DATA, NBHD_CENTERS, TRACT_GEO;
+let SL=[], TL=[], EG=[], EL=[], RPT=[], CO=[], VO=[], MC=[];
+let VET_V=[], VF_V=[], HOH_V=[], PRO_V=[], SP_GEO=[];
+let VF_DENIED=[], VF_INPROC=[], VF_20_G=[], VF_20_D=[];
+let PRO_20=[], VF20_A=[], VF20_D=[], VF20_R=[], VETW=[];
+let PRO_21=[], VF21_A=[], VF21_D=[], VF21_R=[], VETW_21=[];
+const VF_OL=null;
+const OFC=[35.0845,-106.6567];
+let _layersReady=false;
+
+// Show loading state
+document.getElementById("map").style.display="flex";
+document.getElementById("map").style.alignItems="center";
+document.getElementById("map").style.justifyContent="center";
+document.getElementById("map").innerHTML="<div style=\"font-family:system-ui;color:#666;font-size:16px\">Loading map data\u2026</div>";
+
+const _coreP=fetch("data/core.json").then(r=>r.json());
+const _layersP=fetch("data/layers.json").then(r=>r.json());
+_coreP.then(core=>{
+  COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
+  const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
+  init();
+});
+_layersP.then(d=>{
+  SL=d.SL; TL=d.TL; EG=d.EG; EL=d.EL; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
+  VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
+  VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
+  PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
+  PRO_21=d.PRO_21; VF21_A=d.VF21_A; VF21_D=d.VF21_D; VF21_R=d.VF21_R; VETW_21=d.VETW_21;
+  _layersReady=true;
+  if(typeof refreshOL==='function')refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
+});
+
+function init() {
+const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
+const TILES={
+  sat:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri &mdash; Maxar',maxZoom:19}),
+  street:L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap &copy; Carto',maxZoom:19})
+};
+let currentTile='sat';
+TILES.sat.addTo(map);
+L.geoJSON(COUNTY,{style:{fillColor:'none',weight:2,color:'#aaa',fillOpacity:0}}).addTo(map);
+const office=L.marker(OFC,{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ffff00;border:2px solid #333;border-radius:2px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).bindPopup("Assessor's Office").addTo(map);
+
+// ── Color scales ──────────────────────────────────────────────────────────────
+const YRC={2022:'#984ea3',2023:'#2166ac',2024:'#f4a11d',2025:'#1a9850',2026:'#e41a1c'};
+function interp(stops,v){
+  if(v<=stops[0][0])return stops[0][1];
+  if(v>=stops[stops.length-1][0])return stops[stops.length-1][1];
+  for(let i=0;i<stops.length-1;i++){
+    if(v>=stops[i][0]&&v<=stops[i+1][0]){
+      const t=(v-stops[i][0])/(stops[i+1][0]-stops[i][0]);
+      return lerpHex(stops[i][1],stops[i+1][1],t);
+    }
+  }
+  return stops[stops.length-1][1];
+}
+function lerpHex(a,b,t){
+  const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);
+  const r1=pa>>16,g1=(pa>>8)&255,b1=pa&255;
+  const r2=pb>>16,g2=(pb>>8)&255,b2=pb&255;
+  const h=n=>n.toString(16).padStart(2,'0');
+  return'#'+h(Math.round(r1+t*(r2-r1)))+h(Math.round(g1+t*(g2-g1)))+h(Math.round(b1+t*(b2-b1)));
+}
+function grad(stops){return'linear-gradient(to right,'+stops.map(s=>s[1]).join(',')+')';}
+
+
+
+
+const YOY=[[-.1,'#2166ac'],[-.05,'#92c5de'],[0,'#f7f7f7'],[.05,'#f4a582'],[.1,'#d6604d'],[.2,'#b2182b']];
+const CS={
+  demand:[[0,'#ffffcc'],[.15,'#fed976'],[.3,'#feb24c'],[.5,'#fd8d3c'],[.8,'#fc4e2a'],[1.2,'#e31a1c'],[2,'#800026']],
+  calls_per_parcel:[[0,'#f7fbff'],[.05,'#c6dbef'],[.1,'#6baed6'],[.2,'#2171b5'],[.5,'#084594'],[1,'#08306b']],
+  failure:[[0,'#1a9850'],[.05,'#66bd63'],[.1,'#a6d96a'],[.15,'#fee08b'],[.25,'#f46d43'],[.4,'#a50026']],
+  avg_visit_min:[[0,'#f7fbff'],[10,'#c6dbef'],[20,'#6baed6'],[30,'#2171b5'],[45,'#08519c'],[60,'#08306b']],
+  avg_appraised:[[50000,'#f7fcf5'],[150000,'#c7e9c0'],[300000,'#74c476'],[500000,'#238b45'],[800000,'#00441b'],[2000000,'#00250f']],
+  median_yrbuilt:[[1930,'#7f3b08'],[1955,'#b35806'],[1970,'#e08214'],[1985,'#fdb863'],[1998,'#fee0b6'],[2010,'#d8daeb'],[2022,'#542788']],
+  valfreeze:[[0,'#f2f0f7'],[.02,'#dadaeb'],[.05,'#bcbddc'],[.08,'#9e9ac8'],[.12,'#756bb1'],[.2,'#54278f']],
+  pct_vf_denied:[[0,'#fff5f0'],[.2,'#fca082'],[.4,'#fb6a4a'],[.6,'#de2d26'],[.8,'#a50f15'],[1,'#67000d']],
+  pct_hoh:[[0,'#fff5eb'],[.3,'#fdd0a2'],[.5,'#fd8d3c'],[.7,'#d94801'],[.9,'#7f2704']],
+  pct_vet:[[0,'#f7fbff'],[.05,'#deebf7'],[.1,'#9ecae1'],[.2,'#3182bd'],[.35,'#08519c'],[.5,'#08306b']],
+  owner_turnover:[[0,'#f7fbff'],[.05,'#c6dbef'],[.1,'#6baed6'],[.2,'#2171b5'],[.35,'#084594']],
+  hoh_churn:[[0,'#fff7ec'],[.01,'#fee8c8'],[.02,'#fdbb84'],[.04,'#e34a33'],[.08,'#b30000']],
+  sales:[[0,'#ffffcc'],[.02,'#c7e9b4'],[.05,'#7fcdbb'],[.08,'#41b6c4'],[.12,'#1d91c0'],[.2,'#0c2c84']],
+  taxlightning:[[0,'#ffffcc'],[.05,'#fed976'],[.1,'#feb24c'],[.2,'#fd8d3c'],[.3,'#e31a1c'],[.5,'#800026']],
+  chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,chg_25_26:YOY,
+  appr_volatility:[[0,'#f7fbff'],[.02,'#c6dbef'],[.04,'#6baed6'],[.06,'#2171b5'],[.1,'#084594'],[.2,'#08306b']],
+  exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
+    addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
+  volatility:[[0,'#f7f7f7'],[.1,'#d9f0d3'],[.2,'#a6dba0'],[.3,'#5aae61'],[.4,'#1b7837'],[.6,'#00441b']],
+  exstab:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.4,'#00441b'],[.8,'#001a09']],
+  volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']],
+  exemption_stability:[[0,'#fff7ec'],[.03,'#fee8c8'],[.06,'#fdbb84'],[.1,'#fc8d59'],[.2,'#e34a33'],[.4,'#b30000']]
+};
+const LG={
+  demand:{l:'0',h:'2+',n:'contacts/parcel'},
+  calls_per_parcel:{l:'0',h:'1+',n:'calls/parcel'},
+  failure:{l:'0%',h:'40%+',n:'service failure rate'},
+  avg_visit_min:{l:'0',h:'60+ min',n:'avg visit duration'},
+  avg_appraised:{l:'$50k',h:'$2M+',n:'avg appraised value'},
+  median_yrbuilt:{l:'1930',h:'2022',n:'median year built'},
+  valfreeze:{l:'0%',h:'20%+',n:'value freeze rate'},
+  pct_vf_denied:{l:'0%',h:'100%',n:'value freeze denial rate'},
+  pct_hoh:{l:'0%',h:'90%+',n:'HOH exemption rate'},
+  pct_vet:{l:'0%',h:'50%+',n:'veteran exemption rate'},
+  owner_turnover:{l:'0%',h:'35%+',n:'owner turnover rate'},
+  hoh_churn:{l:'0%',h:'8%+',n:'HOH exemption churn'},
+  sales:{l:'0%',h:'20%+',n:'recent sale rate'},
+  taxlightning:{l:'0%',h:'50%+',n:'sale contact rate'},
+  chg_20_21:{l:'\u221210%',h:'+20%',n:'value change 2020\u219221 (median +3.6%)'},
+  chg_21_22:{l:'\u221210%',h:'+20%',n:'value change 2021\u219222 (median +3.6%)'},
+  chg_22_23:{l:'\u221210%',h:'+20%',n:'value change 2022\u219223 (median +1.9%)'},
+  chg_23_24:{l:'\u221210%',h:'+20%',n:'value change 2023\u219224 (median +5.3%)'},
+  chg_24_25:{l:'\u221210%',h:'+20%',n:'value change 2024\u219225 (median +2.2%)'},
+  chg_25_26:{l:'\u221210%',h:'+20%',n:'value change 2025\u219226 (median +2.5%)'},
+  appr_volatility:{l:'0%',h:'20%+',n:'appraisal volatility (std dev of YoY changes 2020–26)'},
+  exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOHΔ|+|VETΔ| 2020 vs 2026)'},
+    addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
+  volatility:{l:'0%',h:'60%+',n:'cumulative appraisal volatility (2020\u21922026)'},
+  exstab:{l:'0%',h:'80%+',n:'exemption stability delta (HOH+VET 2020 vs 2026)'},
+  volatility:{l:'0%',h:'80%+',n:'appraisal volatility (sum |YoY| 2020\u219226)'},
+  exemption_stability:{l:'0%',h:'40%+',n:'exemption instability (|\u0394HOH|+|\u0394VET| 2020 vs 2026)'}
+};
+
+// Map layer key → property field used for coloring
+const LAYER_FIELD={
+  demand:'contacts_per_parcel',calls_per_parcel:'calls_per_parcel',
+  failure:'failure_rate',avg_visit_min:'avg_visit_min',
+  avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',
+  valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',
+  pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover',
+  hoh_churn:'hoh_churn',sales:'pct_recent_sale',taxlightning:'sale_contact_rate',
+  chg_20_21:'chg_20_21',appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',
+  chg_24_25:'chg_24_25',chg_25_26:'chg_25_26',
+  volatility:'volatility',exstab:'exstab'
+};
+
+let _visFeatCache=null, _visFeatKey=null;
+function getVisibleFeatures(){
+  const key=hideCommercial?'h':'a';
+  if(_visFeatKey===key&&_visFeatCache)return _visFeatCache;
+  _visFeatCache=DATA.features.filter(f=>!(hideCommercial&&f.properties.is_commercial));
+  _visFeatKey=key;
+  return _visFeatCache;
+}
+
+function formatStat(v,layer){
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','volatility','exstab'];
+  if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
+  if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
+  if(layer==='avg_visit_min')return v.toFixed(1)+' min';
+  if(layer==='median_yrbuilt')return Math.round(v).toString();
+  return v.toFixed(2);
+}
+
+function updateStatsBar(layer){
+  const bar=document.getElementById('statsBar');
+  const feats=getVisibleFeatures();
+  const totNbhd=feats.length;
+  let totParcels=0,totContacts=0,totCalls=0,totFailures=0;
+  for(let i=0;i<feats.length;i++){const p=feats[i].properties;totParcels+=(p.parcels||0);totContacts+=(p.total_contacts||0);totCalls+=(p.total_calls||0);totFailures+=(p.total_failures||0);}
+
+  let rangeHtml='';
+  const field=LAYER_FIELD[layer];
+  if(field){
+    const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
+    if(vals.length){
+      let mn=vals[0],mx=vals[0],sum=0;
+      for(let i=0;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];sum+=vals[i];}
+      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(mn,layer)+' \u2013 '+formatStat(mx,layer)+' (avg '+formatStat(sum/vals.length,layer)+')</span>';
+    }
+  }
+  bar.innerHTML=
+    '<span><b>'+totNbhd.toLocaleString()+'</b> nbhds</span>'+
+    '<span><b>'+totParcels.toLocaleString()+'</b> parcels</span>'+
+    '<span><b>'+totContacts.toLocaleString()+'</b> contacts</span>'+
+    '<span><b>'+totCalls.toLocaleString()+'</b> calls</span>'+
+    '<span><b>'+totFailures.toLocaleString()+'</b> failures</span>'+
+    rangeHtml;
+  // Update sidebar note to reflect filtered counts
+  const note=document.getElementById('sidebarNote');
+  if(note){
+    const allNbhd=DATA.features.length;
+    const prefix=hideCommercial?totNbhd+' of '+allNbhd+' neighborhoods (commercial hidden)':allNbhd+' neighborhoods';
+    note.innerHTML=prefix+' &middot; 176 census tracts &middot; '+totParcels.toLocaleString()+' parcels (2026)<br>63,890 visitors &middot; 8,700 geocoded &middot; Tax rolls 2020&ndash;2026';
+  }
+}
+
+function updateLegendRange(layer){
+  if(swipeActive)return; // split mode has its own legend
+  const field=LAYER_FIELD[layer];
+  if(!field)return;
+  const feats=getVisibleFeatures();
+  const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
+  if(!vals.length)return;
+  let mn=vals[0],mx=vals[0];
+  for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
+  document.getElementById('lL').textContent=formatStat(mn,layer);
+  document.getElementById('lH').textContent=formatStat(mx,layer);
+}
+
+// ── Tooltip with sparkline ────────────────────────────────────────────────────
+const info=L.control({position:'topleft'});
+info.onAdd=function(){this._div=L.DomUtil.create('div','info');this.update();return this._div;};
+const _tooltipCache={};
+info._buildHtml=function(p){
+  const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
+  const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
+  const min=v=>v?v.toFixed(1)+' min':'\u2014';
+  const vals=[p.chg_20_21||0, p.chg_21_22||0, p.chg_22_23||0, p.chg_23_24||0, p.chg_24_25||0, p.chg_25_26||0];
+  const labs=["'20→'21","'21→'22","'22→'23","'23→'24","'24→'25","'25→'26"];
+  let maxAbs=0.01;for(let i=0;i<6;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
+  const bw=30,bh=40,svgW=bw*6,mid=50;
+  const bars=vals.map((v,i)=>{
+    const h=Math.round(Math.abs(v)/maxAbs*bh);
+    const col=v>=0?'#d6604d':'#2166ac';
+    const pct_=(v>=0?'+':'')+(v*100).toFixed(1)+'%';
+    const x=i*bw, cx=x+bw/2;
+    const barY=v>=0?mid-h:mid;
+    return '<g>'+
+      '<rect x="'+(x+4)+'" y="'+barY+'" width="'+(bw-8)+'" height="'+h+'" rx="2" fill="'+col+'"/>'+
+      '<text x="'+cx+'" y="'+(v>=0?barY-3:barY+h+10)+'" text-anchor="middle" font-size="9" font-weight="600" fill="'+col+'">'+pct_+'</text>'+
+      '<text x="'+cx+'" y="'+(mid+bh+16)+'" text-anchor="middle" font-size="8" fill="#999">'+labs[i]+'</text>'+
+      '</g>';
+  }).join('');
+  const spark='<svg width="'+svgW+'" height="'+(mid+bh+22)+'" style="display:block;margin:6px 0">'+
+    '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
+    bars+'</svg>';
+  return '<h4>Nbhd '+p.nbhd+(p.is_commercial?' <span style="font-size:10px;color:#888">[commercial]</span>':'')+'</h4>'+
+    '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
+    '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
+    '<div class="s"><span>Failures</span><span class="v">'+((p.total_failures||0).toLocaleString())+'</span></div>'+
+    '<div class="s"><span>Contacts/parcel</span><span class="v">'+((p.contacts_per_parcel||0).toFixed(2))+'</span></div>'+
+    '<div class="s"><span>Calls/parcel</span><span class="v">'+((p.calls_per_parcel||0).toFixed(2))+'</span></div>'+
+    '<div class="s"><span>Failure rate</span><span class="v">'+pct(p.failure_rate)+'</span></div>'+
+    '<div class="s"><span>Avg visit</span><span class="v">'+min(p.avg_visit_min)+'</span></div>'+
+    '<div class="s"><span>Median value 2025</span><span class="v">'+dlr(p.median_val_25)+'</span></div>'+
+    '<div class="s"><span>Yr built</span><span class="v">'+(p.median_yrbuilt||'\u2014')+'</span></div>'+
+    '<div class="s"><span>Value freeze</span><span class="v">'+pct(p.pct_val_freeze)+'</span></div>'+
+    '<div class="s"><span>VF denial rate</span><span class="v">'+pct(p.pct_vf_denied)+'</span></div>'+
+    '<div class="s"><span>HOH rate</span><span class="v">'+pct(p.pct_hoh)+'</span></div>'+
+    '<div class="s"><span>Vet rate</span><span class="v">'+pct(p.pct_vet)+'</span></div>'+
+    '<div class="s"><span>Owner turnover</span><span class="v">'+pct(p.owner_turnover)+'</span></div>'+
+    '<div style="font-size:10px;color:#888;margin-top:4px">Value change by year:</div>'+spark+
+    '<div class="s"><span>Volatility</span><span class="v">'+(p.appr_volatility!=null?(p.appr_volatility*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
+    '<div class="s"><span>Exemp drift</span><span class="v">'+(p.exemp_drift!=null?(p.exemp_drift*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
+        '<div class="s"><span>Parcels</span><span class="v">'+((p.parcels||0).toLocaleString())+'</span></div>'+
+    (p.volatility!=null?'<div class="s"><span>Volatility (20\u219226)</span><span class="v">'+(p.volatility*100).toFixed(1)+'%</span></div>':'')+
+    (p.hoh_20!=null?'<div class="s"><span>HOH 2020\u21922026</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
+    (p.vet_20!=null?'<div class="s"><span>VET 2020\u21922026</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'');
+};
+info.update=function(p){
+  if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
+  const key=p.nbhd;
+  if(!_tooltipCache[key])_tooltipCache[key]=this._buildHtml(p);
+  this._div.innerHTML=_tooltipCache[key];
+};
+info.addTo(map);
+
+// Precompute tract density stats for percentile ranking
+const _tractCounts=TRACT_GEO.features.map(f=>f.properties.address_count||0).sort((a,b)=>a-b);
+const _tractTotal=_tractCounts.reduce((s,v)=>s+v,0);
+const _tractAvg=Math.round(_tractTotal/_tractCounts.length);
+function tractPctile(v){let lo=0,hi=_tractCounts.length;while(lo<hi){const mid=(lo+hi)>>>1;if(_tractCounts[mid]<=v)lo=mid+1;else hi=mid;}return Math.round(lo/_tractCounts.length*100);}
+
+const tractInfo=L.control({position:'topleft'});
+tractInfo.onAdd=function(){this._div=L.DomUtil.create('div','info');this._div.style.display='none';return this._div;};
+tractInfo.update=function(p){
+  if(!p){this._div.style.display='none';return;}
+  this._div.style.display='block';
+  const cnt=p.address_count||0;
+  const pct=tractPctile(cnt);
+  const pctOfTotal=(_tractTotal>0?((cnt/_tractTotal)*100).toFixed(1):'0')+'%';
+  this._div.innerHTML='<h4>'+p.NAMELSAD+'</h4>'+
+    '<div class="s"><span>Geocoded addresses</span><span class="v">'+cnt.toLocaleString()+'</span></div>'+
+    '<div class="s"><span>Density percentile</span><span class="v">'+pct+'th</span></div>'+
+    '<div class="s"><span>Share of all addresses</span><span class="v">'+pctOfTotal+'</span></div>'+
+    '<div class="s"><span>County avg per tract</span><span class="v">'+_tractAvg.toLocaleString()+'</span></div>';
+};
+tractInfo.addTo(map);
+
+// ── Choropleth layers ─────────────────────────────────────────────────────────
+let NBL='demand', TRACTL='none', FILL_OPAC=0.72, hideCommercial=false;
+let nbhdLayer=null, tractLayer=null;
+let swipeActive=false;
+
+function getNbhdColor(p, override){
+  const layer=override||NBL;
+  if(hideCommercial && p.is_commercial)return'transparent';
+  if(layer==='none')return'#e0e0e0';
+  if(layer==='demand')return interp(CS.demand,p.contacts_per_parcel||0);
+  if(layer==='calls_per_parcel')return interp(CS.calls_per_parcel,p.calls_per_parcel||0);
+  if(layer==='failure')return(p.total_calls>=5)?interp(CS.failure,p.failure_rate||0):'#f0f0f0';
+  if(layer==='avg_visit_min')return(p.avg_visit_min>0)?interp(CS.avg_visit_min,p.avg_visit_min):'#f0f0f0';
+  if(layer==='avg_appraised')return interp(CS.avg_appraised,p.avg_appraised||0);
+  if(layer==='median_yrbuilt')return(p.median_yrbuilt>0)?interp(CS.median_yrbuilt,p.median_yrbuilt):'#f0f0f0';
+  if(layer==='valfreeze')return interp(CS.valfreeze,p.pct_val_freeze||0);
+  if(layer==='pct_vf_denied')return(p.pct_vf_denied>0)?interp(CS.pct_vf_denied,p.pct_vf_denied):'#f0f0f0';
+  if(layer==='pct_hoh')return interp(CS.pct_hoh,p.pct_hoh||0);
+  if(layer==='pct_vet')return interp(CS.pct_vet,p.pct_vet||0);
+  if(layer==='owner_turnover')return interp(CS.owner_turnover,p.owner_turnover||0);
+  if(layer==='hoh_churn')return interp(CS.hoh_churn,p.hoh_churn||0);
+  if(layer==='sales')return interp(CS.sales,p.pct_recent_sale||0);
+  if(layer==='taxlightning')return(p.recent_sales>=3)?interp(CS.taxlightning,p.sale_contact_rate||0):'#f0f0f0';
+  if(CS[layer])return interp(CS[layer],p[layer]||0);
+  return'#e0e0e0';
+}
+function nbhdStyle(f){
+  const hidden=hideCommercial&&f.properties.is_commercial;
+  return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
+}
+function hiNbhd(e){e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
+function rhNbhd(e){nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
+function renderNbhd(){
+  if(NBL==='none'){
+    if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
+    updateStatsBar(NBL);return;
+  }
+  if(nbhdLayer){
+    nbhdLayer.setStyle(nbhdStyle);
+  }else{
+    nbhdLayer=L.geoJSON(DATA,{style:nbhdStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd})}).addTo(map);
+  }
+  if(!swipeActive){
+    const g=LG[NBL];
+    document.getElementById('lN').textContent=g.n;
+    document.getElementById('lG').style.background=grad(CS[NBL]);
+    updateLegendRange(NBL);
+  }
+  updateStatsBar(NBL);
+}
+
+function tractStyle(f){return{fillColor:interp(CS.addr_density,f.properties.address_count||0),weight:1.5,opacity:.8,color:'#555',fillOpacity:.55};}
+function hiTract(e){e.target.setStyle({weight:2.5,color:'#222',fillOpacity:.75});e.target.bringToFront();tractInfo.update(e.target.feature.properties);}
+function rhTract(e){tractLayer&&tractLayer.resetStyle(e.target);tractInfo.update();}
+function renderTract(){
+  if(tractLayer){map.removeLayer(tractLayer);tractLayer=null;}
+  if(TRACTL==='none'){tractInfo._div.style.display='none';return;}
+  tractLayer=L.geoJSON(TRACT_GEO,{style:tractStyle,onEachFeature:(f,l)=>l.on({mouseover:hiTract,mouseout:rhTract})}).addTo(map);
+  const g=LG.addr_density;
+  document.getElementById('lL').textContent=g.l;
+  document.getElementById('lH').textContent=g.h;
+  document.getElementById('lN').textContent=g.n;
+  document.getElementById('lG').style.background=grad(CS.addr_density);
+}
+
+renderNbhd();
+
+// ── Swipe compare ─────────────────────────────────────────────────────────────
+let swipePos=50, swipeDragging=false;
+let swipeLayerL=null, swipeLayerR=null;
+
+function buildSwipeLayer(layerName){
+  return L.geoJSON(DATA,{
+    style:f=>({fillColor:getNbhdColor(f.properties,layerName),weight:.5,opacity:.5,color:'#fff',fillOpacity:FILL_OPAC}),
+    onEachFeature:(f,l)=>l.on({mouseover:e=>{info.update(f.properties);},mouseout:()=>info.update()})
+  });
+}
+
+let _swipeDocListeners=[];
+function createDivider(){
+  const d=document.getElementById('swipeDivider');
+  if(d)return;
+  const overlay=document.getElementById('swipeOverlay');
+  overlay.style.display='block';
+  const div=document.createElement('div');
+  div.id='swipeDivider';
+  div.className='swipe-divider';
+  div.style.position='fixed';
+  div.style.pointerEvents='all';
+  const mapRect=document.getElementById('map').getBoundingClientRect();
+  div.style.top=mapRect.top+'px';
+  div.style.height=mapRect.height+'px';
+  div.style.left=(mapRect.left+mapRect.width*swipePos/100)+'px';
+  div.innerHTML='<div class="swipe-handle">\u2194</div>';
+  overlay.appendChild(div);
+  // Floating pane labels
+  const lblL=document.createElement('div');lblL.id='swipeLabelL';lblL.className='swipe-label';
+  const lblR=document.createElement('div');lblR.id='swipeLabelR';lblR.className='swipe-label';
+  overlay.appendChild(lblL);overlay.appendChild(lblR);
+  positionSwipeLabels();
+
+  function updateDivPos(clientX){
+    const rect=document.getElementById('map').getBoundingClientRect();
+    swipePos=Math.max(5,Math.min(95,(clientX-rect.left)/rect.width*100));
+    div.style.left=(rect.left+rect.width*swipePos/100)+'px';
+    applyClip();positionSwipeLabels();
+  }
+  const onMouseMove=e=>{if(!swipeDragging)return;updateDivPos(e.clientX);};
+  const onMouseUp=()=>{if(swipeDragging){swipeDragging=false;map.dragging.enable();}};
+  const onTouchMove=e=>{if(!swipeDragging)return;updateDivPos(e.touches[0].clientX);};
+  const onTouchEnd=()=>{if(swipeDragging){swipeDragging=false;map.dragging.enable();}};
+  div.addEventListener('mousedown',e=>{swipeDragging=true;map.dragging.disable();e.preventDefault();});
+  document.addEventListener('mousemove',onMouseMove);
+  document.addEventListener('mouseup',onMouseUp);
+  div.addEventListener('touchstart',e=>{swipeDragging=true;map.dragging.disable();e.preventDefault();},{passive:false});
+  document.addEventListener('touchmove',onTouchMove,{passive:false});
+  document.addEventListener('touchend',onTouchEnd);
+  _swipeDocListeners=[['mousemove',onMouseMove],['mouseup',onMouseUp],['touchmove',onTouchMove],['touchend',onTouchEnd]];
+}
+
+function applyClip(){
+  const mapEl=document.getElementById('map');
+  const mapW=mapEl.offsetWidth, mapH=mapEl.offsetHeight;
+  const splitPx=Math.round(mapW*swipePos/100);
+  // Account for map pane transform offset so clip stays aligned on pan/zoom
+  const pos=map._mapPane?L.DomUtil.getPosition(map._mapPane):{x:0,y:0};
+  const t=-pos.y, r=-pos.x+splitPx, b=-pos.y+mapH, lx=-pos.x;
+  const clipL='rect('+t+'px,'+r+'px,'+b+'px,'+lx+'px)';
+  const clipR='rect('+t+'px,'+(-pos.x+mapW)+'px,'+b+'px,'+r+'px)';
+  const pL=map.getPane('swipeLeft');
+  const pR=map.getPane('swipeRight');
+  if(pL)pL.style.clip=clipL;
+  if(pR)pR.style.clip=clipR;
+}
+
+function updateSwipeClip(){applyClip();}
+
+function positionSwipeLabels(){
+  const lblL=document.getElementById('swipeLabelL');
+  const lblR=document.getElementById('swipeLabelR');
+  if(!lblL||!lblR)return;
+  const rect=document.getElementById('map').getBoundingClientRect();
+  const splitPx=rect.width*swipePos/100;
+  // Left label: centered in left half
+  lblL.style.top=rect.top+'px';
+  lblL.style.left=(rect.left+splitPx/2)+'px';
+  lblL.style.transform='translateX(-50%)';
+  // Right label: centered in right half
+  lblR.style.top=rect.top+'px';
+  lblR.style.left=(rect.left+splitPx+(rect.width-splitPx)/2)+'px';
+  lblR.style.transform='translateX(-50%)';
+}
+
+function enableSwipe(){
+  if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
+  // Create panes with correct z-index
+  if(!map.getPane('swipeLeft')){
+    map.createPane('swipeLeft');
+    map.getPane('swipeLeft').style.zIndex=400;
+  }
+  if(!map.getPane('swipeRight')){
+    map.createPane('swipeRight');
+    map.getPane('swipeRight').style.zIndex=401;
+  }
+  const lName=document.getElementById('swipeLeft').value;
+  const rName=document.getElementById('swipeRight').value;
+  // Use canvas renderers — SVG renderer overflows pane bounds and breaks clip
+  const canvasL=L.canvas({pane:'swipeLeft'});
+  const canvasR=L.canvas({pane:'swipeRight'});
+  swipeLayerL=L.geoJSON(DATA,{
+    pane:'swipeLeft',renderer:canvasL,
+    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,lName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
+  }).addTo(map);
+  swipeLayerR=L.geoJSON(DATA,{
+    pane:'swipeRight',renderer:canvasR,
+    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,rName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
+  }).addTo(map);
+  createDivider();
+  // Defer clip application until layers are rendered
+  setTimeout(applyClip,200);map.on("move zoom moveend zoomend",applyClip);
+  const gL=LG[lName]||LG.demand, gR=LG[rName]||LG.demand;
+  const selL=document.getElementById('swipeLeft'), selR=document.getElementById('swipeRight');
+  const nameL=selL.options[selL.selectedIndex].text, nameR=selR.options[selR.selectedIndex].text;
+  // Set floating map labels
+  const lblL=document.getElementById('swipeLabelL'), lblR=document.getElementById('swipeLabelR');
+  if(lblL)lblL.textContent='\u25C0 '+nameL;
+  if(lblR)lblR.textContent=nameR+' \u25B6';
+  positionSwipeLabels();
+  // Compute dynamic ranges for visible features
+  const feats=getVisibleFeatures();
+  const fL=LAYER_FIELD[lName], fR=LAYER_FIELD[rName];
+  const rangeLabel=(field,layer)=>{
+    if(!field)return{lo:gL.l,hi:gL.h};
+    const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
+    if(!vals.length)return{lo:'—',hi:'—'};
+    let mn=vals[0],mx=vals[0];for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
+    return{lo:formatStat(mn,layer),hi:formatStat(mx,layer)};
+  };
+  const rL=rangeLabel(fL,lName), rR=rangeLabel(fR,rName);
+  const lb=document.getElementById('lb');
+  lb.style.flexDirection='column';lb.style.alignItems='stretch';
+  lb.innerHTML=
+    '<div style="display:flex;align-items:center;gap:6px;padding:2px 0"><span style="font-weight:700;font-size:11px;color:#185FA5;min-width:60px">\u25C0 Left</span><span>'+rL.lo+'</span><div class="g" style="width:120px;height:10px;border-radius:3px;background:'+grad(CS[lName]||CS.demand)+'"></div><span>'+rL.hi+'</span><span style="margin-left:2px;font-weight:600">'+gL.n+'</span></div>'+
+    '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;border-top:1px solid rgba(0,0,0,.1)"><span style="font-weight:700;font-size:11px;color:#d6604d;min-width:60px">Right \u25B6</span><span>'+rR.lo+'</span><div class="g" style="width:120px;height:10px;border-radius:3px;background:'+grad(CS[rName]||CS.demand)+'"></div><span>'+rR.hi+'</span><span style="margin-left:2px;font-weight:600">'+gR.n+'</span></div>';
+  updateStatsBar(lName);
+}
+
+function disableSwipe(){
+  if(swipeLayerL){map.removeLayer(swipeLayerL);swipeLayerL=null;}
+  if(swipeLayerR){map.removeLayer(swipeLayerR);swipeLayerR=null;}
+  const pL=map.getPane('swipeLeft');
+  if(pL)pL.style.clip='';
+  const pR=map.getPane('swipeRight');
+  if(pR)pR.style.clip='';
+
+  map.off('move zoom moveend zoomend',applyClip);
+  _swipeDocListeners.forEach(([evt,fn])=>document.removeEventListener(evt,fn));
+  _swipeDocListeners=[];
+  const d=document.getElementById('swipeDivider');
+  if(d)d.remove();
+  const lblL=document.getElementById('swipeLabelL');if(lblL)lblL.remove();
+  const lblR=document.getElementById('swipeLabelR');if(lblR)lblR.remove();
+  document.getElementById('swipeOverlay').style.display='none';
+  // Restore original legend structure
+  const lb=document.getElementById('lb');
+  lb.style.flexDirection='';lb.style.alignItems='center';
+  lb.innerHTML='<span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
+  renderNbhd();
+}
+
+document.getElementById('swipeMode').addEventListener('change',e=>{
+  swipeActive=e.target.checked;
+  if(swipeActive)enableSwipe(); else disableSwipe();
+});
+document.getElementById('swipeLeft').addEventListener('change',()=>{if(swipeActive){disableSwipe();enableSwipe();}});
+document.getElementById('swipeRight').addEventListener('change',()=>{if(swipeActive){disableSwipe();enableSwipe();}});
+
+// ── Opacity slider ─────────────────────────────────────────────────────────────
+let _opacRAF=null;
+document.getElementById('opacSlider').addEventListener('input',e=>{
+  FILL_OPAC=parseInt(e.target.value)/100;
+  document.getElementById('opacVal').textContent=e.target.value+'%';
+  if(_opacRAF)return;
+  _opacRAF=requestAnimationFrame(()=>{
+    if(nbhdLayer)nbhdLayer.setStyle({fillOpacity:FILL_OPAC});
+    if(swipeLayerL)swipeLayerL.setStyle({fillOpacity:FILL_OPAC});
+    if(swipeLayerR)swipeLayerR.setStyle({fillOpacity:FILL_OPAC});
+    _opacRAF=null;
+  });
+});
+
+// ── Commercial filter ─────────────────────────────────────────────────────────
+document.getElementById('hideCommercial').addEventListener('change',e=>{
+  hideCommercial=e.target.checked;
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+});
+
+// ── Search by neighborhood ────────────────────────────────────────────────────
+document.getElementById('searchBox').addEventListener('keydown',e=>{
+  if(e.key!=='Enter')return;
+  const n=parseInt(e.target.value);
+  if(isNaN(n))return;
+  const c=NBHD_CENTERS[n];
+  if(c){map.flyTo(c,14,{duration:1});}
+  else{e.target.style.borderColor='#e41a1c';setTimeout(()=>e.target.style.borderColor='',1000);}
+});
+
+// ── Point layer helpers ───────────────────────────────────────────────────────
+let heatMode=false;
+let activeYrs=new Set([2023,2024,2025]);
+let visActiveYrs=new Set([2022,2023,2024,2025,2026]);
+const heatLayers={};
+
+function makeCluster(pts,color,radius,popFn){
+  const grp=L.markerClusterGroup({maxClusterRadius:40,showCoverageOnHover:false,
+    chunkedLoading:true,chunkInterval:100,chunkDelay:10,
+    iconCreateFunction:c=>L.divIcon({html:'<div style="background:'+color+';color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;border:2px solid rgba(255,255,255,.8)">'+c.getChildCount()+'</div>',className:'',iconSize:[32,32]})
+  });
+  const markers=pts.map(p=>{
+    const m=L.circleMarker([p.la,p.ln],{radius:radius||3.5,fillColor:YRC[p.y]||color,color:'#fff',weight:.6,fillOpacity:.75});
+    if(popFn)m.bindPopup(popFn(p));
+    return m;
+  });
+  grp.addLayers(markers);
+  return grp;
+}
+
+function makeHeat(pts,key){
+  // Use meaningful intensity weights when available
+  let maxW=1;
+  const weighted=pts.map(p=>{
+    let w=1;
+    if(key==='rpt'&&p.c)w=p.c;
+    else if(['vet_v','vf_v','hoh_v','pro_v','sp_geo'].includes(key)&&p.d)w=p.d;
+    else if(key==='sl'&&p.p)w=Math.log10(Math.max(p.p,1));
+    else if(['vf_denied','vf_inproc'].includes(key)&&p.v)w=Math.log10(Math.max(p.v,1));
+    return [p.la,p.ln,w];
+  });
+  for(let i=0;i<weighted.length;i++){if(weighted[i][2]>maxW)maxW=weighted[i][2];}
+  return L.heatLayer(weighted,{radius:25,blur:20,maxZoom:14,max:maxW,gradient:{0.4:'blue',0.65:'lime',1:'red'}});
+}
+
+function buildLayer(key){
+  const defs={
+    vet_v:{src:()=>VET_V.filter(p=>visActiveYrs.has(p.y)),col:'#2171b5',r:3.5,pop:p=>p.y+' veteran exemption: '+p.d.toFixed(1)+' min'},
+    vf_v:{src:()=>VF_V.filter(p=>visActiveYrs.has(p.y)),col:'#D85A30',r:3.5,pop:p=>p.y+' value freeze: '+p.d.toFixed(1)+' min'},
+    hoh_v:{src:()=>HOH_V.filter(p=>visActiveYrs.has(p.y)),col:'#6a51a3',r:3.5,pop:p=>p.y+' HOH exemption: '+p.d.toFixed(1)+' min'},
+    pro_v:{src:()=>PRO_V.filter(p=>visActiveYrs.has(p.y)),col:'#b10026',r:5,pop:p=>p.y+' protest: '+p.d.toFixed(1)+' min'},
+    sp_geo:{src:()=>SP_GEO.filter(p=>visActiveYrs.has(p.y)),col:'#e6ab02',r:4,pop:p=>p.y+' Spanish-speaking: '+p.d.toFixed(1)+' min'},
+    sl:{src:()=>SL.filter(p=>activeYrs.has(p.y)),col:'#888',r:4.5,pop:p=>p.y+' sale \u2192 '+p.d+'d later\n$'+p.p.toLocaleString()},
+    tl:{src:()=>TL.filter(p=>activeYrs.has(p.y)),col:'#e31a1c',r:4,pop:p=>p.y+' owner change'},
+    eg:{src:()=>EG.filter(p=>activeYrs.has(p.y)),col:'#1D9E75',r:4,pop:p=>p.y+' exemption gained'+(p.h?' \u00b7 HOH':'')+(p.v?' \u00b7 VET':'')},
+    el:{src:()=>EL.filter(p=>activeYrs.has(p.y)),col:'#d6604d',r:4,pop:p=>p.y+' exemption lost'+(p.h?' \u00b7 HOH':'')+(p.v?' \u00b7 VET':'')},
+    vf_denied:{src:()=>VF_DENIED,col:'#d73027',r:3,pop:p=>'VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vf_inproc:{src:()=>VF_INPROC,col:'#fdae61',r:5,pop:p=>'VF in process\n$'+p.v.toLocaleString()},
+    vf20_a:{src:()=>VF20_A,col:'#2166ac',r:3.5,pop:p=>'VF 2020 active\n$'+(p.v||0).toLocaleString()},
+    vf20_d:{src:()=>VF20_D,col:'#d73027',r:3,pop:p=>'VF 2020 denied\n$'+(p.v||0).toLocaleString()},
+    vf20_r:{src:()=>VF20_R,col:'#999',r:3,pop:p=>'VF 2020 removed\n$'+(p.v||0).toLocaleString()},
+        rpt:{src:()=>RPT,col:'#b10026',r:4,pop:p=>p.c+' calls'},
+    co:{src:()=>CO,col:'#185FA5',r:2.5,pop:null},
+    vo:{src:()=>VO,col:'#1D9E75',r:2.5,pop:null},
+    mc:{src:()=>MC,col:'#BA7517',r:3,pop:null},
+    pro_20:{src:()=>PRO_20,col:'#e31a1c',r:5,pop:p=>'2020 protest\nHearing: '+p.ht+'\nStatus: '+p.st+'\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
+    vf_20_g:{src:()=>VF_20_G,col:'#1a9850',r:3,pop:p=>'2020 VF granted\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vf_20_d:{src:()=>VF_20_D,col:'#d73027',r:3,pop:p=>'2020 VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vetw:{src:()=>VETW,col:'#4a1486',r:4,pop:p=>'Disabled vet waiver\n$'+p.v.toLocaleString()},
+    pro_21:{src:()=>PRO_21,col:'#e31a1c',r:5,pop:p=>'2021 protest\nHearing: '+p.ht+'\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
+    vf21_a:{src:()=>VF21_A,col:'#1a9850',r:3,pop:p=>'2021 VF active\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vf21_d:{src:()=>VF21_D,col:'#d73027',r:3,pop:p=>'2021 VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vf21_r:{src:()=>VF21_R,col:'#999',r:3,pop:p=>'2021 VF removed\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vetw_21:{src:()=>VETW_21,col:'#4a1486',r:4,pop:p=>'2021 disabled vet waiver\n$'+p.v.toLocaleString()},
+  };
+  const d=defs[key];
+  if(!d)return L.layerGroup([]);
+  const pts=d.src();
+  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg','el','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
+    return makeHeat(pts,key);
+  }
+  return makeCluster(pts,d.col,d.r,d.pop);
+}
+
+const RL=L.layerGroup([2,5,10,15].map(r=>L.circle([35.084,-106.651],{radius:r*1609.34,color:'#666',weight:1,fill:false,dashArray:'4 4'}).bindTooltip(r+' mi')));
+
+let OL={rings:RL};
+function getOL(k){if(!OL[k])OL[k]=buildLayer(k);return OL[k];}
+
+function refreshOL(keys){
+  keys.forEach(k=>{
+    if(!OL[k]||!map.hasLayer(OL[k]))return;
+    map.removeLayer(OL[k]);
+    OL[k]=buildLayer(k);
+    OL[k].addTo(map);
+  });
+}
+
+// ── Heatmap toggle ────────────────────────────────────────────────────────────
+document.getElementById('heatMode').addEventListener('change',e=>{
+  heatMode=e.target.checked;
+  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg','el','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
+});
+
+// ── Year filters ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.yrf').forEach(cb=>cb.addEventListener('change',()=>{
+  activeYrs=new Set([...document.querySelectorAll('.yrf:checked')].map(c=>parseInt(c.value)));
+  refreshOL(['sl','tl','eg','el']);
+}));
+document.querySelectorAll('.visyrf').forEach(cb=>cb.addEventListener('change',()=>{
+  visActiveYrs=new Set([...document.querySelectorAll('.visyrf:checked')].map(c=>parseInt(c.value)));
+  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo']);
+}));
+
+// ── Layer toggles ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
+  const k=e.target.dataset.layer;
+  if(e.target.checked)getOL(k).addTo(map); else if(OL[k])map.removeLayer(OL[k]);
+}));
+
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
+  NBL=e.target.value;
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+}));
+document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',e=>{
+  TRACTL=e.target.value; renderTract();
+}));
+document.getElementById('officeToggle').addEventListener('change',e=>{
+  if(e.target.checked)office.addTo(map);else map.removeLayer(office);
+});
+
+// ── Satellite toggle ──────────────────────────────────────────────────────────
+document.getElementById('tileToggle').addEventListener('click',function(){
+  if(currentTile==='sat'){
+    map.removeLayer(TILES.sat);TILES.street.addTo(map);
+    currentTile='street';
+    document.getElementById('tileIcon').textContent='\ud83d\uddef\ufe0f';
+    document.getElementById('tileLabel').textContent='Satellite';
+  }else{
+    map.removeLayer(TILES.street);TILES.sat.addTo(map);
+    currentTile='sat';
+    document.getElementById('tileIcon').textContent='\ud83d\uddfa\ufe0f';
+    document.getElementById('tileLabel').textContent='Street view';
+  }
+});
+
+// ── Panel toggle ──────────────────────────────────────────────────────────────
+let ctrlOpen=true;
+document.getElementById('ctrlToggle').addEventListener('click',function(){
+  ctrlOpen=!ctrlOpen;
+  document.querySelector('.ctrl').style.display=ctrlOpen?'block':'none';
+  this.textContent=ctrlOpen?'\u276e':'\u276f';
+  this.style.right=ctrlOpen?'296px':'10px';
+});
+} // end init()
+</script></body></html>
