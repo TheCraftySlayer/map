@@ -196,59 +196,53 @@ def join_roll_with_coords(roll_records, coord_lookup):
 
 
 def build_point_layers_from_roll(joined_by_yr):
-    """Build point layers from tax roll + coords (no enriched data needed)."""
+    """Build point layers from tax roll + coords (no enriched data needed).
+    Limits to last 5 years to keep file size manageable."""
     layers = {}
 
-    all_recs = []
-    for yr, recs in joined_by_yr.items():
+    # Only use recent years for point layers
+    all_years = sorted(joined_by_yr.keys())
+    recent_years = all_years[-5:] if len(all_years) > 5 else all_years
+    print(f"  Using years {recent_years} for point layers")
+
+    recent_recs = []
+    for yr in recent_years:
+        recs = joined_by_yr[yr]
         for r in recs:
             r['_yr'] = yr
-        all_recs.extend(recs)
+        recent_recs.extend(recs)
 
-    print(f"  Processing {len(all_recs):,} joined records...")
+    print(f"  Processing {len(recent_recs):,} recent records...")
 
     def ll(r):
         return to_latlon(safe_float(r.get('XCOORD')), safe_float(r.get('YCOORD')))
 
-    # ── HOH exemption points (current year) ──
-    latest_yr = max(joined_by_yr.keys()) if joined_by_yr else 0
-    latest_recs = joined_by_yr.get(latest_yr, [])
-
-    hoh_pts = []
-    vet_pts = []
+    # ── Sale points (recent years, matching UI format: y, d, p) ──
     sale_pts = []
-    for r in latest_recs:
-        la, ln = ll(r)
-        v = safe_int(r.get('TOTVALUE'))
-
-        # HOH exemption
-        if safe_float(r.get('HOHEXEMP')) > 0:
-            hoh_pts.append({'la': la, 'ln': ln, 'v': v})
-
-        # Veteran exemption
-        if safe_float(r.get('VETEXEMP')) > 0:
-            vet_pts.append({'la': la, 'ln': ln, 'v': v})
-
-        # Recent sales
-        sp = safe_float(r.get('SALEPRICE'))
-        if sp > 0:
-            sd = str(r.get('SALEDATE', '') or '').strip()
-            sale_pts.append({'la': la, 'ln': ln, 'v': int(sp), 'd': sd})
-
+    for yr in recent_years:
+        for r in joined_by_yr[yr]:
+            sp = safe_float(r.get('SALEPRICE'))
+            if sp > 0:
+                la, ln = ll(r)
+                sale_pts.append({
+                    'la': la, 'ln': ln,
+                    'y': yr,
+                    'p': int(sp),
+                    'd': 0
+                })
     layers['SL'] = sale_pts
 
-    # ── Exemption gained/lost (multi-year comparison) ──
+    # ── Exemption gained/lost (recent year-pairs only) ──
     by_parid = defaultdict(dict)
-    for r in all_recs:
+    for r in recent_recs:
         parid = str(r.get('PARID', '') or r.get('UPC', '') or '').strip()
         yr = r['_yr']
         if parid:
             by_parid[parid][yr] = r
 
     eg_list, el_list = [], []
-    comparison_years = sorted(joined_by_yr.keys())
-    for i in range(len(comparison_years) - 1):
-        y1, y2 = comparison_years[i], comparison_years[i+1]
+    for i in range(len(recent_years) - 1):
+        y1, y2 = recent_years[i], recent_years[i+1]
         for parid, yrs in by_parid.items():
             if y1 not in yrs or y2 not in yrs:
                 continue
