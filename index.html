@@ -235,7 +235,7 @@ let VF_DENIED=[], VF_INPROC=[], VF_20_G=[], VF_20_D=[];
 let PRO_20=[], VF20_A=[], VF20_D=[], VF20_R=[], VETW=[];
 let PRO_21=[], VF21_A=[], VF21_D=[], VF21_R=[], VETW_21=[];
 const VF_OL=null;
-const OFC=[35.0845,-106.6567];
+const OFC=[35.08249,-106.65261];
 let _layersReady=false;
 
 // Show loading state
@@ -858,7 +858,7 @@ function buildLayer(key){
   return makeCluster(pts,d.col,d.r,d.pop);
 }
 
-const RL=L.layerGroup([2,5,10,15].map(r=>L.circle([35.084,-106.651],{radius:r*1609.34,color:'#666',weight:1,fill:false,dashArray:'4 4'}).bindTooltip(r+' mi')));
+const RL=L.layerGroup([2,5,10,15].map(r=>L.circle(OFC,{radius:r*1609.34,color:'#666',weight:1,fill:false,dashArray:'4 4'}).bindTooltip(r+' mi')));
 
 let OL={rings:RL};
 function getOL(k){if(!OL[k])OL[k]=buildLayer(k);return OL[k];}
