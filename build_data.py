@@ -264,6 +264,7 @@ def build_point_layers_from_roll(joined_by_yr):
     layers['SL'] = sale_pts
 
     # ── Exemption gained/lost (recent year-pairs only) ──
+    eg_list, el_list = [], []
     for i in range(len(recent_years) - 1):
         y1, y2 = recent_years[i], recent_years[i+1]
         for parid, yrs in by_parid.items():
