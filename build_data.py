@@ -228,7 +228,8 @@ def build_point_layers_from_roll(joined_by_yr):
     print(f"  Processing {len(recent_recs):,} recent records...")
 
     def ll(r):
-        return to_latlon(safe_float(r.get('XCOORD')), safe_float(r.get('YCOORD')))
+        # XCOORD=longitude, YCOORD=latitude (already WGS84)
+        return round(safe_float(r.get('YCOORD')), 6), round(safe_float(r.get('XCOORD')), 6)
 
     # ── Sale points: detect NEW sales by comparing consecutive years ──
     by_parid = defaultdict(dict)
@@ -254,7 +255,7 @@ def build_point_layers_from_roll(joined_by_yr):
                 x = safe_float(r2.get('XCOORD'))
                 y_coord = safe_float(r2.get('YCOORD'))
                 if x and y_coord:
-                    la, ln = to_latlon(x, y_coord)
+                    la, ln = round(y_coord, 6), round(x, 6)
                     sale_pts.append({
                         'la': la, 'ln': ln,
                         'y': y2,
@@ -286,7 +287,7 @@ def build_point_layers_from_roll(joined_by_yr):
             lost_h = (hoh1 and not hoh2)
             lost_v = (vet1 and not vet2)
 
-            la, ln = to_latlon(x, y_coord)
+            la, ln = round(y_coord, 6), round(x, 6)
             if gained_h or gained_v:
                 eg_list.append({
                     'la': la, 'ln': ln,
