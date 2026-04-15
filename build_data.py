@@ -471,14 +471,16 @@ def build_point_layers(enriched_by_yr):
 
     print(f"  Processing {len(all_recs):,} enriched records...")
 
-    # Helper to get lat/lon
+    # Helper to get lat/lon (XCOORD=longitude, YCOORD=latitude, already WGS84)
     def ll(r):
-        return to_latlon(safe_float(r.get('XCOORD')), safe_float(r.get('YCOORD')))
+        return round(safe_float(r.get('YCOORD')), 6), round(safe_float(r.get('XCOORD')), 6)
 
-    # ── VF_DENIED: Value freeze denied (current roll) ──
+    # ── VF_DENIED: Value freeze denied (latest year only) ──
+    latest_yr = max(enriched_by_yr.keys())
+    latest_recs = enriched_by_yr.get(latest_yr, [])
     vf_denied = []
     vf_inproc = []
-    for r in all_recs:
+    for r in latest_recs:
         status = str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower()
         if status == 'denied':
             la, ln = ll(r)
@@ -492,6 +494,7 @@ def build_point_layers(enriched_by_yr):
             vf_inproc.append({'la': la, 'ln': ln, 'v': safe_int(r.get('APRTOTAL'))})
     layers['VF_DENIED'] = vf_denied
     layers['VF_INPROC'] = vf_inproc
+    print(f"  VF denied: {len(vf_denied):,}, in-process: {len(vf_inproc):,} (year {latest_yr})")
 
     # ── Protest layers by year ──
     for target_yr, key in [(2020, 'PRO_20'), (2021, 'PRO_21')]:
@@ -595,7 +598,7 @@ def build_point_layers(enriched_by_yr):
             lost_h = (hoh1 and not hoh2)
             lost_v = (vet1 and not vet2)
 
-            la, ln = to_latlon(x, y)
+            la, ln = round(y, 6), round(x, 6)  # Already WGS84
             if gained_h or gained_v:
                 eg_list.append({
                     'la': la, 'ln': ln,
@@ -683,10 +686,7 @@ def main():
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     args = parser.parse_args()
 
-    if args.enriched and args.coords:
-        parser.error("Provide --enriched or --coords, not both")
-
-    # Determine mode: enriched > coords > roll-only
+    # Determine mode
     if args.enriched:
         mode = 'enriched'
     elif args.coords:
@@ -743,7 +743,13 @@ def main():
     if mode == 'enriched':
         # ── Enriched mode: full rebuild ──
         print("\nReading enriched data...")
-        enriched_records = read_dbf(args.enriched)
+        ext = args.enriched.lower()
+        if ext.endswith('.csv'):
+            enriched_records = read_csv(args.enriched)
+        elif ext.endswith('.xlsx'):
+            enriched_records = read_xlsx(args.enriched)
+        else:
+            enriched_records = read_dbf(args.enriched)
 
         print("\nProcessing enriched data by year...")
         enriched_by_yr = process_enriched(enriched_records)
@@ -754,8 +760,28 @@ def main():
         print("\nBuilding point layers from enriched data...")
         new_layers = build_point_layers(enriched_by_yr)
 
+        # Also build SL (sale) layer from roll + enriched coords
+        print("\nBuilding coordinate lookup from enriched data...")
+        coord_lookup = {}
+        for r in enriched_records:
+            parid = str(r.get('PARID', '') or '').strip()
+            x = safe_float(r.get('XCOORD'))
+            y = safe_float(r.get('YCOORD'))
+            if parid and x and y:
+                coord_lookup[parid] = (x, y, 0, 0)
+        print(f"  {len(coord_lookup):,} parcels with coordinates")
+
+        print("\nJoining tax roll with coordinates for sale detection...")
+        joined_by_yr = join_roll_with_coords(roll_records, coord_lookup)
+        for yr in sorted(joined_by_yr.keys()):
+            print(f"  {yr}: {len(joined_by_yr[yr]):,} records")
+
+        print("\nBuilding sale layer from joined data...")
+        sl_layers = build_point_layers_from_roll(joined_by_yr)
+        new_layers['SL'] = sl_layers.get('SL', [])
+
         rebuilt_keys = [
-            'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+            'SL', 'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
             'VETW', 'VETW_21', 'EG', 'EL'
