@@ -213,9 +213,9 @@ def build_point_layers_from_roll(joined_by_yr):
     Limits to last 5 years to keep file size manageable."""
     layers = {}
 
-    # Use all years for point layers
+    # Use last 10 years for point layers to keep file size manageable
     all_years = sorted(joined_by_yr.keys())
-    recent_years = all_years
+    recent_years = all_years[-10:] if len(all_years) > 10 else all_years
     print(f"  Using years {recent_years[0]}-{recent_years[-1]} for point layers ({len(recent_years)} years)")
 
     recent_recs = []
