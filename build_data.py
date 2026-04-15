@@ -265,7 +265,7 @@ def build_point_layers_from_roll(joined_by_yr):
     layers['SL'] = sale_pts
 
     # ── Exemption gained/lost (recent year-pairs only) ──
-    eg_list, el_list = [], []
+    eg_h, eg_v, el_h, el_v = [], [], [], []
     for i in range(len(recent_years) - 1):
         y1, y2 = recent_years[i], recent_years[i+1]
         for parid, yrs in by_parid.items():
@@ -282,29 +282,20 @@ def build_point_layers_from_roll(joined_by_yr):
             vet1 = safe_float(r1.get('VETEXEMP')) > 0
             vet2 = safe_float(r2.get('VETEXEMP')) > 0
 
-            gained_h = (not hoh1 and hoh2)
-            gained_v = (not vet1 and vet2)
-            lost_h = (hoh1 and not hoh2)
-            lost_v = (vet1 and not vet2)
-
             la, ln = round(y_coord, 6), round(x, 6)
-            if gained_h or gained_v:
-                eg_list.append({
-                    'la': la, 'ln': ln,
-                    'h': 1 if gained_h else 0,
-                    'v': 1 if gained_v else 0,
-                    'c': 1, 'y': y2
-                })
-            if lost_h or lost_v:
-                el_list.append({
-                    'la': la, 'ln': ln,
-                    'h': 1 if lost_h else 0,
-                    'v': 1 if lost_v else 0,
-                    'c': 1, 'y': y2
-                })
+            if not hoh1 and hoh2:
+                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if not vet1 and vet2:
+                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if hoh1 and not hoh2:
+                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if vet1 and not vet2:
+                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
 
-    layers['EG'] = eg_list
-    layers['EL'] = el_list
+    layers['EG_H'] = eg_h
+    layers['EG_V'] = eg_v
+    layers['EL_H'] = el_h
+    layers['EL_V'] = el_v
 
     return layers
 
@@ -575,7 +566,7 @@ def build_point_layers(enriched_by_yr):
         if parid:
             by_parid[parid][yr] = r
 
-    eg_list, el_list = [], []
+    eg_h, eg_v, el_h, el_v = [], [], [], []
     comparison_years = sorted(enriched_by_yr.keys())
     for i in range(len(comparison_years) - 1):
         y1, y2 = comparison_years[i], comparison_years[i+1]
@@ -593,29 +584,22 @@ def build_point_layers(enriched_by_yr):
             vet1 = str(r1.get('VETERANS EXEMPTION', '') or '').strip().upper() in ('Y', 'YES', '1', 'TRUE')
             vet2 = str(r2.get('VETERANS EXEMPTION', '') or '').strip().upper() in ('Y', 'YES', '1', 'TRUE')
 
-            gained_h = (not hoh1 and hoh2)
-            gained_v = (not vet1 and vet2)
-            lost_h = (hoh1 and not hoh2)
-            lost_v = (vet1 and not vet2)
-
             la, ln = round(y, 6), round(x, 6)  # Already WGS84
-            if gained_h or gained_v:
-                eg_list.append({
-                    'la': la, 'ln': ln,
-                    'h': 1 if gained_h else 0,
-                    'v': 1 if gained_v else 0,
-                    'c': 1, 'y': y2
-                })
-            if lost_h or lost_v:
-                el_list.append({
-                    'la': la, 'ln': ln,
-                    'h': 1 if lost_h else 0,
-                    'v': 1 if lost_v else 0,
-                    'c': 1, 'y': y2
-                })
+            if not hoh1 and hoh2:
+                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if not vet1 and vet2:
+                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if hoh1 and not hoh2:
+                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+            if vet1 and not vet2:
+                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
 
-    layers['EG'] = eg_list
-    layers['EL'] = el_list
+    layers['EG_H'] = eg_h
+    layers['EG_V'] = eg_v
+    layers['EL_H'] = el_h
+    layers['EL_V'] = el_v
+    print(f"  Exemptions gained: HOH {len(eg_h):,}, VET {len(eg_v):,}")
+    print(f"  Exemptions lost:   HOH {len(el_h):,}, VET {len(el_v):,}")
 
     return layers
 
@@ -737,7 +721,7 @@ def main():
         'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
         'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
-        'EG', 'EL',
+        'EG_H', 'EG_V', 'EL_H', 'EL_V',
     ]
 
     if mode == 'enriched':
@@ -784,7 +768,7 @@ def main():
             'SL', 'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
-            'VETW', 'VETW_21', 'EG', 'EL'
+            'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
         ]
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
 
@@ -811,7 +795,7 @@ def main():
         print("\nBuilding point layers from joined data...")
         new_layers = build_point_layers_from_roll(joined_by_yr)
 
-        rebuilt_keys = ['SL', 'EG', 'EL']
+        rebuilt_keys = ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V']
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
 
     else:
