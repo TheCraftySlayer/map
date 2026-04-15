@@ -174,21 +174,23 @@
 
   <h5>Tax roll point layers <span style="font-weight:400;color:#aaa">2016&ndash;2025 tax rolls</span></h5>
   <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:10px;flex-wrap:wrap">
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2016" checked> <span style="color:#1f78b4;font-weight:600">'16</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2017" checked> <span style="color:#a65628;font-weight:600">'17</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2018" checked> <span style="color:#f781bf;font-weight:600">'18</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2019" checked> <span style="color:#999999;font-weight:600">'19</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2020" checked> <span style="color:#66c2a5;font-weight:600">'20</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2021" checked> <span style="color:#fc8d62;font-weight:600">'21</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2022" checked> <span style="color:#984ea3;font-weight:600">'22</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2023" checked> <span style="color:#2166ac;font-weight:600">'23</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2024" checked> <span style="color:#f4a11d;font-weight:600">'24</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2025" checked> <span style="color:#1a9850;font-weight:600">'25</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2016"> <span style="color:#1f78b4;font-weight:600">'16</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2017"> <span style="color:#a65628;font-weight:600">'17</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2018"> <span style="color:#f781bf;font-weight:600">'18</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2019"> <span style="color:#999999;font-weight:600">'19</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2020"> <span style="color:#66c2a5;font-weight:600">'20</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2021"> <span style="color:#fc8d62;font-weight:600">'21</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2022"> <span style="color:#984ea3;font-weight:600">'22</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2023"> <span style="color:#2166ac;font-weight:600">'23</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2024"> <span style="color:#f4a11d;font-weight:600">'24</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2025"> <span style="color:#1a9850;font-weight:600">'25</span></label>
   </div>
   <label><input type="checkbox" class="ol" data-layer="sl"> <span class="d" style="width:8px;height:8px;background:#888;border:1px solid #333"></span> Sales</label>
   <label><input type="checkbox" class="ol" data-layer="tl"> <span class="d" style="width:8px;height:8px;background:#888"></span> Owner change contacts</label>
-  <label><input type="checkbox" class="ol" data-layer="eg"> <span class="d" style="width:8px;height:8px;background:#1D9E75"></span> Exemption gained</label>
-  <label><input type="checkbox" class="ol" data-layer="el"> <span class="d" style="width:8px;height:8px;background:#d6604d"></span> Exemption lost</label>
+  <label><input type="checkbox" class="ol" data-layer="eg_h"> <span class="d" style="width:8px;height:8px;background:#1D9E75"></span> HOH exemption gained</label>
+  <label><input type="checkbox" class="ol" data-layer="eg_v"> <span class="d" style="width:8px;height:8px;background:#2ca02c"></span> Veteran exemption gained</label>
+  <label><input type="checkbox" class="ol" data-layer="el_h"> <span class="d" style="width:8px;height:8px;background:#d6604d"></span> HOH exemption lost</label>
+  <label><input type="checkbox" class="ol" data-layer="el_v"> <span class="d" style="width:8px;height:8px;background:#e7871a"></span> Veteran exemption lost</label>
 
   <h5>Phone channel <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="checkbox" class="ol" data-layer="rpt"> <span class="d" style="width:8px;height:8px;background:#b10026"></span> Repeat callers 5+ (558)</label>
@@ -227,13 +229,13 @@ L.HeatLayer=(L.Layer?L.Layer:L.Class).extend({initialize:function(t,i){this._lat
 <script>
 // ── Data variables (loaded from JSON) ──────────────────────────────────────────
 let COUNTY, DATA, NBHD_CENTERS, TRACT_GEO;
-let SL=[], TL=[], EG=[], EL=[], RPT=[], CO=[], VO=[], MC=[];
+let SL=[], TL=[], EG_H=[], EG_V=[], EL_H=[], EL_V=[], RPT=[], CO=[], VO=[], MC=[];
 let VET_V=[], VF_V=[], HOH_V=[], PRO_V=[], SP_GEO=[];
 let VF_DENIED=[], VF_INPROC=[], VF_20_G=[], VF_20_D=[];
 let PRO_20=[], VF20_A=[], VF20_D=[], VF20_R=[], VETW=[];
 let PRO_21=[], VF21_A=[], VF21_D=[], VF21_R=[], VETW_21=[];
 const VF_OL=null;
-const OFC=[35.0845,-106.6567];
+const OFC=[35.08249,-106.65261];
 let _layersReady=false;
 
 // Show loading state
@@ -250,7 +252,7 @@ _coreP.then(core=>{
   init();
 });
 _layersP.then(d=>{
-  SL=d.SL; TL=d.TL; EG=d.EG; EL=d.EL; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
+  SL=d.SL; TL=d.TL; EG_H=d.EG_H; EG_V=d.EG_V; EL_H=d.EL_H; EL_V=d.EL_V; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
   VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
   VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
   PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
@@ -782,7 +784,7 @@ document.getElementById('searchBox').addEventListener('keydown',e=>{
 
 // ── Point layer helpers ───────────────────────────────────────────────────────
 let heatMode=false;
-let activeYrs=new Set([2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]);
+let activeYrs=new Set();
 let visActiveYrs=new Set([2022,2023,2024,2025,2026]);
 const heatLayers={};
 
@@ -824,8 +826,10 @@ function buildLayer(key){
     sp_geo:{src:()=>SP_GEO.filter(p=>visActiveYrs.has(p.y)),col:'#e6ab02',r:4,pop:p=>p.y+' Spanish-speaking: '+p.d.toFixed(1)+' min'},
     sl:{src:()=>SL.filter(p=>activeYrs.has(p.y)),col:'#888',r:4.5,pop:p=>p.y+' sale \u2192 '+p.d+'d later\n$'+p.p.toLocaleString()},
     tl:{src:()=>TL.filter(p=>activeYrs.has(p.y)),col:'#e31a1c',r:4,pop:p=>p.y+' owner change'},
-    eg:{src:()=>EG.filter(p=>activeYrs.has(p.y)),col:'#1D9E75',r:4,pop:p=>p.y+' exemption gained'+(p.h?' \u00b7 HOH':'')+(p.v?' \u00b7 VET':'')},
-    el:{src:()=>EL.filter(p=>activeYrs.has(p.y)),col:'#d6604d',r:4,pop:p=>p.y+' exemption lost'+(p.h?' \u00b7 HOH':'')+(p.v?' \u00b7 VET':'')},
+    eg_h:{src:()=>EG_H.filter(p=>activeYrs.has(p.y)),col:'#1D9E75',r:4,pop:p=>p.y+' HOH exemption gained'},
+    eg_v:{src:()=>EG_V.filter(p=>activeYrs.has(p.y)),col:'#2ca02c',r:4,pop:p=>p.y+' veteran exemption gained'},
+    el_h:{src:()=>EL_H.filter(p=>activeYrs.has(p.y)),col:'#d6604d',r:4,pop:p=>p.y+' HOH exemption lost'},
+    el_v:{src:()=>EL_V.filter(p=>activeYrs.has(p.y)),col:'#e7871a',r:4,pop:p=>p.y+' veteran exemption lost'},
     vf_denied:{src:()=>VF_DENIED,col:'#d73027',r:3,pop:p=>'VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     vf_inproc:{src:()=>VF_INPROC,col:'#fdae61',r:5,pop:p=>'VF in process\n$'+p.v.toLocaleString()},
     vf20_a:{src:()=>VF20_A,col:'#2166ac',r:3.5,pop:p=>'VF 2020 active\n$'+(p.v||0).toLocaleString()},
@@ -848,13 +852,13 @@ function buildLayer(key){
   const d=defs[key];
   if(!d)return L.layerGroup([]);
   const pts=d.src();
-  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg','el','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
+  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg_h','eg_v','el_h','el_v','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
     return makeHeat(pts,key);
   }
   return makeCluster(pts,d.col,d.r,d.pop);
 }
 
-const RL=L.layerGroup([2,5,10,15].map(r=>L.circle([35.084,-106.651],{radius:r*1609.34,color:'#666',weight:1,fill:false,dashArray:'4 4'}).bindTooltip(r+' mi')));
+const RL=L.layerGroup([2,5,10,15].map(r=>L.circle(OFC,{radius:r*1609.34,color:'#666',weight:1,fill:false,dashArray:'4 4'}).bindTooltip(r+' mi')));
 
 let OL={rings:RL};
 function getOL(k){if(!OL[k])OL[k]=buildLayer(k);return OL[k];}
@@ -872,13 +876,13 @@ function refreshOL(keys){
 // ── Heatmap toggle ────────────────────────────────────────────────────────────
 document.getElementById('heatMode').addEventListener('change',e=>{
   heatMode=e.target.checked;
-  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg','el','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
+  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','tl','eg_h','eg_v','el_h','el_v','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
 });
 
 // ── Year filters ──────────────────────────────────────────────────────────────
 document.querySelectorAll('.yrf').forEach(cb=>cb.addEventListener('change',()=>{
   activeYrs=new Set([...document.querySelectorAll('.yrf:checked')].map(c=>parseInt(c.value)));
-  refreshOL(['sl','tl','eg','el']);
+  refreshOL(['sl','tl','eg_h','eg_v','el_h','el_v']);
 }));
 document.querySelectorAll('.visyrf').forEach(cb=>cb.addEventListener('change',()=>{
   visActiveYrs=new Set([...document.querySelectorAll('.visyrf:checked')].map(c=>parseInt(c.value)));
