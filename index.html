@@ -174,16 +174,16 @@
 
   <h5>Tax roll point layers <span style="font-weight:400;color:#aaa">2016&ndash;2025 tax rolls</span></h5>
   <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:10px;flex-wrap:wrap">
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2016" checked> <span style="color:#1f78b4;font-weight:600">'16</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2017" checked> <span style="color:#a65628;font-weight:600">'17</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2018" checked> <span style="color:#f781bf;font-weight:600">'18</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2019" checked> <span style="color:#999999;font-weight:600">'19</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2020" checked> <span style="color:#66c2a5;font-weight:600">'20</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2021" checked> <span style="color:#fc8d62;font-weight:600">'21</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2022" checked> <span style="color:#984ea3;font-weight:600">'22</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2023" checked> <span style="color:#2166ac;font-weight:600">'23</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2024" checked> <span style="color:#f4a11d;font-weight:600">'24</span></label>
-    <label style="margin:0"><input type="checkbox" class="yrf" value="2025" checked> <span style="color:#1a9850;font-weight:600">'25</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2016"> <span style="color:#1f78b4;font-weight:600">'16</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2017"> <span style="color:#a65628;font-weight:600">'17</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2018"> <span style="color:#f781bf;font-weight:600">'18</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2019"> <span style="color:#999999;font-weight:600">'19</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2020"> <span style="color:#66c2a5;font-weight:600">'20</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2021"> <span style="color:#fc8d62;font-weight:600">'21</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2022"> <span style="color:#984ea3;font-weight:600">'22</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2023"> <span style="color:#2166ac;font-weight:600">'23</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2024"> <span style="color:#f4a11d;font-weight:600">'24</span></label>
+    <label style="margin:0"><input type="checkbox" class="yrf" value="2025"> <span style="color:#1a9850;font-weight:600">'25</span></label>
   </div>
   <label><input type="checkbox" class="ol" data-layer="sl"> <span class="d" style="width:8px;height:8px;background:#888;border:1px solid #333"></span> Sales</label>
   <label><input type="checkbox" class="ol" data-layer="tl"> <span class="d" style="width:8px;height:8px;background:#888"></span> Owner change contacts</label>
@@ -782,7 +782,7 @@ document.getElementById('searchBox').addEventListener('keydown',e=>{
 
 // ── Point layer helpers ───────────────────────────────────────────────────────
 let heatMode=false;
-let activeYrs=new Set([2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]);
+let activeYrs=new Set();
 let visActiveYrs=new Set([2022,2023,2024,2025,2026]);
 const heatLayers={};
 
