@@ -263,7 +263,8 @@ def build_point_layers_from_roll(joined_by_yr):
                         'la': la, 'ln': ln,
                         'y': y2,
                         'p': int(sp2),
-                        'd': 0
+                        'd': 0,
+                        'n': safe_int(r2.get('NBHD'))
                     })
     layers['SL'] = sale_pts
 
@@ -286,14 +287,15 @@ def build_point_layers_from_roll(joined_by_yr):
             vet2 = safe_float(r2.get('VETEXEMP')) > 0
 
             la, ln = round(y_coord, 6), round(x, 6)
+            nb = safe_int(r2.get('NBHD'))
             if not hoh1 and hoh2:
-                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': nb})
             if not vet1 and vet2:
-                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': nb})
             if hoh1 and not hoh2:
-                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': nb})
             if vet1 and not vet2:
-                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': nb})
 
     layers['EG_H'] = eg_h
     layers['EG_V'] = eg_v
@@ -465,9 +467,11 @@ def build_point_layers(enriched_by_yr):
 
     print(f"  Processing {len(all_recs):,} enriched records...")
 
-    # Helper to get lat/lon (XCOORD=longitude, YCOORD=latitude, already WGS84)
+    # Helper to get lat/lon and nbhd (XCOORD=longitude, YCOORD=latitude, already WGS84)
     def ll(r):
         return round(safe_float(r.get('YCOORD')), 6), round(safe_float(r.get('XCOORD')), 6)
+    def nb(r):
+        return safe_int(r.get('NBHD'))
 
     # ── VF_DENIED: Value freeze denied (latest year only) ──
     latest_yr = max(enriched_by_yr.keys())
@@ -479,13 +483,13 @@ def build_point_layers(enriched_by_yr):
         if status == 'denied':
             la, ln = ll(r)
             vf_denied.append({
-                'la': la, 'ln': ln,
+                'la': la, 'ln': ln, 'n': nb(r),
                 'v': safe_int(r.get('APRTOTAL')),
                 'yr': str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
             })
         elif status in ('in process', 'in-process', 'inprocess', 'pending'):
             la, ln = ll(r)
-            vf_inproc.append({'la': la, 'ln': ln, 'v': safe_int(r.get('APRTOTAL'))})
+            vf_inproc.append({'la': la, 'ln': ln, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
     layers['VF_DENIED'] = vf_denied
     layers['VF_INPROC'] = vf_inproc
     print(f"  VF denied: {len(vf_denied):,}, in-process: {len(vf_inproc):,} (year {latest_yr})")
@@ -502,7 +506,7 @@ def build_point_layers(enriched_by_yr):
                 continue
             la, ln = ll(r)
             pts.append({
-                'la': la, 'ln': ln,
+                'la': la, 'ln': ln, 'n': nb(r),
                 'ht': str(r.get('HEARING TYPE', '') or '').strip()[:1] or '',
                 'st': str(r.get('HEARING STATUS', '') or '').strip()[:1] or '',
                 'ra': str(r.get('RESULT ACTION', '') or '').strip() or '',
@@ -520,7 +524,7 @@ def build_point_layers(enriched_by_yr):
                 continue
             la, ln = ll(r)
             pro_all.append({
-                'la': la, 'ln': ln, 'y': yr,
+                'la': la, 'ln': ln, 'y': yr, 'n': nb(r),
                 'ht': str(r.get('HEARING TYPE', '') or '').strip()[:1] or '',
                 'st': str(r.get('HEARING STATUS', '') or '').strip()[:1] or '',
                 'ra': str(r.get('RESULT ACTION', '') or '').strip() or '',
@@ -541,28 +545,29 @@ def build_point_layers(enriched_by_yr):
             la, ln = ll(r)
             v = safe_int(r.get('APRTOTAL'))
             vf_yr = str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
+            n = nb(r)
             if status == 'active':
                 if target_yr == 2020:
-                    active.append({'la': la, 'ln': ln, 's': 'Active', 'v': v})
+                    active.append({'la': la, 'ln': ln, 'n': n, 's': 'Active', 'v': v})
                 else:
-                    active.append({'la': la, 'ln': ln, 'v': v, 'yr': vf_yr})
+                    active.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
             elif status == 'denied':
                 if target_yr == 2020:
-                    denied.append({'la': la, 'ln': ln, 's': 'Denied', 'v': v})
+                    denied.append({'la': la, 'ln': ln, 'n': n, 's': 'Denied', 'v': v})
                 else:
-                    denied.append({'la': la, 'ln': ln, 'v': v, 'yr': vf_yr})
+                    denied.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
             elif status == 'removed':
                 if target_yr == 2020:
-                    removed.append({'la': la, 'ln': ln, 's': 'Removed', 'v': v})
+                    removed.append({'la': la, 'ln': ln, 'n': n, 's': 'Removed', 'v': v})
                 else:
-                    removed.append({'la': la, 'ln': ln, 'v': v, 'yr': vf_yr})
+                    removed.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
 
         if target_yr == 2020:
             layers['VF20_A'] = active
             layers['VF20_D'] = denied
             layers['VF20_R'] = removed
-            layers['VF_20_G'] = [{'la': p['la'], 'ln': p['ln'], 'v': p['v'], 'yr': vf_yr} for p in active]
-            layers['VF_20_D'] = [{'la': p['la'], 'ln': p['ln'], 'v': p['v'], 'yr': vf_yr} for p in denied]
+            layers['VF_20_G'] = [{'la': p['la'], 'ln': p['ln'], 'n': p['n'], 'v': p['v'], 'yr': vf_yr} for p in active]
+            layers['VF_20_D'] = [{'la': p['la'], 'ln': p['ln'], 'n': p['n'], 'v': p['v'], 'yr': vf_yr} for p in denied]
         else:
             layers['VF21_A'] = active
             layers['VF21_D'] = denied
@@ -576,7 +581,7 @@ def build_point_layers(enriched_by_yr):
             waiver = str(r.get('DISABLED VETERAN TAX WAIVER', '') or '').strip()
             if waiver.upper() in ('Y', 'YES', '1', 'TRUE'):
                 la, ln = ll(r)
-                pts.append({'la': la, 'ln': ln, 'v': safe_int(r.get('APRTOTAL'))})
+                pts.append({'la': la, 'ln': ln, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
         layers[key] = pts
 
     # ── Unified value freeze layer (all years, year-filtered) ──
@@ -589,7 +594,7 @@ def build_point_layers(enriched_by_yr):
             la, ln = ll(r)
             v = safe_int(r.get('APRTOTAL'))
             vf_yr = str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
-            pt = {'la': la, 'ln': ln, 'y': yr, 'v': v, 'yr': vf_yr}
+            pt = {'la': la, 'ln': ln, 'y': yr, 'n': nb(r), 'v': v, 'yr': vf_yr}
             if status == 'active':
                 vf_active_all.append(pt)
             elif status == 'denied':
@@ -608,7 +613,7 @@ def build_point_layers(enriched_by_yr):
             waiver = str(r.get('DISABLED VETERAN TAX WAIVER', '') or '').strip()
             if waiver.upper() in ('Y', 'YES', '1', 'TRUE'):
                 la, ln = ll(r)
-                dvw_all.append({'la': la, 'ln': ln, 'y': yr, 'v': safe_int(r.get('APRTOTAL'))})
+                dvw_all.append({'la': la, 'ln': ln, 'y': yr, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
     layers['DVW'] = dvw_all
     print(f"  Disabled vet waiver (all years): {len(dvw_all):,}")
 
@@ -640,14 +645,15 @@ def build_point_layers(enriched_by_yr):
             vet2 = str(r2.get('VETERANS EXEMPTION', '') or '').strip().upper() in ('Y', 'YES', '1', 'TRUE')
 
             la, ln = round(y, 6), round(x, 6)  # Already WGS84
+            n = safe_int(r2.get('NBHD'))
             if not hoh1 and hoh2:
-                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                eg_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': n})
             if not vet1 and vet2:
-                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                eg_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': n})
             if hoh1 and not hoh2:
-                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                el_h.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': n})
             if vet1 and not vet2:
-                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2})
+                el_v.append({'la': la, 'ln': ln, 'c': 1, 'y': y2, 'n': n})
 
     layers['EG_H'] = eg_h
     layers['EG_V'] = eg_v

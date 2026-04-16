@@ -521,6 +521,7 @@ tractInfo.addTo(map);
 
 // ── Choropleth layers ─────────────────────────────────────────────────────────
 let NBL='none', TRACTL='none', FILL_OPAC=0.72, hideCommercial=false;
+const commercialNbhds=new Set(DATA.features.filter(f=>f.properties.is_commercial).map(f=>f.properties.nbhd));
 let nbhdLayer=null, tractLayer=null;
 let swipeActive=false;
 
@@ -776,6 +777,7 @@ document.getElementById('opacSlider').addEventListener('input',e=>{
 document.getElementById('hideCommercial').addEventListener('change',e=>{
   hideCommercial=e.target.checked;
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  refreshOL(Object.keys(OL).filter(k=>k!=='rings'));
 });
 
 // ── Search by neighborhood ────────────────────────────────────────────────────
@@ -861,7 +863,8 @@ function buildLayer(key){
   };
   const d=defs[key];
   if(!d)return L.layerGroup([]);
-  const pts=d.src();
+  let pts=d.src();
+  if(hideCommercial&&commercialNbhds.size)pts=pts.filter(p=>!p.n||!commercialNbhds.has(p.n));
   if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
     return makeHeat(pts,key);
   }
