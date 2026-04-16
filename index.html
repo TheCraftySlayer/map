@@ -479,20 +479,21 @@ info._buildHtml=function(p){
   const vals=[],labs=[];
   for(let i=0;i<allVals.length;i++){if(allVals[i]!=null&&allVals[i]!==0){vals.push(allVals[i]);labs.push(allLabs[i]);}}
   let maxAbs=0.01;for(let i=0;i<vals.length;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
-  const bw=Math.max(14,Math.min(22,Math.floor(260/vals.length))),bh=40,svgW=bw*vals.length,mid=50;
+  const bw=Math.max(12,Math.min(22,Math.floor(260/vals.length))),bh=36,svgW=bw*vals.length,mid=40;
   const bars=vals.map((v,i)=>{
     const h=Math.round(Math.abs(v)/maxAbs*bh);
     const col=v>=0?'#d6604d':'#2166ac';
     const pct_=(v>=0?'+':'')+(v*100).toFixed(1)+'%';
     const x=i*bw, cx=x+bw/2;
     const barY=v>=0?mid-h:mid;
+    const showLab=(i===0||i===vals.length-1||i%3===0);
     return '<g>'+
-      '<rect x="'+(x+2)+'" y="'+barY+'" width="'+(bw-4)+'" height="'+Math.max(h,1)+'" rx="2" fill="'+col+'"/>'+
-      '<text x="'+cx+'" y="'+(v>=0?barY-3:barY+h+10)+'" text-anchor="middle" font-size="8" font-weight="600" fill="'+col+'">'+pct_+'</text>'+
-      '<text x="'+cx+'" y="'+(mid+bh+14)+'" text-anchor="middle" font-size="7" fill="#999">'+labs[i]+'</text>'+
+      '<title>'+labs[i]+': '+pct_+'</title>'+
+      '<rect x="'+(x+1)+'" y="'+barY+'" width="'+(bw-2)+'" height="'+Math.max(h,1)+'" rx="1" fill="'+col+'"/>'+
+      (showLab?'<text x="'+cx+'" y="'+(mid+bh+10)+'" text-anchor="middle" font-size="7" fill="#999">'+labs[i]+'</text>':'')+
       '</g>';
   }).join('');
-  const spark='<svg width="'+svgW+'" height="'+(mid+bh+20)+'" style="display:block;margin:6px 0">'+
+  const spark='<svg width="'+svgW+'" height="'+(mid+bh+14)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
   return '<h4>Nbhd '+p.nbhd+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+p.nbhd_type+']</span>':'')+'</h4>'+
