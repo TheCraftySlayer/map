@@ -65,9 +65,18 @@
   <label><input type="radio" name="nbhd_layer" value="owner_turnover"> Owner turnover rate</label>
   <label><input type="radio" name="nbhd_layer" value="hoh_churn"> HOH exemption churn</label>
 
-  <h5>Market activity <span style="font-weight:400;color:#aaa">tax rolls 2016&ndash;2025</span></h5>
+  <h5>Market activity <span style="font-weight:400;color:#aaa">tax rolls 2007&ndash;2025</span></h5>
   <label><input type="radio" name="nbhd_layer" value="sales"> Recent sale density</label>
   <label><input type="radio" name="nbhd_layer" value="taxlightning"> Sale contact rate</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_7_8"> Value change 2007&rarr;08</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_8_9"> Value change 2008&rarr;09</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_9_10"> Value change 2009&rarr;10</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_10_11"> Value change 2010&rarr;11</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_11_12"> Value change 2011&rarr;12</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_12_13"> Value change 2012&rarr;13</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_13_14"> Value change 2013&rarr;14</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_14_15"> Value change 2014&rarr;15</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_15_16"> Value change 2015&rarr;16</label>
   <label><input type="radio" name="nbhd_layer" value="chg_16_17"> Value change 2016&rarr;17</label>
   <label><input type="radio" name="nbhd_layer" value="chg_17_18"> Value change 2017&rarr;18</label>
   <label><input type="radio" name="nbhd_layer" value="chg_18_19"> Value change 2018&rarr;19</label>
@@ -104,6 +113,15 @@
     <option value="pct_vf_denied">VF denial rate</option>
     <option value="pct_hoh">HOH rate</option>
     <option value="pct_vet">Vet rate</option>
+    <option value="chg_7_8">Change 07&rarr;08</option>
+    <option value="chg_8_9">Change 08&rarr;09</option>
+    <option value="chg_9_10">Change 09&rarr;10</option>
+    <option value="chg_10_11">Change 10&rarr;11</option>
+    <option value="chg_11_12">Change 11&rarr;12</option>
+    <option value="chg_12_13">Change 12&rarr;13</option>
+    <option value="chg_13_14">Change 13&rarr;14</option>
+    <option value="chg_14_15">Change 14&rarr;15</option>
+    <option value="chg_15_16">Change 15&rarr;16</option>
     <option value="chg_16_17">Change 16&rarr;17</option>
     <option value="chg_17_18">Change 17&rarr;18</option>
     <option value="chg_18_19">Change 18&rarr;19</option>
@@ -126,6 +144,15 @@
     <option value="pct_vf_denied">VF denial rate</option>
     <option value="pct_hoh">HOH rate</option>
     <option value="pct_vet">Vet rate</option>
+    <option value="chg_7_8">Change 07&rarr;08</option>
+    <option value="chg_8_9">Change 08&rarr;09</option>
+    <option value="chg_9_10">Change 09&rarr;10</option>
+    <option value="chg_10_11">Change 10&rarr;11</option>
+    <option value="chg_11_12">Change 11&rarr;12</option>
+    <option value="chg_12_13">Change 12&rarr;13</option>
+    <option value="chg_13_14">Change 13&rarr;14</option>
+    <option value="chg_14_15">Change 14&rarr;15</option>
+    <option value="chg_15_16">Change 15&rarr;16</option>
     <option value="chg_16_17">Change 16&rarr;17</option>
     <option value="chg_17_18">Change 17&rarr;18</option>
     <option value="chg_18_19">Change 18&rarr;19</option>
@@ -319,7 +346,7 @@ const CS={
   hoh_churn:[[0,'#fff7ec'],[.01,'#fee8c8'],[.02,'#fdbb84'],[.04,'#e34a33'],[.08,'#b30000']],
   sales:[[0,'#ffffcc'],[.02,'#c7e9b4'],[.05,'#7fcdbb'],[.08,'#41b6c4'],[.12,'#1d91c0'],[.2,'#0c2c84']],
   taxlightning:[[0,'#ffffcc'],[.05,'#fed976'],[.1,'#feb24c'],[.2,'#fd8d3c'],[.3,'#e31a1c'],[.5,'#800026']],
-  chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,
+  chg_7_8:YOY,chg_8_9:YOY,chg_9_10:YOY,chg_10_11:YOY,chg_11_12:YOY,chg_12_13:YOY,chg_13_14:YOY,chg_14_15:YOY,chg_15_16:YOY,chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,
   appr_volatility:[[0,'#f7fbff'],[.02,'#c6dbef'],[.04,'#6baed6'],[.06,'#2171b5'],[.1,'#084594'],[.2,'#08306b']],
   exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
     addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
@@ -343,6 +370,15 @@ const LG={
   hoh_churn:{l:'0%',h:'8%+',n:'HOH exemption churn'},
   sales:{l:'0%',h:'20%+',n:'recent sale rate'},
   taxlightning:{l:'0%',h:'50%+',n:'sale contact rate'},
+  chg_7_8:{l:'\u221210%',h:'+20%',n:'value change 2007\u219208'},
+  chg_8_9:{l:'\u221210%',h:'+20%',n:'value change 2008\u219209'},
+  chg_9_10:{l:'\u221210%',h:'+20%',n:'value change 2009\u219210'},
+  chg_10_11:{l:'\u221210%',h:'+20%',n:'value change 2010\u219211'},
+  chg_11_12:{l:'\u221210%',h:'+20%',n:'value change 2011\u219212'},
+  chg_12_13:{l:'\u221210%',h:'+20%',n:'value change 2012\u219213'},
+  chg_13_14:{l:'\u221210%',h:'+20%',n:'value change 2013\u219214'},
+  chg_14_15:{l:'\u221210%',h:'+20%',n:'value change 2014\u219215'},
+  chg_15_16:{l:'\u221210%',h:'+20%',n:'value change 2015\u219216'},
   chg_16_17:{l:'\u221210%',h:'+20%',n:'value change 2016\u219217'},
   chg_17_18:{l:'\u221210%',h:'+20%',n:'value change 2017\u219218'},
   chg_18_19:{l:'\u221210%',h:'+20%',n:'value change 2018\u219219'},
@@ -369,6 +405,7 @@ const LAYER_FIELD={
   valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',
   pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover',
   hoh_churn:'hoh_churn',sales:'pct_recent_sale',taxlightning:'sale_contact_rate',
+  chg_7_8:'chg_7_8',chg_8_9:'chg_8_9',chg_9_10:'chg_9_10',chg_10_11:'chg_10_11',chg_11_12:'chg_11_12',chg_12_13:'chg_12_13',chg_13_14:'chg_13_14',chg_14_15:'chg_14_15',chg_15_16:'chg_15_16',
   chg_16_17:'chg_16_17',chg_17_18:'chg_17_18',chg_18_19:'chg_18_19',chg_19_20:'chg_19_20',
   chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',
   appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',
@@ -385,7 +422,7 @@ function getVisibleFeatures(){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','exstab'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','exstab'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
   if(layer==='avg_visit_min')return v.toFixed(1)+' min';
@@ -447,10 +484,10 @@ info._buildHtml=function(p){
   const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
   const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
   const min=v=>v?v.toFixed(1)+' min':'\u2014';
-  const vals=[p.chg_16_17||0,p.chg_17_18||0,p.chg_18_19||0,p.chg_19_20||0,p.chg_20_21||0,p.chg_21_22||0,p.chg_22_23||0,p.chg_23_24||0,p.chg_24_25||0];
-  const labs=["'16→17","'17→18","'18→19","'19→20","'20→21","'21→22","'22→23","'23→24","'24→25"];
-  let maxAbs=0.01;for(let i=0;i<9;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
-  const bw=22,bh=40,svgW=bw*9,mid=50;
+  const vals=[p.chg_7_8||0,p.chg_8_9||0,p.chg_9_10||0,p.chg_10_11||0,p.chg_11_12||0,p.chg_12_13||0,p.chg_13_14||0,p.chg_14_15||0,p.chg_15_16||0,p.chg_16_17||0,p.chg_17_18||0,p.chg_18_19||0,p.chg_19_20||0,p.chg_20_21||0,p.chg_21_22||0,p.chg_22_23||0,p.chg_23_24||0,p.chg_24_25||0];
+  const labs=["'07→08","'08→09","'09→10","'10→11","'11→12","'12→13","'13→14","'14→15","'15→16","'16→17","'17→18","'18→19","'19→20","'20→21","'21→22","'22→23","'23→24","'24→25"];
+  let maxAbs=0.01;for(let i=0;i<vals.length;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
+  const bw=16,bh=40,svgW=bw*vals.length,mid=50;
   const bars=vals.map((v,i)=>{
     const h=Math.round(Math.abs(v)/maxAbs*bh);
     const col=v>=0?'#d6604d':'#2166ac';
