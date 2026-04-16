@@ -576,9 +576,19 @@ function nbhdStyle(f){
   const hidden=hideCommercial&&f.properties.is_commercial;
   return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
 }
-function hiNbhd(e){e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
-function rhNbhd(e){nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
+let pinnedNbhd=null;
+function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
+function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
+function clickNbhd(e){
+  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();return;}
+  if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
+  pinnedNbhd=e.target;
+  e.target.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+  e.target.bringToFront();
+  info.update(e.target.feature.properties);
+}
 function renderNbhd(){
+  pinnedNbhd=null;
   if(NBL==='none'){
     if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
     updateStatsBar(NBL);return;
@@ -586,7 +596,7 @@ function renderNbhd(){
   if(nbhdLayer){
     nbhdLayer.setStyle(nbhdStyle);
   }else{
-    nbhdLayer=L.geoJSON(DATA,{style:nbhdStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd})}).addTo(map);
+    nbhdLayer=L.geoJSON(DATA,{style:nbhdStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);
   }
   if(!swipeActive){
     const g=LG[NBL];
