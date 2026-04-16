@@ -511,6 +511,25 @@ def build_point_layers(enriched_by_yr):
             })
         layers[key] = pts
 
+    # ── Unified protest layer (all years, year-filtered) ──
+    pro_all = []
+    for yr, recs in enriched_by_yr.items():
+        for r in recs:
+            protested = str(r.get('PROTESTED', '') or '').strip()
+            if protested.upper() not in ('Y', 'YES', '1', 'TRUE'):
+                continue
+            la, ln = ll(r)
+            pro_all.append({
+                'la': la, 'ln': ln, 'y': yr,
+                'ht': str(r.get('HEARING TYPE', '') or '').strip()[:1] or '',
+                'st': str(r.get('HEARING STATUS', '') or '').strip()[:1] or '',
+                'ra': str(r.get('RESULT ACTION', '') or '').strip() or '',
+                'nv': safe_int(r.get('NOTICE VALUE')),
+                'tv': safe_int(r.get('TAXPAYER VALUE')),
+            })
+    layers['PRO'] = pro_all
+    print(f"  Protests (all years): {len(pro_all):,}")
+
     # ── Value freeze layers by year ──
     for target_yr in [2020, 2021]:
         recs = enriched_by_yr.get(target_yr, [])
@@ -833,7 +852,7 @@ def main():
     all_layer_keys = [
         'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
-        'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+        'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
         'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
         'EG_H', 'EG_V', 'EL_H', 'EL_V',
@@ -883,7 +902,7 @@ def main():
             new_layers[k] = roll_layers.get(k, [])
 
         rebuilt_keys = [
-            'SL', 'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
+            'SL', 'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
             'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
