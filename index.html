@@ -495,7 +495,7 @@ info._buildHtml=function(p){
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+20)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
-  return '<h4>Nbhd '+p.nbhd+(p.is_commercial?' <span style="font-size:10px;color:#888">[commercial]</span>':'')+'</h4>'+
+  return '<h4>Nbhd '+p.nbhd+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+p.nbhd_type+']</span>':'')+'</h4>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Failures</span><span class="v">'+((p.total_failures||0).toLocaleString())+'</span></div>'+

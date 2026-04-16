@@ -613,6 +613,14 @@ def update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr):
         # Is commercial
         nbhd_type = str(recs[0].get('NBHD_TYPE', '') or '').strip().lower()
         props['is_commercial'] = 1 if nbhd_type in ('commercial', 'comm', 'c') else 0
+        if nbhd_type in ('commercial', 'comm', 'c'):
+            props['nbhd_type'] = 'commercial'
+        elif nbhd_type in ('residential', 'res', 'r'):
+            props['nbhd_type'] = 'residential'
+        elif nbhd_type in ('vacant', 'vac', 'v'):
+            props['nbhd_type'] = 'vacant'
+        elif nbhd_type:
+            props['nbhd_type'] = nbhd_type
 
         # VF denial rate from enriched data
         vf_recs = [r for r in recs if str(r.get('VAL_FREEZE_STATUS', '') or '').strip()]
