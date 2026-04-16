@@ -720,7 +720,9 @@ YRC = {
 def fetch_census_acs():
     """Fetch ACS 5-year data for Bernalillo County from Census API."""
     vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
+    result = {}
     for yr in [2023, 2022, 2021]:
+        # County-level
         url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
         try:
             with urlopen(url, timeout=5) as resp:
@@ -728,11 +730,8 @@ def fetch_census_acs():
                 h, v = data[0], data[1]
                 g = lambda k: v[h.index(k)]
                 pop = int(g('B01001_001E') or 0)
-                pct = lambda n: f'{n/pop*100:.1f}%' if pop else '—'
-                result = {
-                    'year': yr,
-                    'name': g('NAME'),
-                    'population': pop,
+                result['county'] = {
+                    'year': yr, 'name': g('NAME'), 'population': pop,
                     'median_income': int(g('B19013_001E') or 0),
                     'poverty': int(g('B17001_002E') or 0),
                     'hispanic': int(g('B03003_003E') or 0),
@@ -743,11 +742,50 @@ def fetch_census_acs():
                     'housing_units': int(g('B25001_001E') or 0),
                     'median_home_value': int(g('B25077_001E') or 0),
                 }
-                print(f"  Census ACS {yr}: pop {pop:,}, income ${result['median_income']:,}")
-                return result
+                print(f"  County ACS {yr}: pop {pop:,}")
         except (URLError, Exception) as e:
-            print(f"  Census API {yr} failed: {e}")
-    return None
+            print(f"  County ACS {yr} failed: {e}")
+            continue
+
+        # ZIP-level (ZCTAs in NM, filter to Bernalillo area)
+        bern_zips = {
+            '87002','87004','87008','87015','87031','87035','87042','87043',
+            '87047','87048','87059','87068','87101','87102','87103','87104',
+            '87105','87106','87107','87108','87109','87110','87111','87112',
+            '87113','87114','87116','87117','87119','87120','87121','87122',
+            '87123','87124','87131','87144','87153','87154','87158','87176',
+            '87181','87184','87185','87187','87190','87191','87192','87193',
+            '87194','87196','87197','87198','87199',
+        }
+        zip_vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B03003_003E,B25001_001E,B25077_001E'
+        zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*&in=state:35'
+        try:
+            with urlopen(zip_url, timeout=10) as resp:
+                zdata = json.loads(resp.read())
+                zh = zdata[0]
+                zips = {}
+                for row in zdata[1:]:
+                    zcta = row[zh.index('zip code tabulation area')]
+                    if zcta not in bern_zips:
+                        continue
+                    zpop = int(row[zh.index('B01001_001E')] or 0)
+                    if zpop == 0:
+                        continue
+                    zips[zcta] = {
+                        'name': row[zh.index('NAME')],
+                        'pop': zpop,
+                        'income': int(row[zh.index('B19013_001E')] or 0),
+                        'poverty': int(row[zh.index('B17001_002E')] or 0),
+                        'hispanic': int(row[zh.index('B03003_003E')] or 0),
+                        'units': int(row[zh.index('B25001_001E')] or 0),
+                        'home_val': int(row[zh.index('B25077_001E')] or 0),
+                    }
+                result['zips'] = zips
+                print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
+        except (URLError, Exception) as e:
+            print(f"  ZIP ACS {yr} failed: {e}")
+        break
+    return result if result else None
 
 
 def update_html_sidebar(final_layers, html_path, stats=None):
@@ -821,22 +859,37 @@ def update_html_sidebar(final_layers, html_path, stats=None):
 
     # ── Census ACS data ──
     census = stats.get('census')
-    if census:
-        pop = census['population']
+    if census and census.get('county'):
+        c = census['county']
+        pop = c['population']
         pct = lambda n: f'{n/pop*100:.1f}%' if pop else '—'
         census_html = (
-            f'<div style="margin-bottom:2px;color:#888">{census["name"]} &middot; {census["year"]} ACS 5-Year</div>'
+            f'<div style="margin-bottom:2px;color:#888">{c["name"]} &middot; {c["year"]} ACS 5-Year</div>'
             f'<div class="s"><span>Population</span><span class="v">{pop:,}</span></div>'
-            f'<div class="s"><span>Median income</span><span class="v">${census["median_income"]:,}</span></div>'
-            f'<div class="s"><span>Poverty rate</span><span class="v">{pct(census["poverty"])}</span></div>'
-            f'<div class="s"><span>Hispanic/Latino</span><span class="v">{pct(census["hispanic"])}</span></div>'
-            f'<div class="s"><span>White alone</span><span class="v">{pct(census["white"])}</span></div>'
-            f'<div class="s"><span>Black</span><span class="v">{pct(census["black"])}</span></div>'
-            f'<div class="s"><span>Native American</span><span class="v">{pct(census["native_american"])}</span></div>'
-            f'<div class="s"><span>Asian</span><span class="v">{pct(census["asian"])}</span></div>'
-            f'<div class="s"><span>Housing units</span><span class="v">{census["housing_units"]:,}</span></div>'
-            f'<div class="s"><span>Median home value</span><span class="v">${census["median_home_value"]:,}</span></div>'
+            f'<div class="s"><span>Median income</span><span class="v">${c["median_income"]:,}</span></div>'
+            f'<div class="s"><span>Poverty rate</span><span class="v">{pct(c["poverty"])}</span></div>'
+            f'<div class="s"><span>Hispanic/Latino</span><span class="v">{pct(c["hispanic"])}</span></div>'
+            f'<div class="s"><span>White alone</span><span class="v">{pct(c["white"])}</span></div>'
+            f'<div class="s"><span>Black</span><span class="v">{pct(c["black"])}</span></div>'
+            f'<div class="s"><span>Native American</span><span class="v">{pct(c["native_american"])}</span></div>'
+            f'<div class="s"><span>Asian</span><span class="v">{pct(c["asian"])}</span></div>'
+            f'<div class="s"><span>Housing units</span><span class="v">{c["housing_units"]:,}</span></div>'
+            f'<div class="s"><span>Median home value</span><span class="v">${c["median_home_value"]:,}</span></div>'
         )
+        zips = census.get('zips', {})
+        if zips:
+            census_html += f'<div style="margin-top:6px;font-size:10px;color:#888">Demographics by ZIP ({len(zips)} ZCTAs):</div>'
+            for z in sorted(zips.keys()):
+                zd = zips[z]
+                zpct = lambda n: f'{n/zd["pop"]*100:.0f}%' if zd['pop'] else '—'
+                census_html += (
+                    f'<details style="font-size:10px;margin:1px 0"><summary style="cursor:pointer">'
+                    f'<b>{z}</b> &middot; pop {zd["pop"]:,} &middot; income ${zd["income"]:,}</summary>'
+                    f'<div style="padding-left:12px">'
+                    f'Poverty: {zpct(zd["poverty"])} &middot; Hispanic: {zpct(zd["hispanic"])}<br>'
+                    f'Housing: {zd["units"]:,} &middot; Home value: ${zd["home_val"]:,}'
+                    f'</div></details>'
+                )
         html = re.sub(
             r'(<div id="censusData"[^>]*>).*?(</div>)',
             rf'\1{census_html}\2',
