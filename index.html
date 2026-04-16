@@ -55,7 +55,10 @@
   <label><input type="radio" name="nbhd_layer" value="failure"> Service failure rate</label>
   <label><input type="radio" name="nbhd_layer" value="avg_visit_min"> Avg visit duration</label>
 
-  <h5>Property characteristics <span style="font-weight:400;color:#aaa">2025 roll &middot; 257,443 parcels</span></h5>
+  <h5>Property characteristics <span style="font-weight:400;color:#aaa">tax rolls 2007&ndash;2025</span></h5>
+  <div style="margin:2px 0 6px;font-size:11px">
+    <label>Tax year: <select id="propYearSelect" style="font-size:11px;padding:2px;border-radius:4px;border:1px solid #ddd"></select></label>
+  </div>
   <label><input type="radio" name="nbhd_layer" value="avg_appraised"> Avg appraised value</label>
   <label><input type="radio" name="nbhd_layer" value="median_yrbuilt"> Median year built</label>
   <label><input type="radio" name="nbhd_layer" value="valfreeze"> Value freeze rate</label>
@@ -547,6 +550,29 @@ tractInfo.addTo(map);
 
 // ── Choropleth layers ─────────────────────────────────────────────────────────
 let NBL='none', TRACTL='none', FILL_OPAC=0.72, hideCommercial=false;
+// Property characteristics year selector
+const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',valfreeze:'pct_val_freeze',pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover'};
+let propYear=null;
+(function(){
+  const sel=document.getElementById('propYearSelect');
+  const f0=DATA.features[0].properties;
+  const yrs=new Set();
+  for(const k of Object.keys(f0)){const m=k.match(/^avg_appraised_(\d+)$/);if(m)yrs.add(parseInt(m[1]));}
+  const sorted=[...yrs].sort((a,b)=>a-b);
+  sorted.forEach(y=>{const o=document.createElement('option');o.value=y;o.textContent='20'+String(y).padStart(2,'0');sel.appendChild(o);});
+  sel.value=sorted[sorted.length-1];
+  propYear=sorted[sorted.length-1];
+  sel.addEventListener('change',()=>{
+    propYear=parseInt(sel.value);
+    for(const [layer,base] of Object.entries(propYrFields)){
+      LAYER_FIELD[layer]=base+'_'+propYear;
+    }
+    if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  });
+  for(const [layer,base] of Object.entries(propYrFields)){
+    LAYER_FIELD[layer]=base+'_'+propYear;
+  }
+})();
 const commercialNbhds=new Set(DATA.features.filter(f=>f.properties.is_commercial).map(f=>f.properties.nbhd));
 let nbhdLayer=null, tractLayer=null;
 let swipeActive=false;
@@ -559,13 +585,13 @@ function getNbhdColor(p, override){
   if(layer==='calls_per_parcel')return interp(CS.calls_per_parcel,p.calls_per_parcel||0);
   if(layer==='failure')return(p.total_calls>=5)?interp(CS.failure,p.failure_rate||0):'#f0f0f0';
   if(layer==='avg_visit_min')return(p.avg_visit_min>0)?interp(CS.avg_visit_min,p.avg_visit_min):'#f0f0f0';
-  if(layer==='avg_appraised')return interp(CS.avg_appraised,p.avg_appraised||0);
-  if(layer==='median_yrbuilt')return(p.median_yrbuilt>0)?interp(CS.median_yrbuilt,p.median_yrbuilt):'#f0f0f0';
-  if(layer==='valfreeze')return interp(CS.valfreeze,p.pct_val_freeze||0);
+  if(layer==='avg_appraised'){const f=LAYER_FIELD[layer]||'avg_appraised';return interp(CS.avg_appraised,p[f]||0);}
+  if(layer==='median_yrbuilt'){const f=LAYER_FIELD[layer]||'median_yrbuilt';return(p[f]>0)?interp(CS.median_yrbuilt,p[f]):'#f0f0f0';}
+  if(layer==='valfreeze'){const f=LAYER_FIELD[layer]||'pct_val_freeze';return interp(CS.valfreeze,p[f]||0);}
   if(layer==='pct_vf_denied')return(p.pct_vf_denied>0)?interp(CS.pct_vf_denied,p.pct_vf_denied):'#f0f0f0';
-  if(layer==='pct_hoh')return interp(CS.pct_hoh,p.pct_hoh||0);
-  if(layer==='pct_vet')return interp(CS.pct_vet,p.pct_vet||0);
-  if(layer==='owner_turnover')return interp(CS.owner_turnover,p.owner_turnover||0);
+  if(layer==='pct_hoh'){const f=LAYER_FIELD[layer]||'pct_hoh';return interp(CS.pct_hoh,p[f]||0);}
+  if(layer==='pct_vet'){const f=LAYER_FIELD[layer]||'pct_vet';return interp(CS.pct_vet,p[f]||0);}
+  if(layer==='owner_turnover'){const f=LAYER_FIELD[layer]||'owner_turnover';return interp(CS.owner_turnover,p[f]||0);}
   if(layer==='hoh_churn')return interp(CS.hoh_churn,p.hoh_churn||0);
   if(layer==='sales')return interp(CS.sales,p.pct_recent_sale||0);
   if(layer==='taxlightning')return(p.recent_sales>=3)?interp(CS.taxlightning,p.sale_contact_rate||0):'#f0f0f0';

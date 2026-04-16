@@ -446,6 +446,28 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
                 cumulative *= (1 + c)
             props['val_change_pct'] = round(cumulative - 1, 4)
 
+        # Per-year stats for Property characteristics by year
+        for yr in all_years:
+            yr_recs = yr_data.get(yr, [])
+            if not yr_recs:
+                continue
+            ys = str(yr % 100)
+            yp = len(yr_recs)
+            yv = [safe_float(r.get('TOTVALUE')) for r in yr_recs if safe_float(r.get('TOTVALUE')) > 0]
+            yh = sum(1 for r in yr_recs if safe_float(r.get('HOHEXEMP')) > 0)
+            yvet = sum(1 for r in yr_recs if safe_float(r.get('VETEXEMP')) > 0)
+            yvf = sum(1 for r in yr_recs if str(r.get('EXEMCODE', '')).strip().upper() in ('VF', 'F', 'FREEZE'))
+            yyb = [safe_int(r.get('YRBUILT')) for r in yr_recs if safe_int(r.get('YRBUILT')) > 0]
+            yot = sum(1 for r in yr_recs if str(r.get('LSALEDATE', '') or '').strip())
+            props[f'avg_appraised_{ys}'] = int(statistics.mean(yv)) if yv else 0
+            props[f'median_val_{ys}'] = int(median_safe(yv)) if yv else 0
+            props[f'median_yrbuilt_{ys}'] = int(median_safe(yyb)) if yyb else 0
+            props[f'pct_hoh_{ys}'] = round(yh / yp, 4) if yp else 0
+            props[f'pct_vet_{ys}'] = round(yvet / yp, 4) if yp else 0
+            props[f'pct_val_freeze_{ys}'] = round(yvf / yp, 4) if yp else 0
+            props[f'owner_turnover_{ys}'] = round(yot / yp, 4) if yp else 0
+            props[f'parcels_{ys}'] = float(yp)
+
         updated[nbhd] = props
 
     return updated
