@@ -839,6 +839,7 @@ document.getElementById('opacSlider').addEventListener('input',e=>{
 // ── Commercial filter ─────────────────────────────────────────────────────────
 document.getElementById('hideCommercial').addEventListener('change',e=>{
   hideCommercial=e.target.checked;
+  _visFeatCache=null;_visFeatKey=null;
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   refreshOL(Object.keys(OL).filter(k=>k!=='rings'));
 });
