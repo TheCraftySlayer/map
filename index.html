@@ -274,7 +274,13 @@ const _layersP=fetch("data/layers.json").then(r=>r.json());
 _coreP.then(core=>{
   COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
   fetch(TIGER_URL).then(r=>r.json()).then(geo=>{
-    if(geo&&geo.features&&geo.features.length>0){TRACT_GEO=geo;console.log('Loaded '+geo.features.length+' tracts from TIGERweb API');}
+    if(geo&&geo.features&&geo.features.length>0){
+      const addrLookup={};
+      TRACT_GEO.features.forEach(f=>{if(f.properties.GEOID)addrLookup[f.properties.GEOID]=f.properties.address_count||0;});
+      geo.features.forEach(f=>{f.properties.address_count=addrLookup[f.properties.GEOID]||0;});
+      TRACT_GEO=geo;
+      console.log('Loaded '+geo.features.length+' tracts from TIGERweb API');
+    }
   }).catch(()=>console.log('TIGERweb API unavailable, using stored tracts'));
   const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
