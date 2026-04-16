@@ -653,7 +653,7 @@ def update_html_sidebar(final_layers, html_path, stats=None):
 
     # ── 1. Year filter checkboxes for tax roll point layers ──
     yr_set = set()
-    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V']:
+    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V', 'PRO', 'VFA', 'VFD', 'VFR', 'DVW']:
         for p in final_layers.get(k, []):
             if 'y' in p:
                 yr_set.add(p['y'])
@@ -929,7 +929,7 @@ def main():
 
     # Show year coverage for tax roll point layers
     yr_set = set()
-    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V']:
+    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V', 'PRO', 'VFA', 'VFD', 'VFR', 'DVW']:
         for p in final_layers.get(k, []):
             if 'y' in p:
                 yr_set.add(p['y'])
