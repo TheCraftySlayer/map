@@ -723,7 +723,7 @@ def fetch_census_acs():
     for yr in [2023, 2022, 2021]:
         url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
         try:
-            with urlopen(url, timeout=10) as resp:
+            with urlopen(url, timeout=5) as resp:
                 data = json.loads(resp.read())
                 h, v = data[0], data[1]
                 g = lambda k: v[h.index(k)]
@@ -861,6 +861,7 @@ def main():
     parser.add_argument('--enriched', help='Path to enriched parcel .dbf (has coords + protest/freeze)')
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
+    parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
     args = parser.parse_args()
 
     # Determine mode
@@ -1042,8 +1043,12 @@ def main():
         if snap_count:
             snapshot_parcels[snap_yr] = snap_count
 
-    print("\nFetching Census ACS data...")
-    census = fetch_census_acs()
+    census = None
+    if not args.no_census:
+        print("\nFetching Census ACS data...")
+        census = fetch_census_acs()
+    else:
+        print("\nSkipping Census ACS fetch (--no-census)")
 
     sidebar_stats = {
         'total_parcels': total_parcels,
