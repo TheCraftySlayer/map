@@ -648,7 +648,12 @@ def update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr):
             ys = str(yr % 100)
             yp = len(recs)
             vf_active = sum(1 for r in recs if str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower() == 'active')
+            vf_all = [r for r in recs if str(r.get('VAL_FREEZE_STATUS', '') or '').strip()]
+            vf_denied = sum(1 for r in vf_all if str(r.get('VAL_FREEZE_STATUS', '')).strip().lower() == 'denied')
+            hoh_count = sum(1 for r in recs if str(r.get('HEAD OF HOUSEHOLD', '') or '').strip().upper() in ('Y', 'YES', '1', 'TRUE'))
             props[f'pct_val_freeze_{ys}'] = round(vf_active / yp, 4) if yp else 0
+            props[f'pct_vf_denied_{ys}'] = round(vf_denied / len(vf_all), 4) if vf_all else 0
+            props[f'pct_hoh_e_{ys}'] = round(hoh_count / yp, 4) if yp else 0
 
 
 def build_nbhd_centers(core_data):
