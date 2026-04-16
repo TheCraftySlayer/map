@@ -527,8 +527,8 @@ info._buildHtml=function(p){
     '<div class="s"><span>Exemp drift</span><span class="v">'+(p.exemp_drift!=null?(p.exemp_drift*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
         '<div class="s"><span>Parcels</span><span class="v">'+((p.parcels||0).toLocaleString())+'</span></div>'+
     (p.volatility!=null?'<div class="s"><span>Cumulative volatility</span><span class="v">'+(p.volatility*100).toFixed(1)+'%</span></div>':'')+
-    (p.hoh_20!=null?'<div class="s"><span>HOH earliest\u2192latest</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
-    (p.vet_20!=null?'<div class="s"><span>VET earliest\u2192latest</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'');
+    (p.hoh_20!=null?'<div class="s"><span>HOH '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
+    (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'');
 };
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}

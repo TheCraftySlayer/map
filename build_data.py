@@ -628,6 +628,28 @@ def update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr):
             denied = sum(1 for r in vf_recs if str(r.get('VAL_FREEZE_STATUS', '')).strip().lower() == 'denied')
             props['pct_vf_denied'] = round(denied / len(vf_recs), 4)
 
+    # Per-year VF rate from enriched data (by nbhd + year)
+    by_nbhd_yr_e = defaultdict(lambda: defaultdict(list))
+    for yr, recs in enriched_by_yr.items():
+        for r in recs:
+            nbhd = safe_int(r.get('NBHD'))
+            if nbhd:
+                by_nbhd_yr_e[nbhd][yr].append(r)
+
+    for nbhd, yr_data in by_nbhd_yr_e.items():
+        if nbhd not in nbhd_stats:
+            continue
+        props = nbhd_stats[nbhd]
+        sorted_yrs = sorted(yr_data.keys())
+        props['earliest_yr'] = sorted_yrs[0]
+        props['latest_yr'] = sorted_yrs[-1]
+        for yr in sorted_yrs:
+            recs = yr_data[yr]
+            ys = str(yr % 100)
+            yp = len(recs)
+            vf_active = sum(1 for r in recs if str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower() == 'active')
+            props[f'pct_val_freeze_{ys}'] = round(vf_active / yp, 4) if yp else 0
+
 
 def build_nbhd_centers(core_data):
     """Compute neighborhood centers from polygon geometry."""
