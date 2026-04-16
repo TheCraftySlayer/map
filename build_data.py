@@ -32,6 +32,7 @@ Requirements:
 import json
 import argparse
 import csv
+import re
 import sys
 import statistics
 from collections import defaultdict
@@ -658,6 +659,118 @@ def build_nbhd_centers(core_data):
     return centers
 
 
+# Year → color map (must match YRC in index.html)
+YRC = {
+    2005:'#a6cee3',2006:'#b2df8a',2007:'#fb9a99',2008:'#fdbf6f',2009:'#cab2d6',
+    2010:'#ffff99',2011:'#b15928',2012:'#6a3d9a',2013:'#ff7f00',2014:'#33a02c',
+    2015:'#e31a1c',2016:'#1f78b4',2017:'#a65628',2018:'#f781bf',2019:'#999999',
+    2020:'#66c2a5',2021:'#fc8d62',2022:'#984ea3',2023:'#2166ac',2024:'#f4a11d',
+    2025:'#1a9850',2026:'#e41a1c',
+}
+
+
+def update_html_sidebar(final_layers, html_path):
+    """Update index.html sidebar counts and year filter checkboxes
+    to match the actual generated layer data."""
+    html_file = Path(html_path)
+    if not html_file.exists():
+        print(f"  Skipping HTML update: {html_path} not found")
+        return
+
+    raw = html_file.read_bytes()
+    crlf = b'\r\n' in raw
+    html = raw.decode('utf-8').replace('\r\n', '\n')
+    counts = {k: len(v) for k, v in final_layers.items()}
+
+    # ── 1. Year filter checkboxes for tax roll point layers ──
+    yr_set = set()
+    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V']:
+        for p in final_layers.get(k, []):
+            if 'y' in p:
+                yr_set.add(p['y'])
+
+    if yr_set:
+        min_yr, max_yr = min(yr_set), max(yr_set)
+        # Update header range
+        html = re.sub(
+            r'(Tax roll point layers <span[^>]*>)\d+&ndash;\d+( tax rolls)',
+            rf'\g<1>{min_yr}&ndash;{max_yr}\2',
+            html,
+        )
+        # Rebuild year checkbox block
+        cb_lines = []
+        for yr in sorted(yr_set):
+            color = YRC.get(yr, '#666')
+            short = f"'{yr % 100:02d}"
+            cb_lines.append(
+                f'    <label style="margin:0"><input type="checkbox" class="yrf" value="{yr}"> '
+                f'<span style="color:{color};font-weight:600">{short}</span></label>'
+            )
+        new_block = '\n'.join(cb_lines)
+        html = re.sub(
+            r'(  <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:10px;flex-wrap:wrap">\n)'
+            r'(?:    <label style="margin:0"><input type="checkbox" class="yrf"[^\n]*\n)+'
+            r'(  </div>)',
+            rf'\1{new_block}\n\2',
+            html,
+        )
+
+    # ── 2. VF pipeline counts ──
+    vf_denied_n = counts.get('VF_DENIED', 0)
+    vf_inproc_n = counts.get('VF_INPROC', 0)
+    vf_total = vf_denied_n + vf_inproc_n
+    html = re.sub(
+        r'(Value freeze pipeline <span[^>]*>)[^<]*(</span>)',
+        rf'\g<1>2025 roll &middot; {vf_total:,} geocoded\2',
+        html,
+    )
+    html = re.sub(
+        r'(data-layer="vf_denied">.*?Denied )\([\d,]+\)',
+        rf'\1({vf_denied_n:,})',
+        html,
+    )
+    html = re.sub(
+        r'(data-layer="vf_inproc">.*?In-process )\([\d,]+\)',
+        rf'\1({vf_inproc_n:,})',
+        html,
+    )
+
+    # ── 3. 2020 snapshot counts ──
+    for html_key, data_key, label in [
+        ('pro_20', 'PRO_20', 'Protests'),
+        ('vf_20_g', 'VF_20_G', 'VF granted'),
+        ('vf_20_d', 'VF_20_D', 'VF denied'),
+        ('vetw', 'VETW', 'Disabled vet waiver'),
+    ]:
+        n = counts.get(data_key, 0)
+        html = re.sub(
+            rf'(data-layer="{html_key}">.*?{re.escape(label)} )\([\d,]+\)',
+            rf'\1({n:,})',
+            html,
+        )
+
+    # ── 4. 2021 snapshot counts ──
+    for html_key, data_key, label in [
+        ('pro_21', 'PRO_21', 'Protests'),
+        ('vf21_a', 'VF21_A', 'VF active'),
+        ('vf21_d', 'VF21_D', 'VF denied'),
+        ('vf21_r', 'VF21_R', 'VF removed'),
+        ('vetw_21', 'VETW_21', 'Disabled vet waiver'),
+    ]:
+        n = counts.get(data_key, 0)
+        html = re.sub(
+            rf'(data-layer="{html_key}">.*?{re.escape(label)} )\([\d,]+\)',
+            rf'\1({n:,})',
+            html,
+        )
+
+    out = html.encode('utf-8')
+    if crlf:
+        out = out.replace(b'\n', b'\r\n')
+    html_file.write_bytes(out)
+    print(f"  Updated {html_path} sidebar counts")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Rebuild map JSON from .dbf files',
@@ -760,9 +873,12 @@ def main():
         for yr in sorted(joined_by_yr.keys()):
             print(f"  {yr}: {len(joined_by_yr[yr]):,} records")
 
-        print("\nBuilding sale layer from joined data...")
-        sl_layers = build_point_layers_from_roll(joined_by_yr)
-        new_layers['SL'] = sl_layers.get('SL', [])
+        print("\nBuilding sale & exemption layers from joined roll data...")
+        roll_layers = build_point_layers_from_roll(joined_by_yr)
+        new_layers['SL'] = roll_layers.get('SL', [])
+        # Use roll-based exemption gain/loss (wider year range than enriched)
+        for k in ['EG_H', 'EG_V', 'EL_H', 'EL_V']:
+            new_layers[k] = roll_layers.get(k, [])
 
         rebuilt_keys = [
             'SL', 'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
@@ -836,6 +952,11 @@ def main():
     layers_size = layers_path.stat().st_size
     print(f"  → {layers_size:,} bytes")
 
+    # ── Update HTML sidebar counts ──
+    html_path = outdir.parent / 'index.html'
+    print(f"\nUpdating {html_path}...")
+    update_html_sidebar(final_layers, html_path)
+
     # Summary
     print("\n── Summary ──")
     print(f"Mode:           {mode}")
@@ -849,6 +970,17 @@ def main():
     for k in sorted(preserved_keys):
         count = len(final_layers.get(k, []))
         print(f"  {k}: {count:,} points (preserved)")
+
+    # Show year coverage for tax roll point layers
+    yr_set = set()
+    for k in ['SL', 'EG_H', 'EG_V', 'EL_H', 'EL_V']:
+        for p in final_layers.get(k, []):
+            if 'y' in p:
+                yr_set.add(p['y'])
+    if yr_set:
+        print(f"\n  Tax roll point years: {sorted(yr_set)}")
+        print(f"  Note: include the prior year's roll file to get points for the earliest year.")
+
     print("\nDone! Commit and push to update the site.")
 
 
