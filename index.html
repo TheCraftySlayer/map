@@ -168,23 +168,6 @@
   <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
 
   <hr>
-  <h5>Value freeze pipeline <span style="font-weight:400;color:#aaa">2025 roll &middot; 1,143 geocoded</span></h5>
-  <label><input type="checkbox" class="ol" data-layer="vf_denied"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> Denied (1,128)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf_inproc"> <span class="d" style="width:8px;height:8px;background:#fdae61"></span> In-process (15)</label>
-
-  <h5>2020 tax roll snapshot <span style="font-weight:400;color:#aaa">TY 2020 &middot; 253,909 parcels</span></h5>
-  <label><input type="checkbox" class="ol" data-layer="pro_20"> <span class="d" style="width:8px;height:8px;background:#e31a1c"></span> Protests (639)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf_20_g"> <span class="d" style="width:8px;height:8px;background:#1a9850"></span> VF granted (981)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf_20_d"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> VF denied (876)</label>
-  <label><input type="checkbox" class="ol" data-layer="vetw"> <span class="d" style="width:8px;height:8px;background:#4a1486"></span> Disabled vet waiver (1,275)</label>
-
-  <h5>2021 tax roll snapshot <span style="font-weight:400;color:#aaa">TY 2021 &middot; 254,605 parcels</span></h5>
-  <label><input type="checkbox" class="ol" data-layer="pro_21"> <span class="d" style="width:8px;height:8px;background:#e31a1c"></span> Protests (590)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf21_a"> <span class="d" style="width:8px;height:8px;background:#1a9850"></span> VF active (1,000)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf21_d"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> VF denied (905)</label>
-  <label><input type="checkbox" class="ol" data-layer="vf21_r"> <span class="d" style="width:8px;height:8px;background:#999"></span> VF removed (1,290)</label>
-  <label><input type="checkbox" class="ol" data-layer="vetw_21"> <span class="d" style="width:8px;height:8px;background:#4a1486"></span> Disabled vet waiver (1,252)</label>
-
   <h5>In-person visitors <span style="font-weight:400;color:#aaa">Jan 2022&ndash;Apr 2026 &middot; 63,890 visits</span></h5>
   <div style="display:flex;gap:8px;margin:4px 0 6px 2px;font-size:11px;flex-wrap:wrap">
     <label style="margin:0"><input type="checkbox" class="visyrf" value="2022" checked> <span style="color:#984ea3;font-weight:600">2022</span></label>
@@ -262,9 +245,7 @@ L.HeatLayer=(L.Layer?L.Layer:L.Class).extend({initialize:function(t,i){this._lat
 let COUNTY, DATA, NBHD_CENTERS, TRACT_GEO;
 let SL=[], EG_H=[], EG_V=[], EL_H=[], EL_V=[], RPT=[], CO=[], VO=[], MC=[];
 let VET_V=[], VF_V=[], HOH_V=[], PRO_V=[], SP_GEO=[];
-let VF_DENIED=[], VF_INPROC=[], VF_20_G=[], VF_20_D=[];
-let PRO=[], PRO_20=[], VF20_A=[], VF20_D=[], VF20_R=[], VETW=[];
-let PRO_21=[], VF21_A=[], VF21_D=[], VF21_R=[], VETW_21=[];
+let PRO=[];
 let VFA=[], VFD=[], VFR=[], DVW=[];
 const VF_OL=null;
 const OFC=[35.08249,-106.65261];
@@ -286,9 +267,7 @@ _coreP.then(core=>{
 _layersP.then(d=>{
   SL=d.SL; EG_H=d.EG_H; EG_V=d.EG_V; EL_H=d.EL_H; EL_V=d.EL_V; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
   VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
-  VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
-  PRO=d.PRO||[]; PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
-  PRO_21=d.PRO_21; VF21_A=d.VF21_A; VF21_D=d.VF21_D; VF21_R=d.VF21_R; VETW_21=d.VETW_21;
+  PRO=d.PRO||[];
   VFA=d.VFA||[]; VFD=d.VFD||[]; VFR=d.VFR||[]; DVW=d.DVW||[];
   _layersReady=true;
   if(typeof refreshOL==='function')refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
@@ -857,7 +836,7 @@ function makeHeat(pts,key){
     if(key==='rpt'&&p.c)w=p.c;
     else if(['vet_v','vf_v','hoh_v','pro_v','sp_geo'].includes(key)&&p.d)w=p.d;
     else if(key==='sl'&&p.p)w=Math.log10(Math.max(p.p,1));
-    else if(['vf_denied','vf_inproc'].includes(key)&&p.v)w=Math.log10(Math.max(p.v,1));
+    else if(['vfa','vfd','vfr','dvw'].includes(key)&&p.v)w=Math.log10(Math.max(p.v,1));
     return [p.la,p.ln,w];
   });
   for(let i=0;i<weighted.length;i++){if(weighted[i][2]>maxW)maxW=weighted[i][2];}
@@ -881,30 +860,16 @@ function buildLayer(key){
     vfd:{src:()=>VFD.filter(p=>activeYrs.has(p.y)),col:'#d73027',r:3,pop:p=>p.y+' VF denied\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     vfr:{src:()=>VFR.filter(p=>activeYrs.has(p.y)),col:'#999',r:3,pop:p=>p.y+' VF removed\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     dvw:{src:()=>DVW.filter(p=>activeYrs.has(p.y)),col:'#4a1486',r:4,pop:p=>p.y+' disabled vet waiver\n$'+(p.v||0).toLocaleString()},
-    vf_denied:{src:()=>VF_DENIED,col:'#d73027',r:3,pop:p=>'VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vf_inproc:{src:()=>VF_INPROC,col:'#fdae61',r:5,pop:p=>'VF in process\n$'+p.v.toLocaleString()},
-    vf20_a:{src:()=>VF20_A,col:'#2166ac',r:3.5,pop:p=>'VF 2020 active\n$'+(p.v||0).toLocaleString()},
-    vf20_d:{src:()=>VF20_D,col:'#d73027',r:3,pop:p=>'VF 2020 denied\n$'+(p.v||0).toLocaleString()},
-    vf20_r:{src:()=>VF20_R,col:'#999',r:3,pop:p=>'VF 2020 removed\n$'+(p.v||0).toLocaleString()},
         rpt:{src:()=>RPT,col:'#b10026',r:4,pop:p=>p.c+' calls'},
     co:{src:()=>CO,col:'#185FA5',r:2.5,pop:null},
     vo:{src:()=>VO,col:'#1D9E75',r:2.5,pop:null},
     mc:{src:()=>MC,col:'#BA7517',r:3,pop:null},
-    pro_20:{src:()=>PRO_20,col:'#e31a1c',r:5,pop:p=>'2020 protest\nHearing: '+p.ht+'\nStatus: '+p.st+'\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
-    vf_20_g:{src:()=>VF_20_G,col:'#1a9850',r:3,pop:p=>'2020 VF granted\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vf_20_d:{src:()=>VF_20_D,col:'#d73027',r:3,pop:p=>'2020 VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vetw:{src:()=>VETW,col:'#4a1486',r:4,pop:p=>'Disabled vet waiver\n$'+p.v.toLocaleString()},
-    pro_21:{src:()=>PRO_21,col:'#e31a1c',r:5,pop:p=>'2021 protest\nHearing: '+p.ht+'\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
-    vf21_a:{src:()=>VF21_A,col:'#1a9850',r:3,pop:p=>'2021 VF active\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vf21_d:{src:()=>VF21_D,col:'#d73027',r:3,pop:p=>'2021 VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vf21_r:{src:()=>VF21_R,col:'#999',r:3,pop:p=>'2021 VF removed\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vetw_21:{src:()=>VETW_21,col:'#4a1486',r:4,pop:p=>'2021 disabled vet waiver\n$'+p.v.toLocaleString()},
   };
   const d=defs[key];
   if(!d)return L.layerGroup([]);
   let pts=d.src();
   if(hideCommercial&&commercialNbhds.size)pts=pts.filter(p=>!p.n||!commercialNbhds.has(p.n));
-  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
+  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','rpt','co','vo','mc'].includes(key)){
     return makeHeat(pts,key);
   }
   return makeCluster(pts,d.col,d.r,d.pop);
@@ -928,7 +893,7 @@ function refreshOL(keys){
 // ── Heatmap toggle ────────────────────────────────────────────────────────────
 document.getElementById('heatMode').addEventListener('change',e=>{
   heatMode=e.target.checked;
-  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
+  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','rpt','co','vo','mc']);
 });
 
 // ── Year filters ──────────────────────────────────────────────────────────────
