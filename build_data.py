@@ -579,6 +579,39 @@ def build_point_layers(enriched_by_yr):
                 pts.append({'la': la, 'ln': ln, 'v': safe_int(r.get('APRTOTAL'))})
         layers[key] = pts
 
+    # ── Unified value freeze layer (all years, year-filtered) ──
+    vf_active_all, vf_denied_all, vf_removed_all = [], [], []
+    for yr, recs in enriched_by_yr.items():
+        for r in recs:
+            status = str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower()
+            if not status:
+                continue
+            la, ln = ll(r)
+            v = safe_int(r.get('APRTOTAL'))
+            vf_yr = str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
+            pt = {'la': la, 'ln': ln, 'y': yr, 'v': v, 'yr': vf_yr}
+            if status == 'active':
+                vf_active_all.append(pt)
+            elif status == 'denied':
+                vf_denied_all.append(pt)
+            elif status == 'removed':
+                vf_removed_all.append(pt)
+    layers['VFA'] = vf_active_all
+    layers['VFD'] = vf_denied_all
+    layers['VFR'] = vf_removed_all
+    print(f"  VF all years: active {len(vf_active_all):,}, denied {len(vf_denied_all):,}, removed {len(vf_removed_all):,}")
+
+    # ── Unified disabled veteran waiver (all years, year-filtered) ──
+    dvw_all = []
+    for yr, recs in enriched_by_yr.items():
+        for r in recs:
+            waiver = str(r.get('DISABLED VETERAN TAX WAIVER', '') or '').strip()
+            if waiver.upper() in ('Y', 'YES', '1', 'TRUE'):
+                la, ln = ll(r)
+                dvw_all.append({'la': la, 'ln': ln, 'y': yr, 'v': safe_int(r.get('APRTOTAL'))})
+    layers['DVW'] = dvw_all
+    print(f"  Disabled vet waiver (all years): {len(dvw_all):,}")
+
     # ── Exemption gained/lost (multi-year comparison) ──
     # Group enriched records by parcel ID across years
     by_parid = defaultdict(dict)
@@ -853,6 +886,7 @@ def main():
         'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
         'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
+        'VFA', 'VFD', 'VFR', 'DVW',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
         'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
         'EG_H', 'EG_V', 'EL_H', 'EL_V',
@@ -905,6 +939,7 @@ def main():
             'SL', 'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
+            'VFA', 'VFD', 'VFR', 'DVW',
             'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
         ]
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
