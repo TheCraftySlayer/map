@@ -617,6 +617,17 @@ def build_point_layers(enriched_by_yr):
     layers['DVW'] = dvw_all
     print(f"  Disabled vet waiver (all years): {len(dvw_all):,}")
 
+    # ── Unified HOH exemption holders (all years, year-filtered) ──
+    hoh_all = []
+    for yr, recs in enriched_by_yr.items():
+        for r in recs:
+            hoh = str(r.get('HEAD OF HOUSEHOLD', '') or '').strip()
+            if hoh.upper() in ('Y', 'YES', '1', 'TRUE'):
+                la, ln = ll(r)
+                hoh_all.append({'la': la, 'ln': ln, 'y': yr, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
+    layers['HOH'] = hoh_all
+    print(f"  HOH exemption (all years): {len(hoh_all):,}")
+
     # ── Exemption gained/lost (multi-year comparison) ──
     # Group enriched records by parcel ID across years
     by_parid = defaultdict(dict)
@@ -729,9 +740,13 @@ YRC = {
 }
 
 
-def update_html_sidebar(final_layers, html_path):
+def update_html_sidebar(final_layers, html_path, stats=None):
     """Update index.html sidebar counts and year filter checkboxes
-    to match the actual generated layer data."""
+    to match the actual generated layer data.
+    stats: optional dict with total_parcels, latest_yr, nbhd_count,
+           snapshot_parcels={2020: N, 2021: N}"""
+    if stats is None:
+        stats = {}
     html_file = Path(html_path)
     if not html_file.exists():
         print(f"  Skipping HTML update: {html_path} not found")
@@ -824,6 +839,42 @@ def update_html_sidebar(final_layers, html_path):
             html,
         )
 
+    # ── 5. Property characteristics header ──
+    total_parcels = stats.get('total_parcels')
+    latest_yr = stats.get('latest_yr')
+    if total_parcels and latest_yr:
+        html = re.sub(
+            r'(Property characteristics <span[^>]*>)[^<]*(</span>)',
+            rf'\g<1>{latest_yr} roll &middot; {total_parcels:,} parcels\2',
+            html,
+        )
+
+    # ── 6. Snapshot section parcel counts ──
+    snap = stats.get('snapshot_parcels', {})
+    for yr, parcel_count in snap.items():
+        html = re.sub(
+            rf'({yr} tax roll snapshot <span[^>]*>)TY {yr} &middot; [\d,]+ parcels(</span>)',
+            rf'\g<1>TY {yr} &middot; {parcel_count:,} parcels\2',
+            html,
+        )
+
+    # ── 7. VF pipeline year ──
+    if latest_yr:
+        html = re.sub(
+            r'(Value freeze pipeline <span[^>]*>)\d+ roll',
+            rf'\g<1>{latest_yr} roll',
+            html,
+        )
+
+    # ── 8. Sidebar note ──
+    nbhd_count = stats.get('nbhd_count')
+    if total_parcels and nbhd_count:
+        html = re.sub(
+            r'(\d+ neighborhoods &middot; 176 census tracts &middot; )[\d,]+ parcels \(\d+\)',
+            rf'{nbhd_count} neighborhoods &middot; 176 census tracts &middot; {total_parcels:,} parcels ({latest_yr})',
+            html,
+        )
+
     out = html.encode('utf-8')
     if crlf:
         out = out.replace(b'\n', b'\r\n')
@@ -892,7 +943,7 @@ def main():
         'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
         'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
-        'VFA', 'VFD', 'VFR', 'DVW',
+        'VFA', 'VFD', 'VFR', 'DVW', 'HOH',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
         'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
         'EG_H', 'EG_V', 'EL_H', 'EL_V',
@@ -945,7 +996,7 @@ def main():
             'SL', 'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
-            'VFA', 'VFD', 'VFR', 'DVW',
+            'VFA', 'VFD', 'VFR', 'DVW', 'HOH',
             'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
         ]
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
@@ -1014,10 +1065,31 @@ def main():
     layers_size = layers_path.stat().st_size
     print(f"  → {layers_size:,} bytes")
 
+    # ── Compute sidebar stats from data ──
+    all_roll_years = set()
+    for nbhd, yr_data in by_nbhd_yr.items():
+        all_roll_years.update(yr_data.keys())
+    latest_yr = max(all_roll_years) if all_roll_years else 2025
+    total_parcels = sum(int(props.get('parcels', 0)) for props in nbhd_stats.values())
+
+    snapshot_parcels = {}
+    for snap_yr in [2020, 2021]:
+        snap_count = sum(len(yr_data.get(snap_yr, []))
+                         for yr_data in by_nbhd_yr.values())
+        if snap_count:
+            snapshot_parcels[snap_yr] = snap_count
+
+    sidebar_stats = {
+        'total_parcels': total_parcels,
+        'latest_yr': latest_yr,
+        'nbhd_count': len(nbhd_stats),
+        'snapshot_parcels': snapshot_parcels,
+    }
+
     # ── Update HTML sidebar counts ──
     html_path = outdir.parent / 'index.html'
     print(f"\nUpdating {html_path}...")
-    update_html_sidebar(final_layers, html_path)
+    update_html_sidebar(final_layers, html_path, stats=sidebar_stats)
 
     # Summary
     print("\n── Summary ──")
