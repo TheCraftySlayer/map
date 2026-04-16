@@ -707,7 +707,7 @@ def update_html_sidebar(final_layers, html_path, stats=None):
             )
         new_block = '\n'.join(cb_lines)
         html = re.sub(
-            r'(  <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:10px;flex-wrap:wrap">\n)'
+            r'(  <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:1[01]px;flex-wrap:wrap">\n)'
             r'(?:    <label style="margin:0"><input type="checkbox" class="yrf"[^\n]*\n)+'
             r'(  </div>)',
             rf'\1{new_block}\n\2',

@@ -96,7 +96,7 @@
 
   <label style="margin-top:4px"><input type="checkbox" id="hideCommercial"> Hide commercial neighborhoods</label>
 
-  <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">2023 TIGER &middot; 105,922 addresses</span></h5>
+  <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER (live)</span></h5>
   <label><input type="radio" name="tract_layer" value="none" checked> Off</label>
   <label><input type="radio" name="tract_layer" value="addr_density"> Geocoded address density</label>
 
@@ -186,7 +186,7 @@
   <label><input type="checkbox" class="ol" data-layer="sp_geo"> <span class="d" style="width:8px;height:8px;background:#e6ab02"></span> Spanish-speaking (222)</label>
 
   <h5>Market activity <span style="font-weight:400;color:#aaa">2008&ndash;2025 tax rolls</span></h5>
-  <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:10px;flex-wrap:wrap">
+  <div style="display:flex;gap:6px;margin:4px 0 6px 2px;font-size:11px;flex-wrap:wrap">
     <label style="margin:0"><input type="checkbox" class="yrf" value="2008"> <span style="color:#fdbf6f;font-weight:600">'08</span></label>
     <label style="margin:0"><input type="checkbox" class="yrf" value="2009"> <span style="color:#cab2d6;font-weight:600">'09</span></label>
     <label style="margin:0"><input type="checkbox" class="yrf" value="2010"> <span style="color:#ffff99;font-weight:600">'10</span></label>
@@ -254,6 +254,7 @@ L.HeatLayer=(L.Layer?L.Layer:L.Class).extend({initialize:function(t,i){this._lat
 <script>
 // ── Data variables (loaded from JSON) ──────────────────────────────────────────
 let COUNTY, DATA, NBHD_CENTERS, TRACT_GEO;
+const TIGER_URL='https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/0/query?where=STATE%3D%2735%27+AND+COUNTY%3D%27001%27&outFields=GEOID,NAME,BASENAME,TRACT,AREALAND,CENTLAT,CENTLON,NAMELSAD&f=geojson';
 let SL=[], EG_H=[], EG_V=[], EL_H=[], EL_V=[], RPT=[], CO=[], VO=[], MC=[];
 let VET_V=[], VF_V=[], HOH_V=[], PRO_V=[], SP_GEO=[];
 let PRO=[];
@@ -272,6 +273,9 @@ const _coreP=fetch("data/core.json").then(r=>r.json());
 const _layersP=fetch("data/layers.json").then(r=>r.json());
 _coreP.then(core=>{
   COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
+  fetch(TIGER_URL).then(r=>r.json()).then(geo=>{
+    if(geo&&geo.features&&geo.features.length>0){TRACT_GEO=geo;console.log('Loaded '+geo.features.length+' tracts from TIGERweb API');}
+  }).catch(()=>console.log('TIGERweb API unavailable, using stored tracts'));
   const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
 });
