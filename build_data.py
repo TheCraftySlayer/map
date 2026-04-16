@@ -210,15 +210,12 @@ def join_roll_with_coords(roll_records, coord_lookup):
 
 
 def build_point_layers_from_roll(joined_by_yr):
-    """Build point layers from tax roll + coords (no enriched data needed).
-    Limits to last 5 years to keep file size manageable."""
+    """Build point layers from tax roll + coords (no enriched data needed)."""
     layers = {}
 
-    # Use last 10 years for point layers, plus one extra prior year as
-    # baseline so change detection can produce points for the earliest year.
+    # Use all available years for point layers.
     all_years = sorted(joined_by_yr.keys())
-    max_point_years = 10
-    recent_years = all_years[-(max_point_years + 1):] if len(all_years) > max_point_years + 1 else all_years
+    recent_years = all_years
     print(f"  Using years {recent_years[0]}-{recent_years[-1]} for point layers ({len(recent_years)} years)")
 
     recent_recs = []
@@ -473,48 +470,6 @@ def build_point_layers(enriched_by_yr):
     def nb(r):
         return safe_int(r.get('NBHD'))
 
-    # ── VF_DENIED: Value freeze denied (latest year only) ──
-    latest_yr = max(enriched_by_yr.keys())
-    latest_recs = enriched_by_yr.get(latest_yr, [])
-    vf_denied = []
-    vf_inproc = []
-    for r in latest_recs:
-        status = str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower()
-        if status == 'denied':
-            la, ln = ll(r)
-            vf_denied.append({
-                'la': la, 'ln': ln, 'n': nb(r),
-                'v': safe_int(r.get('APRTOTAL')),
-                'yr': str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
-            })
-        elif status in ('in process', 'in-process', 'inprocess', 'pending'):
-            la, ln = ll(r)
-            vf_inproc.append({'la': la, 'ln': ln, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
-    layers['VF_DENIED'] = vf_denied
-    layers['VF_INPROC'] = vf_inproc
-    print(f"  VF denied: {len(vf_denied):,}, in-process: {len(vf_inproc):,} (year {latest_yr})")
-
-    # ── Protest layers by year ──
-    for target_yr, key in [(2020, 'PRO_20'), (2021, 'PRO_21')]:
-        recs = enriched_by_yr.get(target_yr, [])
-        pts = []
-        for r in recs:
-            if not r.get('PROTESTED'):
-                continue
-            protested = str(r.get('PROTESTED', '') or '').strip()
-            if protested.upper() not in ('Y', 'YES', '1', 'TRUE'):
-                continue
-            la, ln = ll(r)
-            pts.append({
-                'la': la, 'ln': ln, 'n': nb(r),
-                'ht': str(r.get('HEARING TYPE', '') or '').strip()[:1] or '',
-                'st': str(r.get('HEARING STATUS', '') or '').strip()[:1] or '',
-                'ra': str(r.get('RESULT ACTION', '') or '').strip() or '',
-                'nv': safe_int(r.get('NOTICE VALUE')),
-                'tv': safe_int(r.get('TAXPAYER VALUE')),
-            })
-        layers[key] = pts
-
     # ── Unified protest layer (all years, year-filtered) ──
     pro_all = []
     for yr, recs in enriched_by_yr.items():
@@ -533,56 +488,6 @@ def build_point_layers(enriched_by_yr):
             })
     layers['PRO'] = pro_all
     print(f"  Protests (all years): {len(pro_all):,}")
-
-    # ── Value freeze layers by year ──
-    for target_yr in [2020, 2021]:
-        recs = enriched_by_yr.get(target_yr, [])
-        active, denied, removed = [], [], []
-        for r in recs:
-            status = str(r.get('VAL_FREEZE_STATUS', '') or '').strip().lower()
-            if not status:
-                continue
-            la, ln = ll(r)
-            v = safe_int(r.get('APRTOTAL'))
-            vf_yr = str(r.get('VAL_FREEZE_YEAR', '') or '').strip() or None
-            n = nb(r)
-            if status == 'active':
-                if target_yr == 2020:
-                    active.append({'la': la, 'ln': ln, 'n': n, 's': 'Active', 'v': v})
-                else:
-                    active.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
-            elif status == 'denied':
-                if target_yr == 2020:
-                    denied.append({'la': la, 'ln': ln, 'n': n, 's': 'Denied', 'v': v})
-                else:
-                    denied.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
-            elif status == 'removed':
-                if target_yr == 2020:
-                    removed.append({'la': la, 'ln': ln, 'n': n, 's': 'Removed', 'v': v})
-                else:
-                    removed.append({'la': la, 'ln': ln, 'n': n, 'v': v, 'yr': vf_yr})
-
-        if target_yr == 2020:
-            layers['VF20_A'] = active
-            layers['VF20_D'] = denied
-            layers['VF20_R'] = removed
-            layers['VF_20_G'] = [{'la': p['la'], 'ln': p['ln'], 'n': p['n'], 'v': p['v'], 'yr': vf_yr} for p in active]
-            layers['VF_20_D'] = [{'la': p['la'], 'ln': p['ln'], 'n': p['n'], 'v': p['v'], 'yr': vf_yr} for p in denied]
-        else:
-            layers['VF21_A'] = active
-            layers['VF21_D'] = denied
-            layers['VF21_R'] = removed
-
-    # ── Disabled veteran waiver ──
-    for target_yr, key in [(2020, 'VETW'), (2021, 'VETW_21')]:
-        recs = enriched_by_yr.get(target_yr, [])
-        pts = []
-        for r in recs:
-            waiver = str(r.get('DISABLED VETERAN TAX WAIVER', '') or '').strip()
-            if waiver.upper() in ('Y', 'YES', '1', 'TRUE'):
-                la, ln = ll(r)
-                pts.append({'la': la, 'ln': ln, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
-        layers[key] = pts
 
     # ── Unified value freeze layer (all years, year-filtered) ──
     vf_active_all, vf_denied_all, vf_removed_all = [], [], []
@@ -779,56 +684,7 @@ def update_html_sidebar(final_layers, html_path, stats=None):
             html,
         )
 
-    # ── 2. VF pipeline counts ──
-    vf_denied_n = counts.get('VF_DENIED', 0)
-    vf_inproc_n = counts.get('VF_INPROC', 0)
-    vf_total = vf_denied_n + vf_inproc_n
-    html = re.sub(
-        r'(Value freeze pipeline <span[^>]*>)[^<]*(</span>)',
-        rf'\g<1>2025 roll &middot; {vf_total:,} geocoded\2',
-        html,
-    )
-    html = re.sub(
-        r'(data-layer="vf_denied">.*?Denied )\([\d,]+\)',
-        rf'\1({vf_denied_n:,})',
-        html,
-    )
-    html = re.sub(
-        r'(data-layer="vf_inproc">.*?In-process )\([\d,]+\)',
-        rf'\1({vf_inproc_n:,})',
-        html,
-    )
-
-    # ── 3. 2020 snapshot counts ──
-    for html_key, data_key, label in [
-        ('pro_20', 'PRO_20', 'Protests'),
-        ('vf_20_g', 'VF_20_G', 'VF granted'),
-        ('vf_20_d', 'VF_20_D', 'VF denied'),
-        ('vetw', 'VETW', 'Disabled vet waiver'),
-    ]:
-        n = counts.get(data_key, 0)
-        html = re.sub(
-            rf'(data-layer="{html_key}">.*?{re.escape(label)} )\([\d,]+\)',
-            rf'\1({n:,})',
-            html,
-        )
-
-    # ── 4. 2021 snapshot counts ──
-    for html_key, data_key, label in [
-        ('pro_21', 'PRO_21', 'Protests'),
-        ('vf21_a', 'VF21_A', 'VF active'),
-        ('vf21_d', 'VF21_D', 'VF denied'),
-        ('vf21_r', 'VF21_R', 'VF removed'),
-        ('vetw_21', 'VETW_21', 'Disabled vet waiver'),
-    ]:
-        n = counts.get(data_key, 0)
-        html = re.sub(
-            rf'(data-layer="{html_key}">.*?{re.escape(label)} )\([\d,]+\)',
-            rf'\1({n:,})',
-            html,
-        )
-
-    # ── 5. Property characteristics header ──
+    # ── 2. Property characteristics header ──
     total_parcels = stats.get('total_parcels')
     latest_yr = stats.get('latest_yr')
     if total_parcels and latest_yr:
@@ -838,24 +694,7 @@ def update_html_sidebar(final_layers, html_path, stats=None):
             html,
         )
 
-    # ── 6. Snapshot section parcel counts ──
-    snap = stats.get('snapshot_parcels', {})
-    for yr, parcel_count in snap.items():
-        html = re.sub(
-            rf'({yr} tax roll snapshot <span[^>]*>)TY {yr} &middot; [\d,]+ parcels(</span>)',
-            rf'\g<1>TY {yr} &middot; {parcel_count:,} parcels\2',
-            html,
-        )
-
-    # ── 7. VF pipeline year ──
-    if latest_yr:
-        html = re.sub(
-            r'(Value freeze pipeline <span[^>]*>)\d+ roll',
-            rf'\g<1>{latest_yr} roll',
-            html,
-        )
-
-    # ── 8. Sidebar note ──
+    # ── 3. Sidebar note ──
     nbhd_count = stats.get('nbhd_count')
     if total_parcels and nbhd_count:
         html = re.sub(
@@ -931,10 +770,7 @@ def main():
     all_layer_keys = [
         'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
-        'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
-        'VFA', 'VFD', 'VFR', 'DVW',
-        'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
-        'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
+        'PRO', 'VFA', 'VFD', 'VFR', 'DVW',
         'EG_H', 'EG_V', 'EL_H', 'EL_V',
     ]
 
@@ -982,11 +818,8 @@ def main():
             new_layers[k] = roll_layers.get(k, [])
 
         rebuilt_keys = [
-            'SL', 'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
-            'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
-            'VF21_A', 'VF21_D', 'VF21_R',
-            'VFA', 'VFD', 'VFR', 'DVW',
-            'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
+            'SL', 'PRO', 'VFA', 'VFD', 'VFR', 'DVW',
+            'EG_H', 'EG_V', 'EL_H', 'EL_V'
         ]
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
 
