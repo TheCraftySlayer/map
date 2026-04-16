@@ -549,7 +549,9 @@ info._buildHtml=function(p){
     (p.volatility!=null?'<div class="s"><span>Cumulative volatility</span><span class="v">'+(p.volatility*100).toFixed(1)+'%</span></div>':'')+
     (p.hoh_20!=null?'<div class="s"><span>HOH '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
     (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'')+
-    (p.outreach_need!=null?'<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span><b>Outreach need</b></span><span class="v" style="color:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'"><b>'+(p.outreach_need*100).toFixed(0)+'%</b></span></div>':'');
+    (p.outreach_need!=null?'<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span><b>Outreach need</b></span><span class="v" style="color:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'"><b>'+(p.outreach_need*100).toFixed(0)+'%</b></span></div>':'')+
+    (p.outreach_recs?'<div style="margin-top:3px;font-size:10px;color:#555"><b>Recommended outreach:</b><ul style="margin:2px 0 0 16px;padding:0">'+p.outreach_recs.split('|').map(function(r){return'<li>'+r+'</li>';}).join('')+'</ul></div>':'')+
+    (p.nearest_cc?'<div style="margin-top:3px;font-size:10px;color:#185FA5"><b>\u2192 Host event at:</b> '+p.nearest_cc+' Community Center</div>':'');
 };
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}

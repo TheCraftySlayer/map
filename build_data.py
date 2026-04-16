@@ -494,6 +494,57 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             scores.append(max(0, 1.0 - cpp / 1.0))
         props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
 
+        # Generate outreach recommendations
+        recs = []
+        if props.get('pct_hoh', 0) > 0.25:
+            recs.append('HOH exemption education')
+        if props.get('pct_vf_denied', 0) > 0.3:
+            recs.append('Value freeze application assistance')
+        if volatility is not None and volatility > 0.3:
+            recs.append('Property value change awareness')
+        if owner_turnover > 0.15:
+            recs.append('New homeowner orientation')
+        if hoh_churn is not None and hoh_churn > 0.02:
+            recs.append('Exemption renewal reminders')
+        cpp = props.get('contacts_per_parcel', 0) or 0
+        if cpp < 0.3:
+            recs.append('General outreach (underserved area)')
+        if props.get('pct_vet', 0) > 0.08:
+            recs.append('Veteran exemption outreach')
+        props['outreach_recs'] = '|'.join(recs) if recs else ''
+
+        # Find nearest community center
+        cc_locations = [
+            ('Vista Grande', 35.1769943, -106.3409576),
+            ('Los Vecinos', 35.0788198, -106.3923734),
+            ('Paradise Hills', 35.1950907, -106.7129307),
+            ('Raymond G. Sanchez', 35.193073, -106.6157715),
+            ('Westside', 35.0537822, -106.672675),
+            ('Los Padillas', 34.9569792, -106.696385),
+            ('Kiki Saavedra', 35.0158333, -106.6577778),
+            ('South Valley Senior', 35.069824, -106.6881653),
+            ('Alamosa', 35.0714679, -106.7101371),
+        ]
+        nbhd_center = None
+        for feat in existing_props:
+            if int(feat['properties'].get('nbhd', 0)) == nbhd:
+                geom = feat['geometry']
+                coords = []
+                if geom['type'] == 'Polygon':
+                    coords = geom['coordinates'][0]
+                elif geom['type'] == 'MultiPolygon':
+                    for poly in geom['coordinates']:
+                        coords.extend(poly[0])
+                if coords:
+                    nbhd_center = (
+                        sum(c[1] for c in coords) / len(coords),
+                        sum(c[0] for c in coords) / len(coords),
+                    )
+                break
+        if nbhd_center:
+            best_cc = min(cc_locations, key=lambda c: (c[1]-nbhd_center[0])**2 + (c[2]-nbhd_center[1])**2)
+            props['nearest_cc'] = best_cc[0]
+
         updated[nbhd] = props
 
     return updated
