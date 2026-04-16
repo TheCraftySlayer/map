@@ -1007,46 +1007,6 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
 });
-// ── Census ACS data ──────────────────────────────────────────────────────────
-(function(){
-  const vars='NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E';
-  const tryYears=[2023,2022];
-  function tryFetch(i){
-    if(i>=tryYears.length){document.getElementById('censusData').textContent='Census API unavailable';return;}
-    const yr=tryYears[i];
-    fetch('https://api.census.gov/data/'+yr+'/acs/acs5?get='+vars+'&for=county:001&in=state:35')
-      .then(r=>{if(!r.ok)throw 0;return r.json();})
-      .then(d=>{
-        const h=d[0],v=d[1];
-        const g=k=>v[h.indexOf(k)];
-        const pop=parseInt(g('B01001_001E'))||0;
-        const inc=parseInt(g('B19013_001E'))||0;
-        const pov=parseInt(g('B17001_002E'))||0;
-        const hisp=parseInt(g('B03003_003E'))||0;
-        const white=parseInt(g('B02001_002E'))||0;
-        const black=parseInt(g('B02001_003E'))||0;
-        const natam=parseInt(g('B02001_004E'))||0;
-        const asian=parseInt(g('B02001_005E'))||0;
-        const units=parseInt(g('B25001_001E'))||0;
-        const homeval=parseInt(g('B25077_001E'))||0;
-        const pct=n=>(pop?(n/pop*100).toFixed(1)+'%':'—');
-        document.getElementById('censusData').innerHTML=
-          '<div style="margin-bottom:2px;color:#888">'+g('NAME')+' &middot; '+yr+' ACS 5-Year</div>'+
-          '<div class="s"><span>Population</span><span class="v">'+pop.toLocaleString()+'</span></div>'+
-          '<div class="s"><span>Median income</span><span class="v">$'+inc.toLocaleString()+'</span></div>'+
-          '<div class="s"><span>Poverty rate</span><span class="v">'+pct(pov)+'</span></div>'+
-          '<div class="s"><span>Hispanic/Latino</span><span class="v">'+pct(hisp)+'</span></div>'+
-          '<div class="s"><span>White alone</span><span class="v">'+pct(white)+'</span></div>'+
-          '<div class="s"><span>Black</span><span class="v">'+pct(black)+'</span></div>'+
-          '<div class="s"><span>Native American</span><span class="v">'+pct(natam)+'</span></div>'+
-          '<div class="s"><span>Asian</span><span class="v">'+pct(asian)+'</span></div>'+
-          '<div class="s"><span>Housing units</span><span class="v">'+units.toLocaleString()+'</span></div>'+
-          '<div class="s"><span>Median home value</span><span class="v">$'+homeval.toLocaleString()+'</span></div>';
-      })
-      .catch(()=>tryFetch(i+1));
-  }
-  tryFetch(0);
-})();
 
 } // end init()
 </script></body></html>

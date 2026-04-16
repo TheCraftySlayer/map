@@ -37,6 +37,8 @@ import sys
 import statistics
 from collections import defaultdict
 from pathlib import Path
+from urllib.request import urlopen
+from urllib.error import URLError
 
 try:
     from dbfread import DBF
@@ -691,6 +693,39 @@ YRC = {
 }
 
 
+def fetch_census_acs():
+    """Fetch ACS 5-year data for Bernalillo County from Census API."""
+    vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
+    for yr in [2023, 2022, 2021]:
+        url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
+        try:
+            with urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read())
+                h, v = data[0], data[1]
+                g = lambda k: v[h.index(k)]
+                pop = int(g('B01001_001E') or 0)
+                pct = lambda n: f'{n/pop*100:.1f}%' if pop else '—'
+                result = {
+                    'year': yr,
+                    'name': g('NAME'),
+                    'population': pop,
+                    'median_income': int(g('B19013_001E') or 0),
+                    'poverty': int(g('B17001_002E') or 0),
+                    'hispanic': int(g('B03003_003E') or 0),
+                    'white': int(g('B02001_002E') or 0),
+                    'black': int(g('B02001_003E') or 0),
+                    'native_american': int(g('B02001_004E') or 0),
+                    'asian': int(g('B02001_005E') or 0),
+                    'housing_units': int(g('B25001_001E') or 0),
+                    'median_home_value': int(g('B25077_001E') or 0),
+                }
+                print(f"  Census ACS {yr}: pop {pop:,}, income ${result['median_income']:,}")
+                return result
+        except (URLError, Exception) as e:
+            print(f"  Census API {yr} failed: {e}")
+    return None
+
+
 def update_html_sidebar(final_layers, html_path, stats=None):
     """Update index.html sidebar counts and year filter checkboxes
     to match the actual generated layer data.
@@ -758,6 +793,31 @@ def update_html_sidebar(final_layers, html_path, stats=None):
             r'(\d+ neighborhoods &middot; 176 census tracts &middot; )[\d,]+ parcels \(\d+\)',
             rf'{nbhd_count} neighborhoods &middot; 176 census tracts &middot; {total_parcels:,} parcels ({latest_yr})',
             html,
+        )
+
+    # ── Census ACS data ──
+    census = stats.get('census')
+    if census:
+        pop = census['population']
+        pct = lambda n: f'{n/pop*100:.1f}%' if pop else '—'
+        census_html = (
+            f'<div style="margin-bottom:2px;color:#888">{census["name"]} &middot; {census["year"]} ACS 5-Year</div>'
+            f'<div class="s"><span>Population</span><span class="v">{pop:,}</span></div>'
+            f'<div class="s"><span>Median income</span><span class="v">${census["median_income"]:,}</span></div>'
+            f'<div class="s"><span>Poverty rate</span><span class="v">{pct(census["poverty"])}</span></div>'
+            f'<div class="s"><span>Hispanic/Latino</span><span class="v">{pct(census["hispanic"])}</span></div>'
+            f'<div class="s"><span>White alone</span><span class="v">{pct(census["white"])}</span></div>'
+            f'<div class="s"><span>Black</span><span class="v">{pct(census["black"])}</span></div>'
+            f'<div class="s"><span>Native American</span><span class="v">{pct(census["native_american"])}</span></div>'
+            f'<div class="s"><span>Asian</span><span class="v">{pct(census["asian"])}</span></div>'
+            f'<div class="s"><span>Housing units</span><span class="v">{census["housing_units"]:,}</span></div>'
+            f'<div class="s"><span>Median home value</span><span class="v">${census["median_home_value"]:,}</span></div>'
+        )
+        html = re.sub(
+            r'(<div id="censusData"[^>]*>).*?(</div>)',
+            rf'\1{census_html}\2',
+            html,
+            flags=re.DOTALL,
         )
 
     out = html.encode('utf-8')
@@ -958,11 +1018,15 @@ def main():
         if snap_count:
             snapshot_parcels[snap_yr] = snap_count
 
+    print("\nFetching Census ACS data...")
+    census = fetch_census_acs()
+
     sidebar_stats = {
         'total_parcels': total_parcels,
         'latest_yr': latest_yr,
         'nbhd_count': len(nbhd_stats),
         'snapshot_parcels': snapshot_parcels,
+        'census': census,
     }
 
     # ── Update HTML sidebar counts ──
