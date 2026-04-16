@@ -458,7 +458,7 @@ function updateStatsBar(layer){
 }
 
 function updateLegendRange(layer){
-  if(swipeActive)return; // split mode has its own legend
+  if(swipeActive)return;
   const field=LAYER_FIELD[layer];
   if(!field)return;
   const feats=getVisibleFeatures();
@@ -468,6 +468,7 @@ function updateLegendRange(layer){
   for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
   document.getElementById('lL').textContent=formatStat(mn,layer);
   document.getElementById('lH').textContent=formatStat(mx,layer);
+  document.getElementById('lG').style.background=grad(CS[layer]||CS[NBL]);
 }
 
 // ── Tooltip with sparkline ────────────────────────────────────────────────────
@@ -845,6 +846,8 @@ document.getElementById('hideCommercial').addEventListener('change',e=>{
   hideCommercial=e.target.checked;
   _visFeatCache=null;_visFeatKey=null;
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  updateStatsBar(NBL);
+  updateLegendRange(NBL);
   refreshOL(Object.keys(OL).filter(k=>k!=='rings'));
 });
 
