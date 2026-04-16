@@ -191,7 +191,6 @@
   <label><input type="checkbox" class="ol" data-layer="vfd"> <span class="d" style="width:8px;height:8px;background:#d73027"></span> VF denied</label>
   <label><input type="checkbox" class="ol" data-layer="vfr"> <span class="d" style="width:8px;height:8px;background:#999"></span> VF removed</label>
   <label><input type="checkbox" class="ol" data-layer="dvw"> <span class="d" style="width:8px;height:8px;background:#4a1486"></span> Disabled vet waiver</label>
-  <label><input type="checkbox" class="ol" data-layer="hoh"> <span class="d" style="width:8px;height:8px;background:#6a51a3"></span> HOH exemption</label>
   <label><input type="checkbox" class="ol" data-layer="eg_h"> <span class="d" style="width:8px;height:8px;background:#1D9E75"></span> HOH exemption gained</label>
   <label><input type="checkbox" class="ol" data-layer="eg_v"> <span class="d" style="width:8px;height:8px;background:#2ca02c"></span> Veteran exemption gained</label>
   <label><input type="checkbox" class="ol" data-layer="el_h"> <span class="d" style="width:8px;height:8px;background:#d6604d"></span> HOH exemption lost</label>
@@ -239,7 +238,7 @@ let VET_V=[], VF_V=[], HOH_V=[], PRO_V=[], SP_GEO=[];
 let VF_DENIED=[], VF_INPROC=[], VF_20_G=[], VF_20_D=[];
 let PRO=[], PRO_20=[], VF20_A=[], VF20_D=[], VF20_R=[], VETW=[];
 let PRO_21=[], VF21_A=[], VF21_D=[], VF21_R=[], VETW_21=[];
-let VFA=[], VFD=[], VFR=[], DVW=[], HOH=[];
+let VFA=[], VFD=[], VFR=[], DVW=[];
 const VF_OL=null;
 const OFC=[35.08249,-106.65261];
 let _layersReady=false;
@@ -263,7 +262,7 @@ _layersP.then(d=>{
   VF_DENIED=d.VF_DENIED; VF_INPROC=d.VF_INPROC; VF_20_G=d.VF_20_G; VF_20_D=d.VF_20_D;
   PRO=d.PRO||[]; PRO_20=d.PRO_20; VF20_A=d.VF20_A; VF20_D=d.VF20_D; VF20_R=d.VF20_R; VETW=d.VETW;
   PRO_21=d.PRO_21; VF21_A=d.VF21_A; VF21_D=d.VF21_D; VF21_R=d.VF21_R; VETW_21=d.VETW_21;
-  VFA=d.VFA||[]; VFD=d.VFD||[]; VFR=d.VFR||[]; DVW=d.DVW||[]; HOH=d.HOH||[];
+  VFA=d.VFA||[]; VFD=d.VFD||[]; VFR=d.VFR||[]; DVW=d.DVW||[];
   _layersReady=true;
   if(typeof refreshOL==='function')refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
 });
@@ -843,7 +842,6 @@ function buildLayer(key){
     vfd:{src:()=>VFD.filter(p=>activeYrs.has(p.y)),col:'#d73027',r:3,pop:p=>p.y+' VF denied\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     vfr:{src:()=>VFR.filter(p=>activeYrs.has(p.y)),col:'#999',r:3,pop:p=>p.y+' VF removed\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     dvw:{src:()=>DVW.filter(p=>activeYrs.has(p.y)),col:'#4a1486',r:4,pop:p=>p.y+' disabled vet waiver\n$'+(p.v||0).toLocaleString()},
-    hoh:{src:()=>HOH.filter(p=>activeYrs.has(p.y)),col:'#6a51a3',r:3,pop:p=>p.y+' HOH exemption\n$'+(p.v||0).toLocaleString()},
     vf_denied:{src:()=>VF_DENIED,col:'#d73027',r:3,pop:p=>'VF denied\n$'+p.v.toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
     vf_inproc:{src:()=>VF_INPROC,col:'#fdae61',r:5,pop:p=>'VF in process\n$'+p.v.toLocaleString()},
     vf20_a:{src:()=>VF20_A,col:'#2166ac',r:3.5,pop:p=>'VF 2020 active\n$'+(p.v||0).toLocaleString()},
@@ -867,7 +865,7 @@ function buildLayer(key){
   if(!d)return L.layerGroup([]);
   let pts=d.src();
   if(hideCommercial&&commercialNbhds.size)pts=pts.filter(p=>!p.n||!commercialNbhds.has(p.n));
-  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','hoh','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
+  if(heatMode&&pts.length>0&&['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21'].includes(key)){
     return makeHeat(pts,key);
   }
   return makeCluster(pts,d.col,d.r,d.pop);
@@ -891,13 +889,13 @@ function refreshOL(keys){
 // ── Heatmap toggle ────────────────────────────────────────────────────────────
 document.getElementById('heatMode').addEventListener('change',e=>{
   heatMode=e.target.checked;
-  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','hoh','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
+  refreshOL(['vet_v','vf_v','hoh_v','pro_v','sp_geo','sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','vf_denied','vf_inproc','rpt','co','vo','mc','pro_20','vetw','vf_20_g','vf_20_d','vf20_a','vf20_d','vf20_r','pro_21','vf21_a','vf21_d','vf21_r','vetw_21']);
 });
 
 // ── Year filters ──────────────────────────────────────────────────────────────
 document.querySelectorAll('.yrf').forEach(cb=>cb.addEventListener('change',()=>{
   activeYrs=new Set([...document.querySelectorAll('.yrf:checked')].map(c=>parseInt(c.value)));
-  refreshOL(['sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw','hoh']);
+  refreshOL(['sl','eg_h','eg_v','el_h','el_v','pro','vfa','vfd','vfr','dvw']);
 }));
 document.querySelectorAll('.visyrf').forEach(cb=>cb.addEventListener('change',()=>{
   visActiveYrs=new Set([...document.querySelectorAll('.visyrf:checked')].map(c=>parseInt(c.value)));

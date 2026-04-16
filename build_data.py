@@ -617,17 +617,6 @@ def build_point_layers(enriched_by_yr):
     layers['DVW'] = dvw_all
     print(f"  Disabled vet waiver (all years): {len(dvw_all):,}")
 
-    # ── Unified HOH exemption holders (all years, year-filtered) ──
-    hoh_all = []
-    for yr, recs in enriched_by_yr.items():
-        for r in recs:
-            hoh = str(r.get('HEAD OF HOUSEHOLD', '') or '').strip()
-            if hoh.upper() in ('Y', 'YES', '1', 'TRUE'):
-                la, ln = ll(r)
-                hoh_all.append({'la': la, 'ln': ln, 'y': yr, 'n': nb(r), 'v': safe_int(r.get('APRTOTAL'))})
-    layers['HOH'] = hoh_all
-    print(f"  HOH exemption (all years): {len(hoh_all):,}")
-
     # ── Exemption gained/lost (multi-year comparison) ──
     # Group enriched records by parcel ID across years
     by_parid = defaultdict(dict)
@@ -943,7 +932,7 @@ def main():
         'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
         'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
-        'VFA', 'VFD', 'VFR', 'DVW', 'HOH',
+        'VFA', 'VFD', 'VFR', 'DVW',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
         'VF21_A', 'VF21_D', 'VF21_R', 'VETW', 'VETW_21',
         'EG_H', 'EG_V', 'EL_H', 'EL_V',
@@ -996,7 +985,7 @@ def main():
             'SL', 'VF_DENIED', 'VF_INPROC', 'PRO', 'PRO_20', 'PRO_21',
             'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
             'VF21_A', 'VF21_D', 'VF21_R',
-            'VFA', 'VFD', 'VFR', 'DVW', 'HOH',
+            'VFA', 'VFD', 'VFR', 'DVW',
             'VETW', 'VETW_21', 'EG_H', 'EG_V', 'EL_H', 'EL_V'
         ]
         preserved_keys = [k for k in all_layer_keys if k not in rebuilt_keys]
