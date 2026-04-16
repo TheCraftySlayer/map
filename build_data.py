@@ -753,7 +753,7 @@ def update_html_sidebar(final_layers, html_path):
         min_yr, max_yr = min(yr_set), max(yr_set)
         # Update header range
         html = re.sub(
-            r'(Tax roll point layers <span[^>]*>)\d+&ndash;\d+( tax rolls)',
+            r'(Market activity <span[^>]*>)\d+&ndash;\d+( tax rolls)',
             rf'\g<1>{min_yr}&ndash;{max_yr}\2',
             html,
         )
