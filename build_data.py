@@ -831,7 +831,7 @@ def main():
 
     # All possible layer keys
     all_layer_keys = [
-        'SL', 'TL', 'RPT', 'CO', 'VO', 'MC',
+        'SL', 'RPT', 'CO', 'VO', 'MC',
         'VET_V', 'VF_V', 'HOH_V', 'PRO_V', 'SP_GEO',
         'VF_DENIED', 'VF_INPROC', 'PRO_20', 'PRO_21',
         'VF20_A', 'VF20_D', 'VF20_R', 'VF_20_G', 'VF_20_D',
