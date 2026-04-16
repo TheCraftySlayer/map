@@ -63,6 +63,7 @@
   <label><input type="radio" name="nbhd_layer" value="pct_vf_denied"> Value freeze denial rate</label>
   <label><input type="radio" name="nbhd_layer" value="owner_turnover"> Owner turnover rate</label>
   <label><input type="radio" name="nbhd_layer" value="hoh_churn"> HOH exemption churn</label>
+  <label><input type="radio" name="nbhd_layer" value="outreach_need"> <b>Outreach need score</b></label>
 
   <h5>Value changes <span style="font-weight:400;color:#aaa">year-over-year</span></h5>
   <label><input type="radio" name="nbhd_layer" value="sales"> Recent sale density</label>
@@ -230,7 +231,8 @@
 
   <h5>Reference</h5>
   <label><input type="checkbox" class="ol" data-layer="rings"> Distance rings (2/5/10/15 mi)</label>
-  <label><input type="checkbox" id="officeToggle" checked> <span class="sq" style="width:8px;height:8px;background:#ffff00"></span> Office location</label>
+  <label><input type="checkbox" id="officeToggle" checked> <span class="sq" style="width:8px;height:8px;background:#ffff00"></span> Assessor office</label>
+  <label><input type="checkbox" id="ccToggle"> <span class="sq" style="width:8px;height:8px;background:#00bfff"></span> Community centers (9)</label>
   <div class="note" id="sidebarNote"></div>
 </div>
 <div id="bottomStack" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:6px">
@@ -307,6 +309,20 @@ TILES.sat.addTo(map);
 L.geoJSON(COUNTY,{style:{fillColor:'none',weight:2,color:'#aaa',fillOpacity:0}}).addTo(map);
 const office=L.marker(OFC,{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ffff00;border:2px solid #333;border-radius:2px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).bindPopup("Assessor's Office").addTo(map);
 
+const CC_DATA=[
+  {n:'Vista Grande',a:'15 La Madera Rd, Sandia Park',la:35.1769943,ln:-106.3409576},
+  {n:'Los Vecinos',a:'478 NM-333, Tijeras',la:35.0788198,ln:-106.3923734},
+  {n:'Paradise Hills',a:'5901 Paradise Blvd NW',la:35.1950907,ln:-106.7129307},
+  {n:'Raymond G. Sanchez',a:'9800 4th St NW',la:35.193073,ln:-106.6157715},
+  {n:'Westside',a:'1250 Isleta Blvd SW',la:35.0537822,ln:-106.672675},
+  {n:'Los Padillas',a:'2117 Los Padillas Rd SW',la:34.9569792,ln:-106.696385},
+  {n:'Henry "Kiki" Saavedra',a:'201 Prosperity Ave SE',la:35.0158333,ln:-106.6577778},
+  {n:'South Valley Multipurpose Senior',a:'2008 Larrazolo Rd SW',la:35.069824,ln:-106.6881653},
+  {n:'Alamosa (@ Ted M. Gallegos)',a:'6900 Gonzales Rd SW',la:35.0714679,ln:-106.7101371},
+];
+const ccIcon=L.divIcon({className:'',html:'<div style="width:12px;height:12px;background:#00bfff;border:2px solid #005f7f;border-radius:2px"></div>',iconSize:[12,12],iconAnchor:[6,6]});
+const ccLayer=L.layerGroup(CC_DATA.map(c=>L.marker([c.la,c.ln],{icon:ccIcon}).bindPopup('<b>'+c.n+'</b><br>'+c.a)));
+
 // ── Color scales ──────────────────────────────────────────────────────────────
 const YRC={2005:'#a6cee3',2006:'#b2df8a',2007:'#fb9a99',2008:'#fdbf6f',2009:'#cab2d6',2010:'#ffff99',2011:'#b15928',2012:'#6a3d9a',2013:'#ff7f00',2014:'#33a02c',2015:'#e31a1c',2016:'#1f78b4',2017:'#a65628',2018:'#f781bf',2019:'#999999',2020:'#66c2a5',2021:'#fc8d62',2022:'#984ea3',2023:'#2166ac',2024:'#f4a11d',2025:'#1a9850',2026:'#e41a1c'};
 function interp(stops,v){
@@ -346,6 +362,7 @@ const CS={
   pct_vet:[[0,'#f7fbff'],[.05,'#deebf7'],[.1,'#9ecae1'],[.2,'#3182bd'],[.35,'#08519c'],[.5,'#08306b']],
   owner_turnover:[[0,'#f7fbff'],[.05,'#c6dbef'],[.1,'#6baed6'],[.2,'#2171b5'],[.35,'#084594']],
   hoh_churn:[[0,'#fff7ec'],[.01,'#fee8c8'],[.02,'#fdbb84'],[.04,'#e34a33'],[.08,'#b30000']],
+  outreach_need:[[0,'#f7fbff'],[.2,'#c6dbef'],[.4,'#6baed6'],[.6,'#2171b5'],[.8,'#08519c'],[1,'#08306b']],
   sales:[[0,'#ffffcc'],[.02,'#c7e9b4'],[.05,'#7fcdbb'],[.08,'#41b6c4'],[.12,'#1d91c0'],[.2,'#0c2c84']],
   taxlightning:[[0,'#ffffcc'],[.05,'#fed976'],[.1,'#feb24c'],[.2,'#fd8d3c'],[.3,'#e31a1c'],[.5,'#800026']],
   chg_7_8:YOY,chg_8_9:YOY,chg_9_10:YOY,chg_10_11:YOY,chg_11_12:YOY,chg_12_13:YOY,chg_13_14:YOY,chg_14_15:YOY,chg_15_16:YOY,chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,
@@ -370,6 +387,7 @@ const LG={
   pct_vet:{l:'0%',h:'50%+',n:'veteran exemption rate'},
   owner_turnover:{l:'0%',h:'35%+',n:'owner turnover rate'},
   hoh_churn:{l:'0%',h:'8%+',n:'HOH exemption churn'},
+  outreach_need:{l:'Low',h:'High',n:'outreach need score'},
   sales:{l:'0%',h:'20%+',n:'recent sale rate'},
   taxlightning:{l:'0%',h:'50%+',n:'sale contact rate'},
   chg_7_8:{l:'\u221210%',h:'+20%',n:'value change 2007\u219208'},
@@ -406,7 +424,7 @@ const LAYER_FIELD={
   avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',
   valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',
   pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover',
-  hoh_churn:'hoh_churn',sales:'pct_recent_sale',taxlightning:'sale_contact_rate',
+  hoh_churn:'hoh_churn',outreach_need:'outreach_need',sales:'pct_recent_sale',taxlightning:'sale_contact_rate',
   chg_7_8:'chg_7_8',chg_8_9:'chg_8_9',chg_9_10:'chg_9_10',chg_10_11:'chg_10_11',chg_11_12:'chg_11_12',chg_12_13:'chg_12_13',chg_13_14:'chg_13_14',chg_14_15:'chg_14_15',chg_15_16:'chg_15_16',
   chg_16_17:'chg_16_17',chg_17_18:'chg_17_18',chg_18_19:'chg_18_19',chg_19_20:'chg_19_20',
   chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',
@@ -530,7 +548,8 @@ info._buildHtml=function(p){
         '<div class="s"><span>Parcels</span><span class="v">'+((p.parcels||0).toLocaleString())+'</span></div>'+
     (p.volatility!=null?'<div class="s"><span>Cumulative volatility</span><span class="v">'+(p.volatility*100).toFixed(1)+'%</span></div>':'')+
     (p.hoh_20!=null?'<div class="s"><span>HOH '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
-    (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'');
+    (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'')+
+    (p.outreach_need!=null?'<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span><b>Outreach need</b></span><span class="v" style="color:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'"><b>'+(p.outreach_need*100).toFixed(0)+'%</b></span></div>':'');
 };
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
@@ -982,6 +1001,9 @@ document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventList
 }));
 document.getElementById('officeToggle').addEventListener('change',e=>{
   if(e.target.checked)office.addTo(map);else map.removeLayer(office);
+});
+document.getElementById('ccToggle').addEventListener('change',e=>{
+  if(e.target.checked)ccLayer.addTo(map);else map.removeLayer(ccLayer);
 });
 
 // ── Satellite toggle ──────────────────────────────────────────────────────────

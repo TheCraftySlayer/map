@@ -470,6 +470,30 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             props[f'owner_turnover_{ys}'] = round(yot / yp, 4) if yp else 0
             props[f'parcels_{ys}'] = float(yp)
 
+        # Outreach need score (0-1): combines equity indicators
+        # Higher = more need for outreach
+        scores = []
+        # High HOH rate → may need exemption education
+        if props.get('pct_hoh') is not None:
+            scores.append(min(props['pct_hoh'] / 0.5, 1.0))
+        # High VF denial rate → frustrated taxpayers
+        if props.get('pct_vf_denied') is not None and props['pct_vf_denied'] > 0:
+            scores.append(min(props['pct_vf_denied'] / 0.5, 1.0))
+        # High value volatility → property value instability
+        if volatility is not None:
+            scores.append(min(volatility / 0.5, 1.0))
+        # High owner turnover → new owners need assistance
+        if owner_turnover > 0:
+            scores.append(min(owner_turnover / 0.3, 1.0))
+        # High HOH churn → exemption instability
+        if hoh_churn is not None and hoh_churn > 0:
+            scores.append(min(hoh_churn / 0.05, 1.0))
+        # Low contacts per parcel → underserved
+        cpp = props.get('contacts_per_parcel', 0) or 0
+        if cpp >= 0:
+            scores.append(max(0, 1.0 - cpp / 1.0))
+        props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
+
         updated[nbhd] = props
 
     return updated
