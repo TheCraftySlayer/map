@@ -494,52 +494,78 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             scores.append(max(0, 1.0 - cpp / 1.0))
         props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
 
-        # Generate outreach recommendations with specific event types
-        # Format: "Title::Description" split by | for multiple recs
+        # Generate outreach recommendations with explicit reasoning
+        # Format: "Title::Why::What" split by | for multiple recs
         recs = []
         pct_hoh = props.get('pct_hoh', 0) or 0
         pct_vf_denied = props.get('pct_vf_denied', 0) or 0
         pct_vet = props.get('pct_vet', 0) or 0
         cpp = props.get('contacts_per_parcel', 0) or 0
+        ot_val = owner_turnover or 0
 
         if pct_hoh > 0.25:
             recs.append(
-                f'HOH exemption clinic::{pct_hoh*100:.0f}% of parcels claim HOH. '
-                'Host a walk-in clinic with application help, eligibility review, and renewal tips.'
+                f'HOH exemption clinic::'
+                f'{pct_hoh*100:.0f}% of parcels claim HOH — well above the county norm (~18%). '
+                f'High claim rates mean many residents rely on this exemption and need help keeping it active.::'
+                f'Walk-in clinic with application help, eligibility review, and renewal tips.'
             )
         if pct_vf_denied > 0.3:
             recs.append(
-                f'Value freeze workshop::{pct_vf_denied*100:.0f}% VF denial rate. '
-                'Many seniors/disabled applicants failing the application. '
-                'Host a workshop covering income limits, required documents, and re-applying.'
+                f'Value freeze workshop::'
+                f'{pct_vf_denied*100:.0f}% of VF applications denied — seniors/disabled residents '
+                f'are filing but failing. Common reasons: missing income docs, over the limit, wrong form.::'
+                f'Workshop covering income limits, required documents, and how to re-apply successfully.'
             )
         if volatility is not None and volatility > 0.3:
             recs.append(
-                f'Property value town hall::Values swung {volatility*100:.0f}% over recent years. '
-                'Explain reappraisal cycle, protest rights, and what drives value changes.'
+                f'Property value town hall::'
+                f'Appraised values swung {volatility*100:.0f}% cumulatively over recent years — '
+                f'residents likely confused or frustrated by sudden increases.::'
+                f'Town hall explaining the reappraisal cycle, protest rights, and what drives value changes.'
             )
-        if owner_turnover > 0.15:
+        if ot_val > 0.15:
             recs.append(
-                f'New homeowner orientation::{owner_turnover*100:.0f}% turnover — high % of new owners. '
-                'Offer a welcome session on exemptions, deadlines, and how to read an assessment.'
+                f'New homeowner orientation::'
+                f'{ot_val*100:.0f}% owner turnover — a large share of residents are new to the area '
+                f'and may not know about exemptions, deadlines, or how to read an assessment notice.::'
+                f'Welcome session on HOH/VF/vet exemptions, deadlines, and how to read the annual notice.'
             )
         if hoh_churn is not None and hoh_churn > 0.02:
             recs.append(
-                f'Exemption renewal drive::{hoh_churn*100:.1f}% HOH churn — exemptions being lost. '
-                'Door-to-door or mailer campaign reminding residents to re-apply.'
+                f'Exemption renewal drive::'
+                f'{hoh_churn*100:.1f}% HOH churn — residents are losing their exemption year over year. '
+                f'This usually means they moved, forgot to renew, or the property changed hands.::'
+                f'Door-to-door or mailer campaign reminding residents to re-apply for HOH.'
             )
         if cpp < 0.3:
             recs.append(
-                f'Pop-up office day::Only {cpp:.2f} contacts/parcel — severely underserved. '
-                'Bring staff on-site for a full day: Q&A, account lookups, general assessor info.'
+                f'Pop-up office day::'
+                f'Only {cpp:.2f} contacts/parcel — residents here rarely call or visit. '
+                f'Low engagement usually signals lack of awareness, language barriers, or access issues, '
+                f'not absence of need.::'
+                f'Bring assessor staff on-site for a full day: Q&A, account lookups, general info.'
             )
         if pct_vet > 0.08:
             recs.append(
-                f'Veteran exemption outreach::{pct_vet*100:.0f}% veteran exemption rate. '
-                'Partner with VFW/American Legion for a benefits session covering '
-                'veteran exemption and disabled veteran waiver.'
+                f'Veteran exemption outreach::'
+                f'{pct_vet*100:.0f}% veteran exemption rate — significantly above county average. '
+                f'Many eligible veterans may also qualify for the disabled veteran waiver but not know it.::'
+                f'Partner with VFW/American Legion for a benefits session covering both programs.'
             )
         props['outreach_recs'] = '|'.join(recs) if recs else ''
+
+        # Top drivers summary: which signals pushed the score highest
+        drivers = []
+        if pct_hoh > 0.25: drivers.append(('high HOH rate', pct_hoh / 0.5))
+        if pct_vf_denied > 0.3: drivers.append(('high VF denial', pct_vf_denied / 0.5))
+        if volatility and volatility > 0.3: drivers.append(('value volatility', volatility / 0.5))
+        if ot_val > 0.15: drivers.append(('owner turnover', ot_val / 0.3))
+        if hoh_churn and hoh_churn > 0.02: drivers.append(('HOH churn', hoh_churn / 0.05))
+        if cpp < 0.3: drivers.append(('low contact rate', 1.0 - cpp / 1.0))
+        if pct_vet > 0.08: drivers.append(('high vet exemption', pct_vet / 0.2))
+        drivers.sort(key=lambda x: -x[1])
+        props['outreach_why'] = ', '.join(d[0] for d in drivers[:3]) if drivers else ''
 
         # Find nearest community center
         cc_locations = [
