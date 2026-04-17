@@ -943,9 +943,8 @@ document.getElementById('searchBox').addEventListener('keydown',e=>{
 
 // ── Point layer helpers ───────────────────────────────────────────────────────
 let heatMode=false;
-// Default: all point-layer years selected so checkboxes work immediately
-let activeYrs=new Set([...document.querySelectorAll('.yrf')].map(c=>parseInt(c.value)));
-document.querySelectorAll('.yrf').forEach(c=>c.checked=true);
+// Year filter: empty set = show all years (no filter). Any checked box = filter to those.
+let activeYrs=new Set();
 let visActiveYrs=new Set([2022,2023,2024,2025,2026]);
 const heatLayers={};
 
@@ -985,16 +984,16 @@ function buildLayer(key){
     hoh_v:{src:()=>HOH_V.filter(p=>visActiveYrs.has(p.y)),col:'#6a51a3',r:3.5,pop:p=>p.y+' HOH exemption: '+p.d.toFixed(1)+' min'},
     pro_v:{src:()=>PRO_V.filter(p=>visActiveYrs.has(p.y)),col:'#b10026',r:5,pop:p=>p.y+' protest: '+p.d.toFixed(1)+' min'},
     sp_geo:{src:()=>SP_GEO.filter(p=>visActiveYrs.has(p.y)),col:'#e6ab02',r:4,pop:p=>p.y+' Spanish-speaking: '+p.d.toFixed(1)+' min'},
-    sl:{src:()=>SL.filter(p=>activeYrs.has(p.y)),col:'#888',r:4.5,pop:p=>p.y+' sale \u2192 '+p.d+'d later\n$'+p.p.toLocaleString()},
-    eg_h:{src:()=>EG_H.filter(p=>activeYrs.has(p.y)),col:'#1D9E75',r:4,pop:p=>p.y+' HOH exemption gained'},
-    eg_v:{src:()=>EG_V.filter(p=>activeYrs.has(p.y)),col:'#2ca02c',r:4,pop:p=>p.y+' veteran exemption gained'},
-    el_h:{src:()=>EL_H.filter(p=>activeYrs.has(p.y)),col:'#d6604d',r:4,pop:p=>p.y+' HOH exemption lost'},
-    el_v:{src:()=>EL_V.filter(p=>activeYrs.has(p.y)),col:'#e7871a',r:4,pop:p=>p.y+' veteran exemption lost'},
-    pro:{src:()=>PRO.filter(p=>activeYrs.has(p.y)),col:'#b10026',r:5,pop:p=>p.y+' protest\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
-    vfa:{src:()=>VFA.filter(p=>activeYrs.has(p.y)),col:'#1a9850',r:3.5,pop:p=>p.y+' VF active\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vfd:{src:()=>VFD.filter(p=>activeYrs.has(p.y)),col:'#d73027',r:3,pop:p=>p.y+' VF denied\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    vfr:{src:()=>VFR.filter(p=>activeYrs.has(p.y)),col:'#999',r:3,pop:p=>p.y+' VF removed\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
-    dvw:{src:()=>DVW.filter(p=>activeYrs.has(p.y)),col:'#4a1486',r:4,pop:p=>p.y+' disabled vet waiver\n$'+(p.v||0).toLocaleString()},
+    sl:{src:()=>SL.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#888',r:4.5,pop:p=>p.y+' sale \u2192 '+p.d+'d later\n$'+p.p.toLocaleString()},
+    eg_h:{src:()=>EG_H.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#1D9E75',r:4,pop:p=>p.y+' HOH exemption gained'},
+    eg_v:{src:()=>EG_V.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#2ca02c',r:4,pop:p=>p.y+' veteran exemption gained'},
+    el_h:{src:()=>EL_H.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#d6604d',r:4,pop:p=>p.y+' HOH exemption lost'},
+    el_v:{src:()=>EL_V.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#e7871a',r:4,pop:p=>p.y+' veteran exemption lost'},
+    pro:{src:()=>PRO.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#b10026',r:5,pop:p=>p.y+' protest\nResult: '+p.ra+'\nNotice: $'+p.nv.toLocaleString()+'\nTaxpayer: $'+p.tv.toLocaleString()},
+    vfa:{src:()=>VFA.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#1a9850',r:3.5,pop:p=>p.y+' VF active\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vfd:{src:()=>VFD.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#d73027',r:3,pop:p=>p.y+' VF denied\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    vfr:{src:()=>VFR.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#999',r:3,pop:p=>p.y+' VF removed\n$'+(p.v||0).toLocaleString()+(p.yr?' \u00b7 '+p.yr:'')},
+    dvw:{src:()=>DVW.filter(p=>activeYrs.size===0||activeYrs.has(p.y)),col:'#4a1486',r:4,pop:p=>p.y+' disabled vet waiver\n$'+(p.v||0).toLocaleString()},
         rpt:{src:()=>RPT,col:'#b10026',r:4,pop:p=>p.c+' calls'},
     co:{src:()=>CO,col:'#185FA5',r:2.5,pop:null},
     vo:{src:()=>VO,col:'#1D9E75',r:2.5,pop:null},
