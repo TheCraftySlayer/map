@@ -40,7 +40,7 @@
 <div id="swipeOverlay" style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:9999;display:none"></div>
 
 <button class="toggle-btn" id="ctrlToggle" style="top:10px;right:296px">❮</button>
-<button class="toggle-btn" id="tileToggle" style="bottom:54px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
+<button class="toggle-btn" id="tileToggle" style="bottom:90px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
 
 <div class="ctrl">
   <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span></h4>
@@ -514,8 +514,8 @@ info._buildHtml=function(p){
   const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
   const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
   const min=v=>v?v.toFixed(1)+' min':'\u2014';
-  const allVals=[p.chg_7_8,p.chg_8_9,p.chg_9_10,p.chg_10_11,p.chg_11_12,p.chg_12_13,p.chg_13_14,p.chg_14_15,p.chg_15_16,p.chg_16_17,p.chg_17_18,p.chg_18_19,p.chg_19_20,p.chg_20_21,p.chg_21_22,p.chg_22_23,p.chg_23_24,p.chg_24_25];
-  const allLabs=["'07","'08","'09","'10","'11","'12","'13","'14","'15","'16","'17","'18","'19","'20","'21","'22","'23","'24"];
+  const allVals=[p.chg_7_8,p.chg_8_9,p.chg_9_10,p.chg_10_11,p.chg_11_12,p.chg_12_13,p.chg_13_14,p.chg_14_15,p.chg_15_16,p.chg_16_17,p.chg_17_18,p.chg_18_19,p.chg_19_20,p.chg_20_21,p.chg_21_22,p.chg_22_23,p.chg_23_24,p.chg_24_25,p.chg_25_26];
+  const allLabs=["'08","'09","'10","'11","'12","'13","'14","'15","'16","'17","'18","'19","'20","'21","'22","'23","'24","'25","'26"];
   const vals=[],labs=[];
   for(let i=0;i<allVals.length;i++){if(allVals[i]!=null&&allVals[i]!==0){vals.push(allVals[i]);labs.push(allLabs[i]);}}
   let maxAbs=0.01;for(let i=0;i<vals.length;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
