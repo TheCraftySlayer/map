@@ -943,7 +943,9 @@ document.getElementById('searchBox').addEventListener('keydown',e=>{
 
 // ── Point layer helpers ───────────────────────────────────────────────────────
 let heatMode=false;
-let activeYrs=new Set();
+// Default: all point-layer years selected so checkboxes work immediately
+let activeYrs=new Set([...document.querySelectorAll('.yrf')].map(c=>parseInt(c.value)));
+document.querySelectorAll('.yrf').forEach(c=>c.checked=true);
 let visActiveYrs=new Set([2022,2023,2024,2025,2026]);
 const heatLayers={};
 
