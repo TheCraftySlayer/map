@@ -494,23 +494,51 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             scores.append(max(0, 1.0 - cpp / 1.0))
         props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
 
-        # Generate outreach recommendations
+        # Generate outreach recommendations with specific event types
+        # Format: "Title::Description" split by | for multiple recs
         recs = []
-        if props.get('pct_hoh', 0) > 0.25:
-            recs.append('HOH exemption education')
-        if props.get('pct_vf_denied', 0) > 0.3:
-            recs.append('Value freeze application assistance')
-        if volatility is not None and volatility > 0.3:
-            recs.append('Property value change awareness')
-        if owner_turnover > 0.15:
-            recs.append('New homeowner orientation')
-        if hoh_churn is not None and hoh_churn > 0.02:
-            recs.append('Exemption renewal reminders')
+        pct_hoh = props.get('pct_hoh', 0) or 0
+        pct_vf_denied = props.get('pct_vf_denied', 0) or 0
+        pct_vet = props.get('pct_vet', 0) or 0
         cpp = props.get('contacts_per_parcel', 0) or 0
+
+        if pct_hoh > 0.25:
+            recs.append(
+                f'HOH exemption clinic::{pct_hoh*100:.0f}% of parcels claim HOH. '
+                'Host a walk-in clinic with application help, eligibility review, and renewal tips.'
+            )
+        if pct_vf_denied > 0.3:
+            recs.append(
+                f'Value freeze workshop::{pct_vf_denied*100:.0f}% VF denial rate. '
+                'Many seniors/disabled applicants failing the application. '
+                'Host a workshop covering income limits, required documents, and re-applying.'
+            )
+        if volatility is not None and volatility > 0.3:
+            recs.append(
+                f'Property value town hall::Values swung {volatility*100:.0f}% over recent years. '
+                'Explain reappraisal cycle, protest rights, and what drives value changes.'
+            )
+        if owner_turnover > 0.15:
+            recs.append(
+                f'New homeowner orientation::{owner_turnover*100:.0f}% turnover — high % of new owners. '
+                'Offer a welcome session on exemptions, deadlines, and how to read an assessment.'
+            )
+        if hoh_churn is not None and hoh_churn > 0.02:
+            recs.append(
+                f'Exemption renewal drive::{hoh_churn*100:.1f}% HOH churn — exemptions being lost. '
+                'Door-to-door or mailer campaign reminding residents to re-apply.'
+            )
         if cpp < 0.3:
-            recs.append('General outreach (underserved area)')
-        if props.get('pct_vet', 0) > 0.08:
-            recs.append('Veteran exemption outreach')
+            recs.append(
+                f'Pop-up office day::Only {cpp:.2f} contacts/parcel — severely underserved. '
+                'Bring staff on-site for a full day: Q&A, account lookups, general assessor info.'
+            )
+        if pct_vet > 0.08:
+            recs.append(
+                f'Veteran exemption outreach::{pct_vet*100:.0f}% veteran exemption rate. '
+                'Partner with VFW/American Legion for a benefits session covering '
+                'veteran exemption and disabled veteran waiver.'
+            )
         props['outreach_recs'] = '|'.join(recs) if recs else ''
 
         # Find nearest community center
@@ -929,18 +957,38 @@ def update_html_sidebar(final_layers, html_path, stats=None):
         )
         zips = census.get('zips', {})
         if zips:
-            census_html += f'<div style="margin-top:6px;font-size:10px;color:#888">Demographics by ZIP ({len(zips)} ZCTAs):</div>'
-            for z in sorted(zips.keys()):
-                zd = zips[z]
+            sorted_zips = sorted(zips.items(), key=lambda kv: -kv[1]['pop'])
+            total_pop = sum(z['pop'] for _, z in sorted_zips)
+            avg_income = sum(z['income'] * z['pop'] for _, z in sorted_zips if z['income'] > 0) / max(total_pop, 1)
+            avg_home = sum(z['home_val'] * z['pop'] for _, z in sorted_zips if z['home_val'] > 0) / max(total_pop, 1)
+            census_html += (
+                f'<details style="margin-top:6px" open>'
+                f'<summary style="cursor:pointer;font-size:10px;color:#555;font-weight:600">'
+                f'By ZIP &middot; {len(zips)} ZCTAs &middot; pop {total_pop:,} &middot; '
+                f'avg income ${int(avg_income):,} &middot; avg home ${int(avg_home):,}</summary>'
+                f'<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px">'
+                f'<thead><tr style="border-bottom:1px solid #ddd;color:#777">'
+                f'<th style="text-align:left;padding:2px 4px">ZIP</th>'
+                f'<th style="text-align:right;padding:2px 4px">Pop</th>'
+                f'<th style="text-align:right;padding:2px 4px">Income</th>'
+                f'<th style="text-align:right;padding:2px 4px">Home val</th>'
+                f'<th style="text-align:right;padding:2px 4px">Pov</th>'
+                f'<th style="text-align:right;padding:2px 4px">Hisp</th>'
+                f'</tr></thead><tbody>'
+            )
+            for z, zd in sorted_zips:
                 zpct = lambda n: f'{n/zd["pop"]*100:.0f}%' if zd['pop'] else '—'
                 census_html += (
-                    f'<details style="font-size:10px;margin:1px 0"><summary style="cursor:pointer">'
-                    f'<b>{z}</b> &middot; pop {zd["pop"]:,} &middot; income ${zd["income"]:,}</summary>'
-                    f'<div style="padding-left:12px">'
-                    f'Poverty: {zpct(zd["poverty"])} &middot; Hispanic: {zpct(zd["hispanic"])}<br>'
-                    f'Housing: {zd["units"]:,} &middot; Home value: ${zd["home_val"]:,}'
-                    f'</div></details>'
+                    f'<tr style="border-bottom:1px solid #f0f0f0">'
+                    f'<td style="padding:2px 4px"><b>{z}</b></td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zd["pop"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">${zd["income"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">${zd["home_val"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zpct(zd["poverty"])}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zpct(zd["hispanic"])}</td>'
+                    f'</tr>'
                 )
+            census_html += '</tbody></table></details>'
         html = re.sub(
             r'(<div id="censusData"[^>]*>).*?(</div>)',
             rf'\1{census_html}\2',

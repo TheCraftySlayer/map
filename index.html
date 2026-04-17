@@ -229,6 +229,9 @@
   <h5>County demographics <span style="font-weight:400;color:#aaa">ACS 5-Year</span></h5>
   <div id="censusData" style="font-size:11px;color:#666"><div style="margin-bottom:2px;color:#888">Bernalillo County, New Mexico &middot; 2023 ACS 5-Year</div><div class="s"><span>Population</span><span class="v">674,357</span></div><div class="s"><span>Median income</span><span class="v">$66,514</span></div><div class="s"><span>Poverty rate</span><span class="v">15.6%</span></div><div class="s"><span>Hispanic/Latino</span><span class="v">48.9%</span></div><div class="s"><span>White alone</span><span class="v">54.8%</span></div><div class="s"><span>Black</span><span class="v">3.0%</span></div><div class="s"><span>Native American</span><span class="v">5.1%</span></div><div class="s"><span>Asian</span><span class="v">2.9%</span></div><div class="s"><span>Housing units</span><span class="v">301,278</span></div><div class="s"><span>Median home value</span><span class="v">$268,500</span></div></div><div class="s"><span>Population</span><span class="v">674,357</span></div><div class="s"><span>Median income</span><span class="v">$66,514</span></div><div class="s"><span>Poverty rate</span><span class="v">15.6%</span></div><div class="s"><span>Hispanic/Latino</span><span class="v">48.9%</span></div><div class="s"><span>White alone</span><span class="v">54.8%</span></div><div class="s"><span>Black</span><span class="v">3.0%</span></div><div class="s"><span>Native American</span><span class="v">5.1%</span></div><div class="s"><span>Asian</span><span class="v">2.9%</span></div><div class="s"><span>Housing units</span><span class="v">301,278</span></div><div class="s"><span>Median home value</span><span class="v">$268,500</span></div></div>
 
+  <h5>Top outreach priorities <span style="font-weight:400;color:#aaa">auto-ranked</span></h5>
+  <div id="topOutreach" style="font-size:11px;color:#444;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:4px;background:#fafbfc"></div>
+
   <h5>Reference</h5>
   <label><input type="checkbox" class="ol" data-layer="rings"> Distance rings (2/5/10/15 mi)</label>
   <label><input type="checkbox" id="officeToggle" checked> <span class="sq" style="width:8px;height:8px;background:#ffff00"></span> Assessor office</label>
@@ -550,8 +553,8 @@ info._buildHtml=function(p){
     (p.hoh_20!=null?'<div class="s"><span>HOH '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.hoh_20*100).toFixed(1)+'%\u2192'+(p.pct_hoh*100).toFixed(1)+'%</span></div>':'')+
     (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'')+
     (p.outreach_need!=null?'<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span><b>Outreach need</b></span><span class="v" style="color:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'"><b>'+(p.outreach_need*100).toFixed(0)+'%</b></span></div>':'')+
-    (p.outreach_recs?'<div style="margin-top:3px;font-size:10px;color:#555"><b>Recommended outreach:</b><ul style="margin:2px 0 0 16px;padding:0">'+p.outreach_recs.split('|').map(function(r){return'<li>'+r+'</li>';}).join('')+'</ul></div>':'')+
-    (p.nearest_cc?'<div style="margin-top:3px;font-size:10px;color:#185FA5"><b>\u2192 Host event at:</b> '+p.nearest_cc+' Community Center</div>':'');
+    (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=parts[0];var desc=parts[1]||'';return'<div style="margin-bottom:5px;padding:4px 6px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(desc?'<div style="font-size:10px;color:#555;margin-top:2px;line-height:1.3">'+desc+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
+    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+p.nearest_cc+' Community Center</div>':'');
 };
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
@@ -683,6 +686,47 @@ function renderTract(){
 }
 
 renderNbhd();
+
+// ── Top outreach priorities panel ────────────────────────────────────────────
+function renderTopOutreach(){
+  const el=document.getElementById('topOutreach');
+  if(!el) return;
+  const feats=DATA.features.filter(f=>f.properties.outreach_need!=null&&!f.properties.is_commercial);
+  feats.sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0));
+  const top=feats.slice(0,15);
+  if(!top.length){el.innerHTML='<div style="color:#888;padding:4px">No outreach data available. Rebuild to populate.</div>';return;}
+  el.innerHTML=top.map(function(f){
+    const p=f.properties;
+    const score=(p.outreach_need*100).toFixed(0);
+    const color=p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040';
+    const recs=p.outreach_recs?p.outreach_recs.split('|').map(function(r){return r.split('::')[0];}).slice(0,2).join(', '):'';
+    const cc=p.nearest_cc?' \u2192 '+p.nearest_cc:'';
+    return '<div class="outreach-row" data-nbhd="'+p.nbhd+'" style="cursor:pointer;padding:3px 4px;border-bottom:1px solid #eee;display:flex;gap:6px;align-items:flex-start"><span style="font-weight:700;color:'+color+';min-width:28px">'+score+'%</span><div style="flex:1;min-width:0"><div style="font-weight:600">Nbhd '+p.nbhd+'</div>'+(recs?'<div style="font-size:10px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+recs+'</div>':'')+(cc?'<div style="font-size:9px;color:#185FA5">'+cc+'</div>':'')+'</div></div>';
+  }).join('');
+  // Click to zoom + pin info panel
+  el.querySelectorAll('.outreach-row').forEach(function(row){
+    row.addEventListener('click',function(){
+      const nbhd=parseInt(row.dataset.nbhd);
+      const feat=DATA.features.find(f=>f.properties.nbhd===nbhd);
+      if(!feat)return;
+      const tmp=L.geoJSON(feat);
+      map.fitBounds(tmp.getBounds(),{maxZoom:14,padding:[40,40]});
+      // Find and pin the real layer
+      if(nbhdLayer){
+        nbhdLayer.eachLayer(function(l){
+          if(l.feature&&l.feature.properties.nbhd===nbhd){
+            if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
+            pinnedNbhd=l;
+            l.setStyle({weight:3,color:'#ffcc00',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+            l.bringToFront();
+            info.update(feat.properties);
+          }
+        });
+      }
+    });
+  });
+}
+renderTopOutreach();
 
 // ── Swipe compare ─────────────────────────────────────────────────────────────
 let swipePos=50, swipeDragging=false;
