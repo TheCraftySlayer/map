@@ -11,7 +11,7 @@
 <style>
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}
 #map{width:100%;height:100vh}
-.info{padding:10px 14px;background:rgba(255,255,255,.95);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:13px;line-height:1.6;max-width:300px;max-height:calc(100vh - 130px);overflow-y:auto;z-index:1001}
+.info{padding:10px 14px;background:rgba(255,255,255,.95);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.15);font-size:13px;line-height:1.6;max-width:300px;max-height:calc(100vh - 130px);overflow-y:auto;z-index:1001;margin-top:60px}
 .info h4{margin:0 0 4px;font-size:14px;color:#222}
 .info .s{display:flex;justify-content:space-between;gap:12px}
 .info .s .v{font-weight:600;color:#185FA5}
@@ -40,7 +40,7 @@
 <div id="swipeOverlay" style="position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:9999;display:none"></div>
 
 <button class="toggle-btn" id="ctrlToggle" style="top:10px;right:296px">❮</button>
-<button class="toggle-btn" id="tileToggle" style="top:80px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
+<button class="toggle-btn" id="tileToggle" style="bottom:20px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
 
 <div class="ctrl">
   <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span></h4>
