@@ -957,18 +957,38 @@ def update_html_sidebar(final_layers, html_path, stats=None):
         )
         zips = census.get('zips', {})
         if zips:
-            census_html += f'<div style="margin-top:6px;font-size:10px;color:#888">Demographics by ZIP ({len(zips)} ZCTAs):</div>'
-            for z in sorted(zips.keys()):
-                zd = zips[z]
+            sorted_zips = sorted(zips.items(), key=lambda kv: -kv[1]['pop'])
+            total_pop = sum(z['pop'] for _, z in sorted_zips)
+            avg_income = sum(z['income'] * z['pop'] for _, z in sorted_zips if z['income'] > 0) / max(total_pop, 1)
+            avg_home = sum(z['home_val'] * z['pop'] for _, z in sorted_zips if z['home_val'] > 0) / max(total_pop, 1)
+            census_html += (
+                f'<details style="margin-top:6px" open>'
+                f'<summary style="cursor:pointer;font-size:10px;color:#555;font-weight:600">'
+                f'By ZIP &middot; {len(zips)} ZCTAs &middot; pop {total_pop:,} &middot; '
+                f'avg income ${int(avg_income):,} &middot; avg home ${int(avg_home):,}</summary>'
+                f'<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px">'
+                f'<thead><tr style="border-bottom:1px solid #ddd;color:#777">'
+                f'<th style="text-align:left;padding:2px 4px">ZIP</th>'
+                f'<th style="text-align:right;padding:2px 4px">Pop</th>'
+                f'<th style="text-align:right;padding:2px 4px">Income</th>'
+                f'<th style="text-align:right;padding:2px 4px">Home val</th>'
+                f'<th style="text-align:right;padding:2px 4px">Pov</th>'
+                f'<th style="text-align:right;padding:2px 4px">Hisp</th>'
+                f'</tr></thead><tbody>'
+            )
+            for z, zd in sorted_zips:
                 zpct = lambda n: f'{n/zd["pop"]*100:.0f}%' if zd['pop'] else '—'
                 census_html += (
-                    f'<details style="font-size:10px;margin:1px 0"><summary style="cursor:pointer">'
-                    f'<b>{z}</b> &middot; pop {zd["pop"]:,} &middot; income ${zd["income"]:,}</summary>'
-                    f'<div style="padding-left:12px">'
-                    f'Poverty: {zpct(zd["poverty"])} &middot; Hispanic: {zpct(zd["hispanic"])}<br>'
-                    f'Housing: {zd["units"]:,} &middot; Home value: ${zd["home_val"]:,}'
-                    f'</div></details>'
+                    f'<tr style="border-bottom:1px solid #f0f0f0">'
+                    f'<td style="padding:2px 4px"><b>{z}</b></td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zd["pop"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">${zd["income"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">${zd["home_val"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zpct(zd["poverty"])}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{zpct(zd["hispanic"])}</td>'
+                    f'</tr>'
                 )
+            census_html += '</tbody></table></details>'
         html = re.sub(
             r'(<div id="censusData"[^>]*>).*?(</div>)',
             rf'\1{census_html}\2',
