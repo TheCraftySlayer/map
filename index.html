@@ -49,6 +49,15 @@
     <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
   </div>
 
+  <details id="topOutreachPanel" open style="margin:0 0 10px 0;border:2px solid #c41a1a;border-radius:6px;background:linear-gradient(180deg,#fff5f5 0%,#ffffff 100%);box-shadow:0 1px 3px rgba(196,26,26,.15)">
+    <summary style="cursor:pointer;padding:6px 8px;font-weight:700;font-size:12px;color:#c41a1a;list-style:none;display:flex;align-items:center;gap:6px">
+      <span style="font-size:14px">\u26a0</span>
+      <span>Top outreach priorities</span>
+      <span style="font-weight:400;color:#888;font-size:10px;margin-left:auto">auto-ranked &middot; click to expand</span>
+    </summary>
+    <div id="topOutreach" style="font-size:11px;color:#444;max-height:240px;overflow-y:auto;padding:4px 6px 6px"></div>
+  </details>
+
   <h5>Neighborhood choropleth</h5>
 
   <h5>Property characteristics <span style="font-weight:400;color:#aaa">2025 roll &middot; 257,443 parcels</span></h5>
@@ -228,9 +237,6 @@
 
   <h5>County demographics <span style="font-weight:400;color:#aaa">ACS 5-Year</span></h5>
   <div id="censusData" style="font-size:11px;color:#666"><div style="margin-bottom:2px;color:#888">Bernalillo County, New Mexico &middot; 2023 ACS 5-Year</div><div class="s"><span>Population</span><span class="v">674,357</span></div><div class="s"><span>Median income</span><span class="v">$66,514</span></div><div class="s"><span>Poverty rate</span><span class="v">15.6%</span></div><div class="s"><span>Hispanic/Latino</span><span class="v">48.9%</span></div><div class="s"><span>White alone</span><span class="v">54.8%</span></div><div class="s"><span>Black</span><span class="v">3.0%</span></div><div class="s"><span>Native American</span><span class="v">5.1%</span></div><div class="s"><span>Asian</span><span class="v">2.9%</span></div><div class="s"><span>Housing units</span><span class="v">301,278</span></div><div class="s"><span>Median home value</span><span class="v">$268,500</span></div></div>
-
-  <h5>Top outreach priorities <span style="font-weight:400;color:#aaa">auto-ranked</span></h5>
-  <div id="topOutreach" style="font-size:11px;color:#444;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:4px;background:#fafbfc"></div>
 
   <h5>Reference</h5>
   <label><input type="checkbox" class="ol" data-layer="rings"> Distance rings (2/5/10/15 mi)</label>
