@@ -304,11 +304,13 @@ def build_point_layers_from_roll(joined_by_yr):
     return layers
 
 
-def compute_nbhd_stats(by_nbhd_yr, existing_props):
+def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
     """
     Compute per-neighborhood aggregated stats from tax roll data.
     Merges with existing properties to preserve contact center data.
+    census: optional dict with {'zips': {'87102': {'pop','income','poverty',...}}}
     """
+    zip_data = (census or {}).get('zips', {}) if census else {}
     # Find the latest year and all years available
     all_years = set()
     for nbhd, yrs in by_nbhd_yr.items():
@@ -470,29 +472,84 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             props[f'owner_turnover_{ys}'] = round(yot / yp, 4) if yp else 0
             props[f'parcels_{ys}'] = float(yp)
 
-        # Outreach need score (0-1): combines equity indicators
-        # Higher = more need for outreach
-        scores = []
-        # High HOH rate → may need exemption education
-        if props.get('pct_hoh') is not None:
-            scores.append(min(props['pct_hoh'] / 0.5, 1.0))
-        # High VF denial rate → frustrated taxpayers
-        if props.get('pct_vf_denied') is not None and props['pct_vf_denied'] > 0:
-            scores.append(min(props['pct_vf_denied'] / 0.5, 1.0))
-        # High value volatility → property value instability
-        if volatility is not None:
-            scores.append(min(volatility / 0.5, 1.0))
-        # High owner turnover → new owners need assistance
-        if owner_turnover > 0:
-            scores.append(min(owner_turnover / 0.3, 1.0))
-        # High HOH churn → exemption instability
-        if hoh_churn is not None and hoh_churn > 0:
-            scores.append(min(hoh_churn / 0.05, 1.0))
-        # Low contacts per parcel → underserved
+        # Outreach need score (0-1): multi-signal weighted composite
+        # Design: need = severity × vulnerability × service_gap
+        # High score requires ALL three: a real problem, a vulnerable group,
+        # AND inadequate current service. Mitigates false positives from
+        # wealthy residential areas that simply have high HOH rates.
+        def _cap(v, ceil): return min((v or 0) / ceil, 1.0) if ceil else 0
+
+        # Attach ZIP(s) for this neighborhood: scan roll records for common ZIP fields
+        nbhd_zips = set()
+        for r in recs:
+            for zf in ('OWNZIP', 'SITEZIP', 'PROPZIP', 'ZIP', 'ZIPCODE'):
+                z = str(r.get(zf, '') or '').strip()[:5]
+                if z.isdigit() and z.startswith('87'):
+                    nbhd_zips.add(z)
+                    break
+        zip_poverty = 0
+        zip_low_income = 0
+        if nbhd_zips and zip_data:
+            povs, incs = [], []
+            for z in nbhd_zips:
+                zd = zip_data.get(z)
+                if not zd or not zd.get('pop'):
+                    continue
+                povs.append(zd['poverty'] / zd['pop'])
+                if zd.get('income', 0) > 0:
+                    incs.append(zd['income'])
+            if povs:
+                zip_poverty = sum(povs) / len(povs)   # avg ZIP poverty rate
+            if incs:
+                med_inc = sum(incs) / len(incs)
+                # Low income = 1 when ≤ $35k, 0 when ≥ $100k
+                zip_low_income = max(0, min(1, (100000 - med_inc) / 65000))
+            props['zip_codes'] = ','.join(sorted(nbhd_zips))
+            props['zip_poverty_rate'] = round(zip_poverty, 4)
+            props['zip_income_factor'] = round(zip_low_income, 4)
+
+        # Severity: worst current problem
+        sev_vf_denied = _cap(props.get('pct_vf_denied'), 0.4)
+        sev_hoh_churn = _cap(hoh_churn, 0.04)
+        sev_volatility = _cap(volatility, 0.5)
+        severity = max(sev_vf_denied, sev_hoh_churn, sev_volatility)
+
+        # Vulnerability: concentration of at-risk residents
+        # Include Census poverty/income as strong vulnerability amplifiers
+        vul_elderly = _cap(props.get('pct_val_freeze'), 0.15)
+        vul_veterans = _cap(props.get('pct_vet'), 0.12)
+        vul_new_owners = _cap(owner_turnover, 0.25)
+        vul_poverty = _cap(zip_poverty, 0.25)       # 25% poverty → max
+        vul_low_income = zip_low_income              # already 0-1 (<=$35k → max)
+        vulnerability = max(
+            vul_elderly, vul_veterans, vul_new_owners,
+            vul_poverty, vul_low_income,
+        )
+
+        # Service gap: low engagement is the strongest equity signal
         cpp = props.get('contacts_per_parcel', 0) or 0
-        if cpp >= 0:
-            scores.append(max(0, 1.0 - cpp / 1.0))
-        props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
+        gap_low_contact = max(0, 1.0 - cpp / 0.5)    # <0.1 cpp → ~max
+        gap_failure = _cap(props.get('failure_rate'), 0.15)
+        # Amplify service gap when crossed with Census disadvantage signals
+        # Low contacts + high poverty = classic underserved
+        demographic_disadvantage = max(vul_poverty, vul_low_income)
+        if gap_low_contact > 0.5 and demographic_disadvantage > 0.3:
+            gap_low_contact = min(1.0, gap_low_contact * (1 + demographic_disadvantage * 0.5))
+        service_gap = max(gap_low_contact, gap_failure)
+
+        # Weighted formula: emphasize service gap (equity priority)
+        # Geometric mean style with service_gap weighted 2x
+        sev_f = max(severity, 0.15)
+        vul_f = max(vulnerability, 0.15)
+        gap_f = max(service_gap, 0.15)
+        # score = sqrt(severity * vulnerability) * service_gap (heavier weight on gap)
+        import math
+        base = math.sqrt(sev_f * vul_f)
+        props['outreach_need'] = round(min(1.0, base * gap_f * 1.6), 4)
+        # Store component scores for transparency
+        props['outreach_severity'] = round(severity, 4)
+        props['outreach_vulnerability'] = round(vulnerability, 4)
+        props['outreach_service_gap'] = round(service_gap, 4)
 
         # Generate outreach recommendations with explicit reasoning
         # Format: "Title::Why::What" split by | for multiple recs
@@ -1102,9 +1159,17 @@ def main():
     by_nbhd_yr = process_roll(roll_records)
     print(f"  {len(by_nbhd_yr)} neighborhoods found")
 
-    # Compute neighborhood stats from roll
+    # Fetch Census ACS early so ZIP demographics can feed outreach scores
+    census = None
+    if not args.no_census:
+        print("\nFetching Census ACS data...")
+        census = fetch_census_acs()
+    else:
+        print("\nSkipping Census ACS fetch (--no-census)")
+
+    # Compute neighborhood stats from roll (census is used to amplify outreach score)
     print("\nComputing neighborhood stats...")
-    nbhd_stats = compute_nbhd_stats(by_nbhd_yr, existing_core['DATA']['features'])
+    nbhd_stats = compute_nbhd_stats(by_nbhd_yr, existing_core['DATA']['features'], census=census)
 
     # All possible layer keys
     all_layer_keys = [
@@ -1240,13 +1305,6 @@ def main():
                          for yr_data in by_nbhd_yr.values())
         if snap_count:
             snapshot_parcels[snap_yr] = snap_count
-
-    census = None
-    if not args.no_census:
-        print("\nFetching Census ACS data...")
-        census = fetch_census_acs()
-    else:
-        print("\nSkipping Census ACS fetch (--no-census)")
 
     sidebar_stats = {
         'total_parcels': total_parcels,
