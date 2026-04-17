@@ -1015,12 +1015,32 @@ def update_html_sidebar(final_layers, html_path, stats=None):
                     f'</tr>'
                 )
             census_html += '</tbody></table></details>'
-        html = re.sub(
-            r'(<div id="censusData"[^>]*>).*?(</div>)',
-            rf'\1{census_html}\2',
-            html,
-            flags=re.DOTALL,
-        )
+        # Replace census div by finding start and matching the balanced closing
+        # tag (non-greedy .*? breaks because content has nested <div>).
+        m = re.search(r'<div id="censusData"[^>]*>', html)
+        if m:
+            start = m.start()
+            open_tag_end = m.end()
+            # Scan forward to find the matching </div> by tracking depth
+            depth = 1
+            i = open_tag_end
+            while i < len(html) and depth > 0:
+                nxt_open = html.find('<div', i)
+                nxt_close = html.find('</div>', i)
+                if nxt_close == -1:
+                    break
+                if nxt_open != -1 and nxt_open < nxt_close:
+                    depth += 1
+                    i = nxt_open + 4
+                else:
+                    depth -= 1
+                    i = nxt_close + 6
+            if depth == 0:
+                new_div = (
+                    f'<div id="censusData" style="font-size:11px;color:#666">'
+                    f'{census_html}</div>'
+                )
+                html = html[:start] + new_div + html[i:]
 
     out = html.encode('utf-8')
     if crlf:
