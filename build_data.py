@@ -1118,6 +1118,7 @@ def main():
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
     parser.add_argument('--mdf', help='Path to MDF Complete .xlsx (multi-sheet data warehouse)')
+    parser.add_argument('--mdf-dir', help='Path to folder of MDF CSV exports (faster than xlsx)')
     args = parser.parse_args()
 
     # Determine mode
@@ -1264,12 +1265,24 @@ def main():
 
     # ── MDF integration ──────────────────────────────────────────────────────────
     mdf_census = None
-    if args.mdf:
-        print(f"\n── MDF integration: {args.mdf} ──")
+    mdf_source = args.mdf_dir or args.mdf
+    if mdf_source:
+        is_dir = args.mdf_dir is not None
+        print(f"\n── MDF integration: {mdf_source} ──")
+
+        def read_mdf(sheet_name):
+            if is_dir:
+                csv_path = Path(mdf_source) / f'{sheet_name}.csv'
+                if csv_path.exists():
+                    return read_csv(str(csv_path))
+                else:
+                    raise FileNotFoundError(f'{csv_path} not found')
+            else:
+                return read_xlsx(mdf_source, sheet_name)
 
         # agg_nbhd_summary: merge contact center stats into neighborhood data
         try:
-            nbhd_rows = read_xlsx(args.mdf, 'agg_nbhd_summary')
+            nbhd_rows = read_mdf('agg_nbhd_summary')
             merged = 0
             for r in nbhd_rows:
                 n = safe_int(r.get('nbhd'))
@@ -1286,7 +1299,7 @@ def main():
 
         # agg_tract_summary: update tract address counts
         try:
-            tract_rows = read_xlsx(args.mdf, 'agg_tract_summary')
+            tract_rows = read_mdf('agg_tract_summary')
             tract_counts = {str(r.get('geoid_tract','')): safe_int(r.get('address_count'))
                            for r in tract_rows if r.get('geoid_tract')}
             for feat in existing_core.get('TRACT_GEO', {}).get('features', []):
@@ -1299,7 +1312,7 @@ def main():
 
         # dim_property: use for VF status, exemptions, property class
         try:
-            prop_rows = read_xlsx(args.mdf, 'dim_property')
+            prop_rows = read_mdf('dim_property')
             # Group by nbhd for class breakdown
             class_by_nbhd = defaultdict(lambda: {'R':0,'C':0,'V':0})
             for r in prop_rows:
@@ -1320,8 +1333,8 @@ def main():
 
         # fact_visitors: rebuild visitor layers from service types
         try:
-            vis_rows = read_xlsx(args.mdf, 'fact_visitors')
-            svc_types = read_xlsx(args.mdf, 'dim_service_type')
+            vis_rows = read_mdf('fact_visitors')
+            svc_types = read_mdf('dim_service_type')
             svc_map = {safe_int(s.get('service_type_id')): s.get('service_type_name','')
                       for s in svc_types}
             vet_v, vf_v, hoh_v, pro_v, sp_geo = [], [], [], [], []
@@ -1361,8 +1374,8 @@ def main():
 
         # fact_calls + bridge_phone + bridge_property: phone channel layers
         try:
-            phone_rows = read_xlsx(args.mdf, 'bridge_phone')
-            prop_rows2 = read_xlsx(args.mdf, 'bridge_property')
+            phone_rows = read_mdf('bridge_phone')
+            prop_rows2 = read_mdf('bridge_property')
             prop_map = {}
             for r in prop_rows2:
                 ph = str(r.get('phone_hash', '') or '').strip()
@@ -1399,7 +1412,7 @@ def main():
 
         # fact_sale_contact_lag: sale-to-contact timing per neighborhood
         try:
-            lag_rows = read_xlsx(args.mdf, 'fact_sale_contact_lag')
+            lag_rows = read_mdf('fact_sale_contact_lag')
             lag_by_nbhd = defaultdict(lambda: {'sales': 0, 'contacted': 0})
             for r in lag_rows:
                 n = safe_int(r.get('NBHD'))
@@ -1416,8 +1429,8 @@ def main():
 
         # ref_county_demographics + ref_zcta_demographics: embed in sidebar
         try:
-            county_rows = read_xlsx(args.mdf, 'ref_county_demographics')
-            zcta_rows = read_xlsx(args.mdf, 'ref_zcta_demographics')
+            county_rows = read_mdf('ref_county_demographics')
+            zcta_rows = read_mdf('ref_zcta_demographics')
             mdf_census = {'county_raw': county_rows, 'zcta_raw': zcta_rows}
             print(f"  Demographics: county={len(county_rows)} rows, zcta={len(zcta_rows)} rows")
         except Exception as e:
