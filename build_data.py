@@ -494,23 +494,51 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props):
             scores.append(max(0, 1.0 - cpp / 1.0))
         props['outreach_need'] = round(sum(scores) / len(scores), 4) if scores else 0
 
-        # Generate outreach recommendations
+        # Generate outreach recommendations with specific event types
+        # Format: "Title::Description" split by | for multiple recs
         recs = []
-        if props.get('pct_hoh', 0) > 0.25:
-            recs.append('HOH exemption education')
-        if props.get('pct_vf_denied', 0) > 0.3:
-            recs.append('Value freeze application assistance')
-        if volatility is not None and volatility > 0.3:
-            recs.append('Property value change awareness')
-        if owner_turnover > 0.15:
-            recs.append('New homeowner orientation')
-        if hoh_churn is not None and hoh_churn > 0.02:
-            recs.append('Exemption renewal reminders')
+        pct_hoh = props.get('pct_hoh', 0) or 0
+        pct_vf_denied = props.get('pct_vf_denied', 0) or 0
+        pct_vet = props.get('pct_vet', 0) or 0
         cpp = props.get('contacts_per_parcel', 0) or 0
+
+        if pct_hoh > 0.25:
+            recs.append(
+                f'HOH exemption clinic::{pct_hoh*100:.0f}% of parcels claim HOH. '
+                'Host a walk-in clinic with application help, eligibility review, and renewal tips.'
+            )
+        if pct_vf_denied > 0.3:
+            recs.append(
+                f'Value freeze workshop::{pct_vf_denied*100:.0f}% VF denial rate. '
+                'Many seniors/disabled applicants failing the application. '
+                'Host a workshop covering income limits, required documents, and re-applying.'
+            )
+        if volatility is not None and volatility > 0.3:
+            recs.append(
+                f'Property value town hall::Values swung {volatility*100:.0f}% over recent years. '
+                'Explain reappraisal cycle, protest rights, and what drives value changes.'
+            )
+        if owner_turnover > 0.15:
+            recs.append(
+                f'New homeowner orientation::{owner_turnover*100:.0f}% turnover — high % of new owners. '
+                'Offer a welcome session on exemptions, deadlines, and how to read an assessment.'
+            )
+        if hoh_churn is not None and hoh_churn > 0.02:
+            recs.append(
+                f'Exemption renewal drive::{hoh_churn*100:.1f}% HOH churn — exemptions being lost. '
+                'Door-to-door or mailer campaign reminding residents to re-apply.'
+            )
         if cpp < 0.3:
-            recs.append('General outreach (underserved area)')
-        if props.get('pct_vet', 0) > 0.08:
-            recs.append('Veteran exemption outreach')
+            recs.append(
+                f'Pop-up office day::Only {cpp:.2f} contacts/parcel — severely underserved. '
+                'Bring staff on-site for a full day: Q&A, account lookups, general assessor info.'
+            )
+        if pct_vet > 0.08:
+            recs.append(
+                f'Veteran exemption outreach::{pct_vet*100:.0f}% veteran exemption rate. '
+                'Partner with VFW/American Legion for a benefits session covering '
+                'veteran exemption and disabled veteran waiver.'
+            )
         props['outreach_recs'] = '|'.join(recs) if recs else ''
 
         # Find nearest community center
