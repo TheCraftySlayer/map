@@ -73,13 +73,13 @@ def read_dbf(path):
     return records
 
 
-def read_xlsx(path):
-    """Read an .xlsx file and return list of dicts."""
+def read_xlsx(path, sheet_name=None):
+    """Read an .xlsx file and return list of dicts. Optionally specify sheet."""
     if not HAS_OPENPYXL:
         sys.exit("Install openpyxl: pip install openpyxl")
-    print(f"  Reading {path}...")
+    print(f"  Reading {path}" + (f" [{sheet_name}]" if sheet_name else "") + "...")
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb.active
+    ws = wb[sheet_name] if sheet_name else wb.active
     rows = ws.iter_rows(values_only=True)
     headers = [str(h).strip() if h else '' for h in next(rows)]
     records = []
@@ -1117,6 +1117,7 @@ def main():
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
+    parser.add_argument('--mdf', help='Path to MDF Complete .xlsx (multi-sheet data warehouse)')
     args = parser.parse_args()
 
     # Determine mode
@@ -1260,6 +1261,167 @@ def main():
         new_layers = {}
         rebuilt_keys = []
         preserved_keys = all_layer_keys
+
+    # ── MDF integration ──────────────────────────────────────────────────────────
+    mdf_census = None
+    if args.mdf:
+        print(f"\n── MDF integration: {args.mdf} ──")
+
+        # agg_nbhd_summary: merge contact center stats into neighborhood data
+        try:
+            nbhd_rows = read_xlsx(args.mdf, 'agg_nbhd_summary')
+            merged = 0
+            for r in nbhd_rows:
+                n = safe_int(r.get('nbhd'))
+                if n and n in nbhd_stats:
+                    for k in ['total_contacts','total_calls','total_failures',
+                              'contacts_per_parcel','calls_per_parcel','failure_rate',
+                              'sale_contact_rate','post_sale_contacts']:
+                        if r.get(k) is not None:
+                            nbhd_stats[n][k] = safe_float(r[k])
+                    merged += 1
+            print(f"  agg_nbhd_summary: merged {merged} neighborhoods")
+        except Exception as e:
+            print(f"  agg_nbhd_summary: {e}")
+
+        # agg_tract_summary: update tract address counts
+        try:
+            tract_rows = read_xlsx(args.mdf, 'agg_tract_summary')
+            tract_counts = {str(r.get('geoid_tract','')): safe_int(r.get('address_count'))
+                           for r in tract_rows if r.get('geoid_tract')}
+            for feat in existing_core.get('TRACT_GEO', {}).get('features', []):
+                geoid = feat['properties'].get('GEOID', '')
+                if geoid in tract_counts:
+                    feat['properties']['address_count'] = tract_counts[geoid]
+            print(f"  agg_tract_summary: {len(tract_counts)} tracts")
+        except Exception as e:
+            print(f"  agg_tract_summary: {e}")
+
+        # dim_property: use for VF status, exemptions, property class
+        try:
+            prop_rows = read_xlsx(args.mdf, 'dim_property')
+            # Group by nbhd for class breakdown
+            class_by_nbhd = defaultdict(lambda: {'R':0,'C':0,'V':0})
+            for r in prop_rows:
+                n = safe_int(r.get('nbhd'))
+                cls = str(r.get('class', '') or '').strip().upper()
+                if n and cls in ('R','C','V'):
+                    class_by_nbhd[n][cls] += 1
+            for n, counts in class_by_nbhd.items():
+                if n in nbhd_stats:
+                    total = sum(counts.values())
+                    nbhd_stats[n]['res_count'] = counts['R']
+                    nbhd_stats[n]['comm_count'] = counts['C']
+                    nbhd_stats[n]['vacant_count'] = counts['V']
+                    nbhd_stats[n]['pct_residential'] = round(counts['R'] / total, 4) if total else 0
+            print(f"  dim_property: class breakdown for {len(class_by_nbhd)} neighborhoods")
+        except Exception as e:
+            print(f"  dim_property: {e}")
+
+        # fact_visitors: rebuild visitor layers from service types
+        try:
+            vis_rows = read_xlsx(args.mdf, 'fact_visitors')
+            svc_types = read_xlsx(args.mdf, 'dim_service_type')
+            svc_map = {safe_int(s.get('service_type_id')): s.get('service_type_name','')
+                      for s in svc_types}
+            vet_v, vf_v, hoh_v, pro_v, sp_geo = [], [], [], [], []
+            for r in vis_rows:
+                x = safe_float(r.get('prop_xcoord') or r.get('xcoord'))
+                y = safe_float(r.get('prop_ycoord') or r.get('ycoord'))
+                if not x or not y:
+                    continue
+                la, ln = round(y, 6), round(x, 6)
+                dk = str(r.get('date_key', '') or '')
+                yr = safe_int(dk[:4]) if len(dk) >= 4 else 0
+                if not yr:
+                    continue
+                dur = safe_float(r.get('visit_duration_min'))
+                svc = svc_map.get(safe_int(r.get('service_type_id')), '').lower()
+                pt = {'la': la, 'ln': ln, 'y': yr, 'd': round(dur, 1)}
+                if 'veteran' in svc or 'vet' in svc:
+                    vet_v.append(pt)
+                elif 'freeze' in svc or 'value freeze' in svc:
+                    vf_v.append(pt)
+                elif 'head of household' in svc or 'hoh' in svc:
+                    hoh_v.append(pt)
+                elif 'protest' in svc:
+                    pro_v.append(pt)
+                if str(r.get('is_spanish_speaker', '') or '').strip().upper() in ('Y','YES','1','TRUE'):
+                    sp_geo.append(pt)
+            new_layers['VET_V'] = vet_v
+            new_layers['VF_V'] = vf_v
+            new_layers['HOH_V'] = hoh_v
+            new_layers['PRO_V'] = pro_v
+            new_layers['SP_GEO'] = sp_geo
+            if 'VET_V' not in rebuilt_keys:
+                rebuilt_keys.extend(['VET_V','VF_V','HOH_V','PRO_V','SP_GEO'])
+            print(f"  fact_visitors: VET={len(vet_v)}, VF={len(vf_v)}, HOH={len(hoh_v)}, PRO={len(pro_v)}, SP={len(sp_geo)}")
+        except Exception as e:
+            print(f"  fact_visitors: {e}")
+
+        # fact_calls + bridge_phone + bridge_property: phone channel layers
+        try:
+            phone_rows = read_xlsx(args.mdf, 'bridge_phone')
+            prop_rows2 = read_xlsx(args.mdf, 'bridge_property')
+            prop_map = {}
+            for r in prop_rows2:
+                ph = str(r.get('phone_hash', '') or '').strip()
+                x = safe_float(r.get('xcoord'))
+                y = safe_float(r.get('ycoord'))
+                if ph and x and y:
+                    prop_map[ph] = (round(y, 6), round(x, 6))
+            rpt, co, vo, mc = [], [], [], []
+            for r in phone_rows:
+                ph = str(r.get('phone_hash', '') or '').strip()
+                if ph not in prop_map:
+                    continue
+                la, ln = prop_map[ph]
+                calls = safe_int(r.get('call_count'))
+                visits = safe_int(r.get('visit_count'))
+                is_mc = str(r.get('is_multichannel', '') or '').strip().upper() in ('Y','YES','1','TRUE')
+                if calls >= 5:
+                    rpt.append({'la': la, 'ln': ln, 'c': calls})
+                if calls > 0 and visits == 0:
+                    co.append({'la': la, 'ln': ln})
+                elif visits > 0 and calls == 0:
+                    vo.append({'la': la, 'ln': ln})
+                if is_mc:
+                    mc.append({'la': la, 'ln': ln})
+            new_layers['RPT'] = rpt
+            new_layers['CO'] = co[:2000]
+            new_layers['VO'] = vo[:5000]
+            new_layers['MC'] = mc
+            if 'RPT' not in rebuilt_keys:
+                rebuilt_keys.extend(['RPT','CO','VO','MC'])
+            print(f"  Phone channel: RPT={len(rpt)}, CO={len(co)}, VO={len(vo)}, MC={len(mc)}")
+        except Exception as e:
+            print(f"  Phone channel: {e}")
+
+        # fact_sale_contact_lag: sale-to-contact timing per neighborhood
+        try:
+            lag_rows = read_xlsx(args.mdf, 'fact_sale_contact_lag')
+            lag_by_nbhd = defaultdict(lambda: {'sales': 0, 'contacted': 0})
+            for r in lag_rows:
+                n = safe_int(r.get('NBHD'))
+                if n:
+                    lag_by_nbhd[n]['sales'] += 1
+                    if r.get('first_contact') or r.get('first_call'):
+                        lag_by_nbhd[n]['contacted'] += 1
+            for n, d in lag_by_nbhd.items():
+                if n in nbhd_stats and d['sales'] > 0:
+                    nbhd_stats[n]['sale_contact_rate'] = round(d['contacted'] / d['sales'], 4)
+            print(f"  fact_sale_contact_lag: {len(lag_by_nbhd)} neighborhoods")
+        except Exception as e:
+            print(f"  fact_sale_contact_lag: {e}")
+
+        # ref_county_demographics + ref_zcta_demographics: embed in sidebar
+        try:
+            county_rows = read_xlsx(args.mdf, 'ref_county_demographics')
+            zcta_rows = read_xlsx(args.mdf, 'ref_zcta_demographics')
+            mdf_census = {'county_raw': county_rows, 'zcta_raw': zcta_rows}
+            print(f"  Demographics: county={len(county_rows)} rows, zcta={len(zcta_rows)} rows")
+        except Exception as e:
+            print(f"  Demographics: {e}")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
