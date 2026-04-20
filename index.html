@@ -602,6 +602,32 @@ info._buildHtml=function(p){
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+14)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
+  // Generalized per-layer sparkline — for layers with a per-year history, show the timeline
+  const perYearBases={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover'};
+  const base=perYearBases[NBL];
+  let layerSpark='';
+  if(base){
+    const pts=[],pLabs=[];
+    for(let y=7;y<=26;y++){
+      const v=p[base+'_'+y];
+      if(v!=null&&Number.isFinite(v)&&v!==0){pts.push(v);pLabs.push("'"+String(y).padStart(2,'0'));}
+    }
+    if(pts.length>=3){
+      let pMin=pts[0],pMax=pts[0];
+      for(let i=0;i<pts.length;i++){if(pts[i]<pMin)pMin=pts[i];if(pts[i]>pMax)pMax=pts[i];}
+      if(pMax===pMin)pMax=pMin+1;
+      const lw=Math.max(200,Math.min(260,pts.length*14)),lh=36,lPad=4;
+      const xs=i=>lPad+i*((lw-2*lPad)/(pts.length-1));
+      const ys=v=>lPad+(lh-2*lPad)*(1-(v-pMin)/(pMax-pMin));
+      const path=pts.map((v,i)=>(i?'L':'M')+xs(i).toFixed(1)+' '+ys(v).toFixed(1)).join(' ');
+      const dots=pts.map((v,i)=>'<circle cx="'+xs(i).toFixed(1)+'" cy="'+ys(v).toFixed(1)+'" r="1.8" fill="#185FA5"><title>'+pLabs[i]+': '+formatStat(v,NBL)+'</title></circle>').join('');
+      const fmt=v=>formatStat(v,NBL);
+      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px">'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</div>'+
+        '<svg width="'+lw+'" height="'+lh+'" style="display:block;margin:2px 0">'+
+        '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+'</svg>'+
+        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+pLabs[0]+' '+fmt(pts[0])+'</span><span>'+pLabs[pLabs.length-1]+' '+fmt(pts[pts.length-1])+'</span></div>';
+    }
+  }
   return '<h4>Nbhd '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+esc(p.nbhd_type)+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
@@ -617,7 +643,7 @@ info._buildHtml=function(p){
     '<div class="s"><span>HOH rate</span><span class="v">'+pct(p.pct_hoh)+'</span></div>'+
     '<div class="s"><span>Vet rate</span><span class="v">'+pct(p.pct_vet)+'</span></div>'+
     '<div class="s"><span>Owner turnover</span><span class="v">'+pct(p.owner_turnover)+'</span></div>'+
-    '<div style="font-size:10px;color:#888;margin-top:4px">Value change by year:</div>'+spark+
+    '<div style="font-size:10px;color:#888;margin-top:4px">Value change by year:</div>'+spark+layerSpark+
     '<div class="s"><span>Volatility</span><span class="v">'+(p.appr_volatility!=null?(p.appr_volatility*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
     '<div class="s"><span>Exemp drift</span><span class="v">'+(p.exemp_drift!=null?(p.exemp_drift*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
         '<div class="s"><span>Parcels</span><span class="v">'+((p.parcels||0).toLocaleString())+(p.res_count!=null?' <span style="font-size:9px;color:#888">(R:'+p.res_count+' C:'+p.comm_count+' V:'+p.vacant_count+')</span>':'')+'</span></div>'+
@@ -1245,6 +1271,7 @@ document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
 
 document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
   NBL=e.target.value;
+  for(const k in _tooltipCache)delete _tooltipCache[k];
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
 }));
 document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',e=>{
