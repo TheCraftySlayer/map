@@ -1173,6 +1173,39 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   this.style.right=ctrlOpen?'296px':'10px';
 });
 
+// ── Per-layer help text ───────────────────────────────────────────────────────
+const LAYER_HELP={
+  avg_appraised:'Average appraised value across all parcels in the neighborhood (selected tax year).',
+  median_yrbuilt:'Median year of construction. Lower = older housing stock.',
+  pct_hoh:'Share of parcels claiming the Head of Household exemption.',
+  pct_vet:'Share of parcels claiming the Veteran exemption.',
+  valfreeze:'Share of parcels with an active Value Freeze (age 65+ or disabled, income-qualified).',
+  pct_vf_denied:'Share of Value Freeze applications that were denied. Note: data missing for 2011.',
+  owner_turnover:'Share of parcels with a recent sale date recorded \u2014 a proxy for ownership churn.',
+  hoh_churn:'Year-over-year change in the HOH exemption rate. High values signal instability.',
+  appr_volatility:'Standard deviation of YoY appraised-value changes across 2007\u20132026. High = values swing unpredictably.',
+  exemp_drift:'Combined change in HOH and Veteran exemption rates between earliest and latest year.',
+  outreach_need:'Composite priority score 0\u20131: \u221a(severity \u00d7 vulnerability) \u00d7 service_gap \u00d7 1.6.',
+  sales:'Share of parcels with a recent sale transaction (from tax roll SALEPRICE).',
+  taxlightning:'Share of recent sales that received an assessor contact. Requires \u22653 recent sales per nbhd.',
+  demand:'Total contact-center interactions (calls + walk-ins) per parcel.',
+  calls_per_parcel:'Phone calls to the contact center per parcel.',
+  walkin_rate:'In-person walk-in contacts per parcel (total contacts minus phone calls).',
+  post_sale_rate:'Post-sale assessor contacts per parcel.',
+  failure:'Share of contact-center interactions that ended unresolved.',
+  avg_visit_min:'Average in-person visit duration in minutes.',
+  addr_density:'Geocoded address density per census tract (TIGER/ACS).'
+};
+document.querySelectorAll('input[name="nbhd_layer"],input[name="tract_layer"]').forEach(r=>{
+  const v=r.value;
+  let text=LAYER_HELP[v];
+  if(!text&&/^chg_\d+_\d+$/.test(v)){
+    const m=v.match(/^chg_(\d+)_(\d+)$/);
+    text='Year-over-year median appraised value change: 20'+m[1].padStart(2,'0')+' \u2192 20'+m[2].padStart(2,'0')+'.';
+  }
+  if(text)r.parentElement.setAttribute('title',text);
+});
+
 // ── URL state sharing ─────────────────────────────────────────────────────────
 let _urlApplying=false;
 function updateHash(){
