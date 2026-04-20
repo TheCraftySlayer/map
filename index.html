@@ -698,7 +698,7 @@ info._buildHtml=function(p){
   const allVals=[p.chg_7_8,p.chg_8_9,p.chg_9_10,p.chg_10_11,p.chg_11_12,p.chg_12_13,p.chg_13_14,p.chg_14_15,p.chg_15_16,p.chg_16_17,p.chg_17_18,p.chg_18_19,p.chg_19_20,p.chg_20_21,p.chg_21_22,p.chg_22_23,p.chg_23_24,p.chg_24_25,p.chg_25_26];
   const allLabs=["'08","'09","'10","'11","'12","'13","'14","'15","'16","'17","'18","'19","'20","'21","'22","'23","'24","'25","'26"];
   const vals=[],labs=[];
-  for(let i=0;i<allVals.length;i++){if(allVals[i]!=null&&allVals[i]!==0){vals.push(allVals[i]);labs.push(allLabs[i]);}}
+  for(let i=0;i<allVals.length;i++){if(allVals[i]!=null&&Number.isFinite(allVals[i])){vals.push(allVals[i]);labs.push(allLabs[i]);}}
   let maxAbs=0.01;for(let i=0;i<vals.length;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
   const bw=Math.max(12,Math.min(22,Math.floor(260/vals.length))),bh=36,svgW=bw*vals.length,mid=40;
   const bars=vals.map((v,i)=>{
@@ -719,13 +719,17 @@ info._buildHtml=function(p){
     bars+'</svg>';
   // Generalized per-layer sparkline — for layers with a per-year history, show the timeline
   const perYearBases={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover'};
+  // For avg_appraised / median_yrbuilt, 0 encodes "no data" (no valued parcels
+  // that year) — filter it out. For the percentage-based bases, 0 is a real
+  // measurement (e.g. 0% HOH rate) and must be plotted.
   const base=perYearBases[NBL];
+  const _zeroIsMissing=(base==='avg_appraised'||base==='median_yrbuilt');
   let layerSpark='';
   if(base){
     const pts=[],pLabs=[];
     for(let y=7;y<=26;y++){
       const v=p[base+'_'+y];
-      if(v!=null&&Number.isFinite(v)&&v!==0){pts.push(v);pLabs.push("'"+String(y).padStart(2,'0'));}
+      if(v!=null&&Number.isFinite(v)&&(!_zeroIsMissing||v!==0)){pts.push(v);pLabs.push("'"+String(y).padStart(2,'0'));}
     }
     if(pts.length>=3){
       let pMin=pts[0],pMax=pts[0];
