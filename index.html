@@ -17,6 +17,8 @@
 .info .s .v{font-weight:600;color:#185FA5;cursor:copy}
 .info .s .v:hover{background:#eef5fc;border-radius:2px}
 .info .s .v.copied{background:#ffd54f;transition:background .6s ease-out}
+.info .cmp-hi{color:#157040}
+.info .cmp-lo{color:#c47a00}
 .ctrl{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(255,255,255,.97);border-radius:10px;padding:14px 18px 20px;box-shadow:0 2px 12px rgba(0,0,0,.12);font-size:12px;max-width:280px;max-height:calc(100vh - 30px);overflow-y:auto;scrollbar-gutter:stable}
 .ctrl h4{margin:0 0 6px;font-size:14px;font-weight:600;color:#222}
 .ctrl h5{margin:10px 0 4px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px}
@@ -812,12 +814,63 @@ function annotationsHtml(nbhd){
   const items=notes.map((n,i)=>'<div style="font-size:10px;padding:3px 4px;background:#f7f7f7;border-left:2px solid #888;margin:2px 0;display:flex;gap:4px;align-items:flex-start"><span style="color:#888;white-space:nowrap">'+esc(n.d)+'</span><span style="flex:1">'+esc(n.t)+'</span><button data-action="annot-del" data-nbhd="'+esc(nbhd)+'" data-idx="'+i+'" title="Delete note" style="border:none;background:none;color:#c41a1a;cursor:pointer;padding:0 2px;font-size:11px">\u00d7</button></div>').join('');
   return '<div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#555;font-weight:600">Notes ('+notes.length+')</span><button data-action="annot-add" data-nbhd="'+esc(nbhd)+'" style="font-size:10px;padding:1px 6px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">+ Note</button></div>'+items+'</div>';
 }
+let _infoFrozen=false;
 info.update=function(p){
+  if(_infoFrozen)return;
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
   const key=p.nbhd;
   if(!_tooltipCache[key])_tooltipCache[key]=this._buildHtml(p);
   this._div.innerHTML=_tooltipCache[key];
 };
+// ── Compare two neighborhoods (shift-click) ──────────────────────────────────
+let _pinB=null;
+function compareRow(label,a,b,fmt){
+  const av=fmt?fmt(a):(a==null?'\u2014':a);
+  const bv=fmt?fmt(b):(b==null?'\u2014':b);
+  let cls='';
+  if(typeof a==='number'&&typeof b==='number'&&Number.isFinite(a)&&Number.isFinite(b)&&a!==b){
+    cls=a>b?'cmp-hi':'cmp-lo';
+  }
+  return '<tr><td style="padding:2px 6px 2px 0;color:#666;font-size:10px">'+esc(label)+'</td><td class="'+cls+'" style="padding:2px 6px;text-align:right;font-weight:600;font-size:11px">'+av+'</td><td class="'+(cls==='cmp-hi'?'cmp-lo':cls==='cmp-lo'?'cmp-hi':'')+'" style="padding:2px 0;text-align:right;font-weight:600;font-size:11px">'+bv+'</td></tr>';
+}
+function buildCompareHtml(pA,pB){
+  const pct=v=>v!=null&&Number.isFinite(v)?(v*100).toFixed(1)+'%':'\u2014';
+  const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
+  const num=v=>v!=null&&Number.isFinite(v)?Math.round(v).toLocaleString():'\u2014';
+  const layerField=LAYER_FIELD[NBL];
+  const layerName=NBL&&NBL!=='none'?(LG[NBL]&&LG[NBL].n||NBL):'';
+  const layerFmt=v=>v==null?'\u2014':formatStat(v,NBL);
+  let rows='';
+  rows+=compareRow('Type',pA.nbhd_type||'\u2014',pB.nbhd_type||'\u2014');
+  rows+=compareRow('Parcels',pA.parcels,pB.parcels,num);
+  if(layerField)rows+=compareRow(layerName,pA[layerField],pB[layerField],layerFmt);
+  rows+=compareRow('Median value 2025',pA.median_val_25,pB.median_val_25,dlr);
+  rows+=compareRow('HOH rate',pA.pct_hoh,pB.pct_hoh,pct);
+  rows+=compareRow('Vet rate',pA.pct_vet,pB.pct_vet,pct);
+  rows+=compareRow('Value freeze',pA.pct_val_freeze,pB.pct_val_freeze,pct);
+  rows+=compareRow('VF denial',pA.pct_vf_denied,pB.pct_vf_denied,pct);
+  rows+=compareRow('Owner turnover',pA.owner_turnover,pB.owner_turnover,pct);
+  rows+=compareRow('Volatility',pA.appr_volatility,pB.appr_volatility,pct);
+  rows+=compareRow('Failure rate',pA.failure_rate,pB.failure_rate,pct);
+  rows+=compareRow('Contacts/parcel',pA.contacts_per_parcel,pB.contacts_per_parcel,v=>v!=null?v.toFixed(2):'\u2014');
+  rows+=compareRow('Outreach need',pA.outreach_need,pB.outreach_need,pct);
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><h4 style="margin:0">Compare</h4><button id="cmpClose" title="Close compare view" style="font-size:11px;padding:1px 6px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">\u00d7</button></div>'+
+    '<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:2px 6px 2px 0;font-size:10px;color:#888;font-weight:600">&nbsp;</th><th style="text-align:right;padding:2px 6px;font-size:10px;color:#d9a000">A: '+esc(pA.nbhd)+'</th><th style="text-align:right;padding:2px 0;font-size:10px;color:#00809b">B: '+esc(pB.nbhd)+'</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div style="margin-top:4px;font-size:10px;color:#888">Shift-click another neighborhood to change B.</div>';
+}
+function renderCompare(){
+  if(!pinnedNbhd||!_pinB)return;
+  _infoFrozen=false;
+  info._div.innerHTML=buildCompareHtml(pinnedNbhd.feature.properties,_pinB.feature.properties);
+  _infoFrozen=true;
+}
+function clearPinB(){
+  if(!_pinB)return;
+  if(nbhdLayer)nbhdLayer.resetStyle(_pinB);
+  _pinB=null;
+  _infoFrozen=false;
+  if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties); else info.update();
+}
 info.addTo(map);
 function annotInvalidate(nbhd){delete _tooltipCache[nbhd];delete _tooltipCache[Number(nbhd)];delete _tooltipCache[String(nbhd)];}
 // Delegated handler for annotation buttons
@@ -825,6 +878,7 @@ setTimeout(()=>{
   const el=info._div||document.querySelector('.leaflet-top.leaflet-left .info');
   if(!el)return;
   el.addEventListener('click',e=>{
+    if(e.target.closest('#cmpClose')){clearPinB();return;}
     const v=e.target.closest('.s .v');
     if(v&&!e.target.closest('button')){
       const text=v.textContent.trim();
@@ -1013,8 +1067,33 @@ function clickNbhd(e){
     if(oe.stopPropagation)oe.stopPropagation();
     return;
   }
-  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);if(typeof updateHash==='function')updateHash();return;}
+  // Shift-click pins B for side-by-side comparison (only meaningful with an A).
+  if(oe.shiftKey){
+    if(!pinnedNbhd){
+      // No A yet — fall through so shift-click behaves as plain click.
+    }else if(e.target===pinnedNbhd){
+      // Shift-clicking A toggles compare off.
+      clearPinB();
+      return;
+    }else if(_pinB===e.target){
+      clearPinB();
+      return;
+    }else{
+      if(_pinB)nbhdLayer.resetStyle(_pinB);
+      _pinB=e.target;
+      e.target.setStyle({weight:3,color:'#00e0ff',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+      e.target.bringToFront();
+      renderCompare();
+      return;
+    }
+  }
+  if(pinnedNbhd===e.target){
+    pinnedNbhd=null;clearPinB();
+    nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);
+    if(typeof updateHash==='function')updateHash();return;
+  }
   if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
+  if(_pinB)clearPinB();
   pinnedNbhd=e.target;
   e.target.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
   e.target.bringToFront();
@@ -1024,6 +1103,9 @@ function clickNbhd(e){
 }
 function renderNbhd(){
   pinnedNbhd=null;
+  // A compare view depends on both A and B; when A is blown away by a
+  // layer/filter rerender, tear down B so the info panel isn't frozen.
+  if(_pinB){_pinB=null;_infoFrozen=false;}
   if(bivarActive){
     recomputeBivarThresh();
     if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
@@ -1328,6 +1410,7 @@ function enableSwipe(){
 
 function disableSwipe(){
   pinnedNbhd=null;
+  if(_pinB){_pinB=null;_infoFrozen=false;}
   if(swipeLayerL){map.removeLayer(swipeLayerL);swipeLayerL=null;}
   if(swipeLayerR){map.removeLayer(swipeLayerR);swipeLayerR=null;}
   const pL=map.getPane('swipeLeft');
@@ -1388,6 +1471,7 @@ function pinByNbhd(n,{fit=true,fly=false}={}){
   const feat=DATA.features.find(f=>f.properties.nbhd===n);
   if(!feat||!nbhdLayer)return false;
   let found=false;
+  if(_pinB)clearPinB();
   nbhdLayer.eachLayer(l=>{
     if(found||!l.feature||l.feature.properties.nbhd!==n)return;
     if(pinnedNbhd&&pinnedNbhd!==l)nbhdLayer.resetStyle(pinnedNbhd);
@@ -1418,6 +1502,7 @@ window.addEventListener('keydown',e=>{
   const t=e.target;
   if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'||t.isContentEditable))return;
   if(e.key==='Escape'){
+    if(_pinB){clearPinB();e.preventDefault();return;}
     if(pinnedNbhd){
       if(nbhdLayer)nbhdLayer.resetStyle(pinnedNbhd);
       pinnedNbhd=null;info.update();markHistogram(null);updateHash();
