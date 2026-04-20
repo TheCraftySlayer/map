@@ -614,8 +614,21 @@ info._buildHtml=function(p){
     (p.zip_poverty_rate!=null&&p.zip_poverty_rate>0?'<div style="margin-top:2px;font-size:10px;color:#666">ZIP '+esc(p.zip_codes||'?')+': poverty '+(p.zip_poverty_rate*100).toFixed(0)+'%</div>':'')+
     (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
     (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=esc(parts[0]);var why=esc(parts[1]||'');var what=esc(parts[2]||'');return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
-    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'');
+    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
+    annotationsHtml(p.nbhd);
 };
+// Annotations (persisted per nbhd in localStorage)
+const ANNOT_LS_KEY='mapv4_nbhd_annotations_v1';
+function annotAll(){try{return JSON.parse(localStorage.getItem(ANNOT_LS_KEY)||'{}');}catch(e){return {};}}
+function annotGet(nbhd){return annotAll()[String(nbhd)]||[];}
+function annotSave(all){try{localStorage.setItem(ANNOT_LS_KEY,JSON.stringify(all));}catch(e){}}
+function annotAdd(nbhd,text){const a=annotAll();const k=String(nbhd);(a[k]=a[k]||[]).push({d:new Date().toISOString().slice(0,10),t:text});annotSave(a);}
+function annotDel(nbhd,idx){const a=annotAll();const k=String(nbhd);if(a[k]){a[k].splice(idx,1);if(!a[k].length)delete a[k];annotSave(a);}}
+function annotationsHtml(nbhd){
+  const notes=annotGet(nbhd);
+  const items=notes.map((n,i)=>'<div style="font-size:10px;padding:3px 4px;background:#f7f7f7;border-left:2px solid #888;margin:2px 0;display:flex;gap:4px;align-items:flex-start"><span style="color:#888;white-space:nowrap">'+esc(n.d)+'</span><span style="flex:1">'+esc(n.t)+'</span><button data-action="annot-del" data-nbhd="'+esc(nbhd)+'" data-idx="'+i+'" title="Delete note" style="border:none;background:none;color:#c41a1a;cursor:pointer;padding:0 2px;font-size:11px">\u00d7</button></div>').join('');
+  return '<div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#555;font-weight:600">Notes ('+notes.length+')</span><button data-action="annot-add" data-nbhd="'+esc(nbhd)+'" style="font-size:10px;padding:1px 6px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">+ Note</button></div>'+items+'</div>';
+}
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
   const key=p.nbhd;
@@ -623,6 +636,23 @@ info.update=function(p){
   this._div.innerHTML=_tooltipCache[key];
 };
 info.addTo(map);
+function annotInvalidate(nbhd){delete _tooltipCache[nbhd];delete _tooltipCache[Number(nbhd)];delete _tooltipCache[String(nbhd)];}
+// Delegated handler for annotation buttons
+setTimeout(()=>{
+  const el=info._div||document.querySelector('.leaflet-top.leaflet-left .info');
+  if(!el)return;
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('button[data-action]');
+    if(!b)return;
+    const nbhd=b.dataset.nbhd;
+    if(b.dataset.action==='annot-add'){
+      const t=(window.prompt('Add note for nbhd '+nbhd+':','')||'').trim();
+      if(t){annotAdd(nbhd,t);annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
+    }else if(b.dataset.action==='annot-del'){
+      if(window.confirm('Delete this note?')){annotDel(nbhd,parseInt(b.dataset.idx));annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
+    }
+  });
+},0);
 
 // Precompute tract density stats for percentile ranking
 const _tractCounts=TRACT_GEO.features.map(f=>f.properties.address_count||0).sort((a,b)=>a-b);
