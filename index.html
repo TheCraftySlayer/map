@@ -441,7 +441,7 @@ function setCcCatchment(key){
   }
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
-  if(NBL!=='none'&&!(typeof bivarActive!=='undefined'&&bivarActive))updateLegendRange(NBL);
+  if(NBL!=='none'&&!(bivarActive))updateLegendRange(NBL);
   renderTopOutreach();
 }
 map.on('popupopen',e=>{
@@ -963,7 +963,7 @@ function clickNbhd(e){
 }
 function renderNbhd(){
   pinnedNbhd=null;
-  if(typeof bivarActive!=='undefined'&&bivarActive){
+  if(bivarActive){
     recomputeBivarThresh();
     if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
     renderBivarLegend();
@@ -1241,7 +1241,7 @@ function disableSwipe(){
 
 document.getElementById('swipeMode').addEventListener('change',e=>{
   swipeActive=e.target.checked;
-  if(swipeActive&&typeof bivarActive!=='undefined'&&bivarActive){
+  if(swipeActive&&bivarActive){
     document.getElementById('bivarMode').checked=false;bivarActive=false;
     // Restore non-bivariate styling before swipe hides/overlays the base layer
     if(nbhdLayer)nbhdLayer.setStyle(nbhdStyle);
@@ -1396,7 +1396,7 @@ document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
 document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
   NBL=e.target.value;
   for(const k in _tooltipCache)delete _tooltipCache[k];
-  if(typeof bivarActive!=='undefined'&&bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;resetLegendHtml();}
+  if(bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;resetLegendHtml();}
   // Stop YoY autoplay if user picked a non-chg layer
   if(typeof _yoyTimer!=='undefined'&&_yoyTimer&&!/^chg_\d+_\d+$/.test(NBL)){
     clearInterval(_yoyTimer);_yoyTimer=null;
@@ -1602,7 +1602,7 @@ function applyFilters(){
   }
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
-  if(NBL!=='none'&&!(typeof bivarActive!=='undefined'&&bivarActive))updateLegendRange(NBL);
+  if(NBL!=='none'&&!(bivarActive))updateLegendRange(NBL);
   renderTopOutreach();
 }
 document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',applyFilters));
