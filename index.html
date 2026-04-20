@@ -127,7 +127,7 @@
     <summary style="cursor:pointer;padding:4px 8px;font-size:11px;font-weight:600;color:#444;background:#f7f7f7">Threshold filters <span id="filterActiveBadge" style="display:none;font-weight:400;color:#c41a1a;margin-left:4px"></span></summary>
     <div id="filterRows" style="padding:4px 8px">
     </div>
-    <div style="padding:0 8px 6px"><button id="filterClear" style="font-size:10px;padding:2px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer">Clear all</button></div>
+    <div style="padding:0 8px 6px;display:flex;gap:4px"><button id="filterAdd" style="font-size:10px;padding:2px 8px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">+ row</button><button id="filterClear" style="font-size:10px;padding:2px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer">Clear all</button></div>
   </details>
 
   <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER (live)</span></h5>
@@ -1647,33 +1647,43 @@ const FILTER_FIELDS=[
   ['total_contacts','Total contacts'],
   ['failure_rate','Failure rate (0\u20131)']
 ];
-const FILTER_COUNT=3;
-(function(){
+const FILTER_INITIAL=3;
+const FILTER_MAX=8;
+function addFilterRow(values){
   const rows=document.getElementById('filterRows');
-  for(let i=0;i<FILTER_COUNT;i++){
-    const sel='<select class="fltField" data-i="'+i+'" style="font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;flex:1;min-width:0">'+FILTER_FIELDS.map(f=>'<option value="'+f[0]+'">'+f[1]+'</option>').join('')+'</select>';
-    rows.insertAdjacentHTML('beforeend','<div style="display:flex;gap:3px;margin:2px 0;align-items:center">'+sel+'<input type="number" class="fltMin" data-i="'+i+'" placeholder="min" step="any" style="width:44px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;min-width:0"><input type="number" class="fltMax" data-i="'+i+'" placeholder="max" step="any" style="width:44px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;min-width:0"></div>');
+  if(rows.querySelectorAll('.fltRow').length>=FILTER_MAX)return null;
+  const sel='<select class="fltField" style="font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;flex:1;min-width:0">'+FILTER_FIELDS.map(f=>'<option value="'+f[0]+'">'+f[1]+'</option>').join('')+'</select>';
+  const html='<div class="fltRow" style="display:flex;gap:3px;margin:2px 0;align-items:center">'+sel+
+    '<input type="number" class="fltMin" placeholder="min" step="any" style="width:44px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;min-width:0">'+
+    '<input type="number" class="fltMax" placeholder="max" step="any" style="width:44px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;min-width:0">'+
+    '<button class="fltDel" title="Remove row" style="width:18px;height:18px;padding:0;font-size:12px;line-height:1;background:none;border:1px solid #ccc;border-radius:3px;color:#c41a1a;cursor:pointer;flex-shrink:0">\u00d7</button>'+
+    '</div>';
+  rows.insertAdjacentHTML('beforeend',html);
+  const row=rows.lastElementChild;
+  if(values){
+    const f=row.querySelector('.fltField'),mn=row.querySelector('.fltMin'),mx=row.querySelector('.fltMax');
+    if([...f.options].some(o=>o.value===values.f))f.value=values.f;
+    mn.value=values.mn||'';mx.value=values.mx||'';
   }
-})();
+  return row;
+}
+(function(){for(let i=0;i<FILTER_INITIAL;i++)addFilterRow();})();
 function getFilters(){
-  // Early-exit when the filter DOM hasn't been built yet — avoids a temporal-
-  // dead-zone crash on FILTER_COUNT during the first renderNbhd() call.
-  const first=document.querySelector('.fltField[data-i="0"]');
-  if(!first)return [];
+  const fields=document.querySelectorAll('#filterRows .fltField');
+  if(!fields.length)return [];
   const out=[];
-  for(let i=0;i<FILTER_COUNT;i++){
-    const fEl=document.querySelector('.fltField[data-i="'+i+'"]');
-    if(!fEl)continue;
+  fields.forEach(fEl=>{
     const f=fEl.value;
-    if(!f)continue;
-    const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
-    const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
-    if(mn===''&&mx==='')continue;
+    if(!f)return;
+    const row=fEl.closest('.fltRow');
+    const mn=row.querySelector('.fltMin').value;
+    const mx=row.querySelector('.fltMax').value;
+    if(mn===''&&mx==='')return;
     const lo=mn===''?-Infinity:parseFloat(mn);
     const hi=mx===''?Infinity:parseFloat(mx);
-    if(Number.isNaN(lo)||Number.isNaN(hi))continue;
+    if(Number.isNaN(lo)||Number.isNaN(hi))return;
     out.push({f,lo,hi});
-  }
+  });
   return out;
 }
 function passesFilters(p,rules){
@@ -1700,11 +1710,33 @@ function applyFilters(){
   if(NBL!=='none'&&!(bivarActive))updateLegendRange(NBL);
   renderTopOutreach();
 }
-document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',applyFilters));
-document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.addEventListener('input',applyFilters));
+(function(){
+  const rows=document.getElementById('filterRows');
+  rows.addEventListener('change',e=>{
+    if(e.target.matches('.fltField,.fltMin,.fltMax')){applyFilters();if(typeof updateHash==='function')updateHash();}
+  });
+  rows.addEventListener('input',e=>{
+    if(e.target.matches('.fltMin,.fltMax')){applyFilters();if(typeof updateHash==='function')updateHash();}
+  });
+  rows.addEventListener('click',e=>{
+    const del=e.target.closest('.fltDel');
+    if(!del)return;
+    const row=del.closest('.fltRow');
+    if(!row)return;
+    row.remove();
+    // Never leave the panel empty — immediately restore one blank row.
+    if(!rows.querySelector('.fltRow'))addFilterRow();
+    applyFilters();
+    if(typeof updateHash==='function')updateHash();
+  });
+})();
+document.getElementById('filterAdd').addEventListener('click',()=>{
+  const row=addFilterRow();
+  if(row){row.querySelector('.fltField').focus();}
+});
 document.getElementById('filterClear').addEventListener('click',()=>{
-  document.querySelectorAll('.fltField').forEach(el=>el.value='');
-  document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.value='');
+  document.querySelectorAll('#filterRows .fltField').forEach(el=>el.value='');
+  document.querySelectorAll('#filterRows .fltMin,#filterRows .fltMax').forEach(el=>el.value='');
   applyFilters();
 });
 
@@ -1779,14 +1811,14 @@ function updateHash(){
   }
   if(pinnedNbhd&&pinnedNbhd.feature)parts.push('pin='+pinnedNbhd.feature.properties.nbhd);
   const fltParts=[];
-  for(let i=0;i<FILTER_COUNT;i++){
-    const fEl=document.querySelector('.fltField[data-i="'+i+'"]');
-    if(!fEl||!fEl.value)continue;
-    const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
-    const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
-    if(mn===''&&mx==='')continue;
-    fltParts.push(encodeURIComponent(fEl.value)+':'+encodeURIComponent(mn)+':'+encodeURIComponent(mx));
-  }
+  document.querySelectorAll('#filterRows .fltRow').forEach(row=>{
+    const f=row.querySelector('.fltField').value;
+    if(!f)return;
+    const mn=row.querySelector('.fltMin').value;
+    const mx=row.querySelector('.fltMax').value;
+    if(mn===''&&mx==='')return;
+    fltParts.push(encodeURIComponent(f)+':'+encodeURIComponent(mn)+':'+encodeURIComponent(mx));
+  });
   if(fltParts.length)parts.push('flt='+fltParts.join(','));
   const h=parts.length?'#'+parts.join('&'):location.pathname+location.search;
   try{history.replaceState(null,'',h);}catch(e){}
@@ -1806,22 +1838,19 @@ function applyHash(){
     if(s.tl){const r=document.querySelector('input[name="tract_layer"][value="'+s.tl.replace(/"/g,'\\"')+'"]');if(r){r.checked=true;r.dispatchEvent(new Event('change'));}}
     if(s.sw){const [sL,sR]=s.sw.split('|');const selL=document.getElementById('swipeLeft'),selR=document.getElementById('swipeRight');if(sL)selL.value=sL;if(sR)selR.value=sR;const sm=document.getElementById('swipeMode');if(!sm.checked){sm.checked=true;sm.dispatchEvent(new Event('change'));}}
     if(s.flt){
-      const rows=s.flt.split(',');
-      for(let i=0;i<FILTER_COUNT;i++){
-        const fEl=document.querySelector('.fltField[data-i="'+i+'"]');
-        const mnEl=document.querySelector('.fltMin[data-i="'+i+'"]');
-        const mxEl=document.querySelector('.fltMax[data-i="'+i+'"]');
-        if(!fEl)continue;
-        if(i<rows.length){
-          const parts=rows[i].split(':');
-          const f=decodeURIComponent(parts[0]||'');
-          const mn=decodeURIComponent(parts[1]||'');
-          const mx=decodeURIComponent(parts[2]||'');
-          if(f&&[...fEl.options].some(o=>o.value===f)){fEl.value=f;mnEl.value=mn;mxEl.value=mx;}
-        }else{
-          fEl.value='';mnEl.value='';mxEl.value='';
-        }
-      }
+      const rowsC=document.getElementById('filterRows');
+      rowsC.innerHTML='';
+      const rowDefs=s.flt.split(',');
+      rowDefs.forEach(def=>{
+        const parts=def.split(':');
+        addFilterRow({
+          f:decodeURIComponent(parts[0]||''),
+          mn:decodeURIComponent(parts[1]||''),
+          mx:decodeURIComponent(parts[2]||'')
+        });
+      });
+      // Keep at least one blank row available for further editing.
+      while(rowsC.querySelectorAll('.fltRow').length<FILTER_INITIAL)addFilterRow();
       if(typeof applyFilters==='function')applyFilters();
     }
   }finally{_urlApplying=false;}
@@ -1836,7 +1865,9 @@ document.getElementById('hideCommercial').addEventListener('change',updateHash);
 document.getElementById('swipeMode').addEventListener('change',updateHash);
 document.getElementById('swipeLeft').addEventListener('change',updateHash);
 document.getElementById('swipeRight').addEventListener('change',updateHash);
-document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',updateHash));
+// Filter row change/input already triggers updateHash via the delegated
+// handler on #filterRows. Clear button bypasses that delegate, so wire
+// its post-clear hash update explicitly.
 document.getElementById('filterClear').addEventListener('click',()=>setTimeout(updateHash,0));
 window.addEventListener('hashchange',()=>{if(!_urlApplying)applyHash();});
 applyHash();
