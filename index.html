@@ -49,6 +49,7 @@
     <button id="exportCsvBtn" title="Download visible neighborhoods with the current layer, outreach score, and recommendations as CSV" style="float:right;margin-top:-2px;padding:2px 8px;font-size:10px;font-weight:600;background:#185FA5;color:#fff;border:none;border-radius:4px;cursor:pointer">Export CSV</button>
   </h4>
   <div id="ccCatchmentBanner" style="display:none;padding:4px 8px;background:#fff4e0;border:1px solid #d4a017;border-radius:4px;margin:0 0 6px;font-size:11px;color:#6b4a00"></div>
+  <div id="selSetBanner" style="display:none;padding:4px 8px;background:#e0f7f2;border:1px solid #00c2a0;border-radius:4px;margin:0 0 6px;font-size:11px;color:#04604f;align-items:center;gap:6px"><span id="selSetCount"></span><button id="selSetExport" style="font-size:10px;padding:1px 6px;background:#00c2a0;color:#fff;border:none;border-radius:3px;cursor:pointer">Export CSV</button><button id="selSetClear" style="font-size:10px;padding:1px 6px;background:#fff;color:#333;border:1px solid #aaa;border-radius:3px;cursor:pointer">Clear</button></div>
 
   <div style="margin-bottom:6px">
     <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
@@ -989,14 +990,29 @@ function getNbhdColor(p, override){
   if(CS[layer])return interp(CS[layer],p[layer]||0);
   return'#e0e0e0';
 }
+// Ctrl/Cmd-click builds this set; each member gets a distinct border so the
+// active selection is visible regardless of the choropleth underneath.
+const _selSet=new Set();
+function isSelected(p){return _selSet.has(p.nbhd);}
 function nbhdStyle(f){
   const hidden=featureHidden(f.properties);
-  return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
+  const sel=!hidden&&isSelected(f.properties);
+  return{fillColor:getNbhdColor(f.properties),weight:hidden?0:(sel?2.5:.6),opacity:hidden?0:(sel?1:.6),color:sel?'#00c2a0':'#fff',fillOpacity:hidden?0:FILL_OPAC,dashArray:sel?'4,2':null};
 }
 let pinnedNbhd=null;
 function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);const f=LAYER_FIELD[NBL];if(f)markHistogram(e.target.feature.properties[f]);}
 function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);}
 function clickNbhd(e){
+  const oe=e.originalEvent||{};
+  // Ctrl/Cmd-click toggles membership in the multi-select set instead of pinning.
+  if(oe.ctrlKey||oe.metaKey){
+    const n=e.target.feature.properties.nbhd;
+    if(_selSet.has(n))_selSet.delete(n); else _selSet.add(n);
+    if(nbhdLayer)nbhdLayer.resetStyle(e.target);
+    updateSelectionUI();
+    if(oe.stopPropagation)oe.stopPropagation();
+    return;
+  }
   if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);if(typeof updateHash==='function')updateHash();return;}
   if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
   pinnedNbhd=e.target;
@@ -1120,6 +1136,53 @@ function exportCsv(){
   setTimeout(()=>URL.revokeObjectURL(url),0);
 }
 document.getElementById('exportCsvBtn').addEventListener('click',e=>{e.stopPropagation();exportCsv();});
+
+// ── Multi-select (Ctrl/Cmd-click) + subset export ────────────────────────────
+function updateSelectionUI(){
+  const banner=document.getElementById('selSetBanner');
+  const cnt=document.getElementById('selSetCount');
+  if(!banner||!cnt)return;
+  if(_selSet.size){
+    cnt.innerHTML='<b>'+_selSet.size+'</b> selected';
+    banner.style.display='flex';
+  }else{
+    banner.style.display='none';
+  }
+}
+function clearSelection(){
+  if(!_selSet.size)return;
+  const prev=new Set(_selSet);
+  _selSet.clear();
+  if(nbhdLayer){
+    nbhdLayer.eachLayer(l=>{if(l.feature&&prev.has(l.feature.properties.nbhd))nbhdLayer.resetStyle(l);});
+  }
+  updateSelectionUI();
+}
+function exportSelectionCsv(){
+  if(!_selSet.size)return;
+  const feats=DATA.features.filter(f=>_selSet.has(f.properties.nbhd));
+  const layer=NBL;
+  const field=LAYER_FIELD[layer];
+  const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
+    const p=f.properties;
+    const layerVal=field?p[field]:'';
+    const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
+    const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+  });
+  const csv=header.join(',')+'\n'+rows.join('\n');
+  const stamp=new Date().toISOString().slice(0,10);
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='spatial_equity_selection_'+stamp+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+}
+document.getElementById('selSetClear').addEventListener('click',clearSelection);
+document.getElementById('selSetExport').addEventListener('click',exportSelectionCsv);
 
 // ── Swipe compare ─────────────────────────────────────────────────────────────
 let swipePos=50, swipeDragging=false;
@@ -1564,7 +1627,8 @@ function bivarColor(p){
 }
 function bivarStyle(f){
   const hidden=featureHidden(f.properties);
-  return{fillColor:bivarColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
+  const sel=!hidden&&isSelected(f.properties);
+  return{fillColor:bivarColor(f.properties),weight:hidden?0:(sel?2.5:.6),opacity:hidden?0:(sel?1:.6),color:sel?'#00c2a0':'#fff',fillOpacity:hidden?0:FILL_OPAC,dashArray:sel?'4,2':null};
 }
 function renderBivarLegend(){
   const lb=document.getElementById('lb');
