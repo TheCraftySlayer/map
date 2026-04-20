@@ -111,6 +111,7 @@
     <input type="range" id="yoySlider" min="0" max="18" value="0" step="1" style="flex:1;accent-color:#185FA5">
     <span id="yoyLabel" style="min-width:52px;text-align:right">&mdash;</span>
   </div>
+  <button id="yoyGridBtn" title="Show all year-over-year change maps in a grid" style="font-size:10px;padding:3px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer;margin-bottom:6px">Open grid view</button>
 
   <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="radio" name="nbhd_layer" value="demand"> Caller demand</label>
@@ -1779,6 +1780,86 @@ document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>{
     if(i>=0){document.getElementById('yoySlider').value=i;document.getElementById('yoyLabel').textContent=YOY_LABELS[i];}
   });
 });
+
+// ── YoY small-multiples grid ─────────────────────────────────────────────────
+// Build each neighborhood's simplified SVG path ONCE and share it across the
+// 19 year tiles via <defs>/<use>. A Web-Mercator-ish y-stretch by
+// 1/cos(midLat) keeps the shape from looking squashed at this latitude.
+let _smallMultCache=null;
+function _simplifyRing(ring,tol){
+  if(ring.length<=4)return ring;
+  const out=[ring[0]];
+  let lx=ring[0][0],ly=ring[0][1];
+  const t2=tol*tol;
+  for(let i=1;i<ring.length-1;i++){
+    const dx=ring[i][0]-lx,dy=ring[i][1]-ly;
+    if(dx*dx+dy*dy>=t2){out.push(ring[i]);lx=ring[i][0];ly=ring[i][1];}
+  }
+  out.push(ring[ring.length-1]);
+  return out;
+}
+function buildSmallMultPaths(){
+  if(_smallMultCache)return _smallMultCache;
+  let minLon=Infinity,maxLon=-Infinity,minLat=Infinity,maxLat=-Infinity;
+  for(const f of DATA.features){
+    const geom=f.geometry;if(!geom)continue;
+    const polys=geom.type==='MultiPolygon'?geom.coordinates:[geom.coordinates];
+    for(const poly of polys)for(const ring of poly)for(const c of ring){
+      if(c[0]<minLon)minLon=c[0];if(c[0]>maxLon)maxLon=c[0];
+      if(c[1]<minLat)minLat=c[1];if(c[1]>maxLat)maxLat=c[1];
+    }
+  }
+  const midLat=(minLat+maxLat)/2;
+  const k=1/Math.cos(midLat*Math.PI/180);
+  // Tolerance ~200m: mini-maps are ~170px wide for a 0.72° lon span,
+  // so 1 px ≈ 0.0042°. A 0.002° tolerance drops interior vertices
+  // that won't be visible at that scale.
+  const TOL=0.002;
+  const paths=DATA.features.map((f,idx)=>{
+    const geom=f.geometry;
+    const polys=geom&&(geom.type==='MultiPolygon'?geom.coordinates:geom.type==='Polygon'?[geom.coordinates]:[]);
+    const d=polys.map(poly=>poly.map(ring=>{
+      const rs=_simplifyRing(ring,TOL);
+      return rs.map((c,i)=>(i?'L':'M')+c[0].toFixed(3)+' '+(-c[1]*k).toFixed(3)).join('')+'Z';
+    }).join('')).join('');
+    return{nbhd:f.properties.nbhd,d,id:'ymp'+idx};
+  });
+  _smallMultCache={paths,vb:{x:minLon,y:-maxLat*k,w:maxLon-minLon,h:(maxLat-minLat)*k}};
+  return _smallMultCache;
+}
+function openYoyGrid(){
+  if(document.getElementById('ymGridOverlay'))return;
+  const {paths,vb}=buildSmallMultPaths();
+  const propsByNbhd={};
+  DATA.features.forEach(f=>{propsByNbhd[f.properties.nbhd]=f.properties;});
+  // One shared <defs> with all neighborhood paths; tiles use <use href="#id">
+  // so the path geometry isn't duplicated 19 times.
+  const defsInner=paths.map(p=>'<path id="'+p.id+'" d="'+p.d+'"/>').join('');
+  const defsSvg='<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true"><defs>'+defsInner+'</defs></svg>';
+  const cells=YOY_KEYS.map((key,idx)=>{
+    const uses=paths.map(p=>{
+      const v=propsByNbhd[p.nbhd][key];
+      const color=v!=null&&Number.isFinite(v)?interp(YOY,v):'#e8e8e8';
+      return '<use href="#'+p.id+'" fill="'+color+'" stroke="#fff" stroke-width="0.0004"/>';
+    }).join('');
+    return '<button type="button" data-yoy-idx="'+idx+'" title="Load '+YOY_LABELS[idx]+' on main map" style="all:unset;cursor:pointer;display:block;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fff"><div style="padding:2px 6px;font-size:10px;font-weight:600;background:#f7f7f7;border-bottom:1px solid #eee">'+YOY_LABELS[idx]+'</div><svg viewBox="'+vb.x+' '+vb.y+' '+vb.w+' '+vb.h+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;background:#fafafa">'+uses+'</svg></button>';
+  }).join('');
+  const legendStops=YOY.map(([v,c])=>'<span style="display:inline-flex;align-items:center;gap:3px"><span style="display:inline-block;width:12px;height:12px;background:'+c+';border:1px solid #ccc"></span>'+(v>=0?'+':'')+(v*100).toFixed(0)+'%</span>').join(' ');
+  const overlay=document.createElement('div');
+  overlay.id='ymGridOverlay';
+  overlay.innerHTML='<div id="ymGridBg" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10000;display:flex;align-items:center;justify-content:center">'+defsSvg+'<div style="background:#fff;border-radius:8px;max-width:95vw;max-height:92vh;overflow:auto;padding:14px 18px;font-family:system-ui,-apple-system,sans-serif"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap"><h3 style="margin:0;font-size:15px">Year-over-year median value change</h3><div style="font-size:10px;color:#666;display:flex;gap:8px;flex-wrap:wrap">'+legendStops+'</div><button id="ymGridClose" style="font-size:12px;padding:3px 10px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">Close</button></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'+cells+'</div><div style="margin-top:8px;font-size:10px;color:#888">Click a tile to load that year on the main map.</div></div></div>';
+  document.body.appendChild(overlay);
+  const close=()=>{overlay.remove();window.removeEventListener('keydown',onKey,true);};
+  const onKey=e=>{if(e.key==='Escape')close();};
+  document.getElementById('ymGridClose').addEventListener('click',close);
+  document.getElementById('ymGridBg').addEventListener('click',e=>{if(e.target.id==='ymGridBg')close();});
+  overlay.querySelectorAll('[data-yoy-idx]').forEach(btn=>btn.addEventListener('click',()=>{
+    yoySelect(parseInt(btn.dataset.yoyIdx));
+    close();
+  }));
+  window.addEventListener('keydown',onKey,true);
+}
+document.getElementById('yoyGridBtn').addEventListener('click',openYoyGrid);
 
 // ── Threshold filters ─────────────────────────────────────────────────────────
 const FILTER_FIELDS=[
