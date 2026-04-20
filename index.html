@@ -199,6 +199,39 @@
   </select>
   <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
 
+  <h5>Bivariate compare <span style="font-weight:400;color:#aaa">two layers, one color</span></h5>
+  <label style="font-size:11px;color:#666">X axis:</label>
+  <select id="bivarX" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="outreach_need">Outreach need</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet">Veteran rate</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="owner_turnover">Owner turnover</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption drift</option>
+    <option value="demand">Caller demand</option>
+    <option value="failure">Failure rate</option>
+    <option value="zip_poverty_rate">ZIP poverty rate</option>
+    <option value="median_val_25">Median value 2025</option>
+  </select>
+  <label style="font-size:11px;color:#666">Y axis:</label>
+  <select id="bivarY" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="outreach_need">Outreach need</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet" selected>Veteran rate</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="owner_turnover">Owner turnover</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption drift</option>
+    <option value="demand">Caller demand</option>
+    <option value="failure">Failure rate</option>
+    <option value="zip_poverty_rate">ZIP poverty rate</option>
+    <option value="median_val_25">Median value 2025</option>
+  </select>
+  <label><input type="checkbox" id="bivarMode"> Enable bivariate</label>
+
   <hr>
   <div class="heat-toggle">
     <label><input type="checkbox" id="heatMode"> Heatmap mode for point layers</label>
@@ -928,6 +961,13 @@ function clickNbhd(e){
 }
 function renderNbhd(){
   pinnedNbhd=null;
+  if(typeof bivarActive!=='undefined'&&bivarActive){
+    recomputeBivarThresh();
+    if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
+    renderBivarLegend();
+    updateStatsBar(NBL);
+    return;
+  }
   if(NBL==='none'){
     if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
     updateStatsBar(NBL);return;
@@ -1202,6 +1242,9 @@ function disableSwipe(){
 
 document.getElementById('swipeMode').addEventListener('change',e=>{
   swipeActive=e.target.checked;
+  if(swipeActive&&typeof bivarActive!=='undefined'&&bivarActive){
+    document.getElementById('bivarMode').checked=false;bivarActive=false;
+  }
   if(swipeActive)enableSwipe(); else disableSwipe();
 });
 document.getElementById('swipeLeft').addEventListener('change',()=>{if(swipeActive){disableSwipe();enableSwipe();}});
@@ -1352,6 +1395,7 @@ document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
 document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
   NBL=e.target.value;
   for(const k in _tooltipCache)delete _tooltipCache[k];
+  if(typeof bivarActive!=='undefined'&&bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;}
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
 }));
 document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',e=>{
@@ -1387,6 +1431,70 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
 });
+
+// ── Bivariate choropleth ──────────────────────────────────────────────────────
+// 3x3 bivariate palette (Cynthia Brewer purple-teal). bivarPalette[xIdx][yIdx]
+const bivarPalette=[
+  ['#e8e8e8','#ace4e4','#5ac8c8'],
+  ['#dfb0d6','#a5add3','#5698b9'],
+  ['#be64ac','#8c62aa','#3b4994']
+];
+let bivarActive=false;
+let _bivarThresh={xLo:0,xHi:1,yLo:0,yHi:1};
+function bivarField(layer){return LAYER_FIELD[layer]||layer;}
+function recomputeBivarThresh(){
+  const xF=bivarField(document.getElementById('bivarX').value);
+  const yF=bivarField(document.getElementById('bivarY').value);
+  const feats=getVisibleFeatures();
+  const xs=feats.map(f=>f.properties[xF]).filter(Number.isFinite).sort((a,b)=>a-b);
+  const ys=feats.map(f=>f.properties[yF]).filter(Number.isFinite).sort((a,b)=>a-b);
+  _bivarThresh.xLo=xs.length?xs[Math.floor(xs.length/3)]:0;
+  _bivarThresh.xHi=xs.length?xs[Math.floor(xs.length*2/3)]:1;
+  _bivarThresh.yLo=ys.length?ys[Math.floor(ys.length/3)]:0;
+  _bivarThresh.yHi=ys.length?ys[Math.floor(ys.length*2/3)]:1;
+}
+function bivarColor(p){
+  const xF=bivarField(document.getElementById('bivarX').value);
+  const yF=bivarField(document.getElementById('bivarY').value);
+  const x=p[xF], y=p[yF];
+  if(!Number.isFinite(x)||!Number.isFinite(y))return '#e0e0e0';
+  const xi=x<_bivarThresh.xLo?0:(x<_bivarThresh.xHi?1:2);
+  const yi=y<_bivarThresh.yLo?0:(y<_bivarThresh.yHi?1:2);
+  return bivarPalette[xi][yi];
+}
+function bivarStyle(f){
+  const hidden=featureHidden(f.properties);
+  return{fillColor:bivarColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
+}
+function renderBivarLegend(){
+  const lb=document.getElementById('lb');
+  if(!lb)return;
+  const xName=document.getElementById('bivarX').selectedOptions[0].text;
+  const yName=document.getElementById('bivarY').selectedOptions[0].text;
+  let grid='';
+  for(let y=2;y>=0;y--){
+    for(let x=0;x<3;x++)grid+='<div style="width:14px;height:14px;background:'+bivarPalette[x][y]+'"></div>';
+  }
+  lb.style.display='flex';lb.style.flexDirection='row';lb.style.alignItems='center';lb.style.gap='8px';
+  lb.innerHTML='<div style="display:flex;flex-direction:column;align-items:flex-end;font-size:9px;color:#666;line-height:1.1;gap:2px"><span>'+esc(yName)+'</span><span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:8px">high \u2192</span></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(3,14px);grid-gap:1px">'+grid+'</div>'+
+    '<div style="font-size:9px;color:#666"><div>'+esc(xName)+' \u2192</div></div>';
+}
+function applyBivar(){
+  bivarActive=document.getElementById('bivarMode').checked;
+  if(bivarActive){
+    // Turn off conflicting modes
+    if(swipeActive){document.getElementById('swipeMode').checked=false;swipeActive=false;disableSwipe();}
+    recomputeBivarThresh();
+    if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
+    renderBivarLegend();
+  }else{
+    renderNbhd();
+  }
+}
+document.getElementById('bivarMode').addEventListener('change',applyBivar);
+document.getElementById('bivarX').addEventListener('change',()=>{if(bivarActive){recomputeBivarThresh();nbhdLayer.setStyle(bivarStyle);renderBivarLegend();}});
+document.getElementById('bivarY').addEventListener('change',()=>{if(bivarActive){recomputeBivarThresh();nbhdLayer.setStyle(bivarStyle);renderBivarLegend();}});
 
 // ── YoY animation slider ──────────────────────────────────────────────────────
 const YOY_KEYS=['chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26'];
