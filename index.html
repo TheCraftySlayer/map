@@ -302,6 +302,7 @@
 <div id="bottomStack" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:6px">
 <div id="statsBar" style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;gap:16px;font-size:11px;color:#555"></div>
 <div class="lb" id="lb"><span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
+<div id="metricDesc" style="background:rgba(255,255,255,.95);border-radius:6px;padding:4px 10px;max-width:520px;font-size:11px;color:#555;font-style:italic;box-shadow:0 1px 4px rgba(0,0,0,.08);display:none"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -1636,15 +1637,38 @@ const LAYER_HELP={
   avg_visit_min:'Average in-person visit duration in minutes.',
   addr_density:'Geocoded address density per census tract (TIGER/ACS).'
 };
-document.querySelectorAll('input[name="nbhd_layer"],input[name="tract_layer"]').forEach(r=>{
-  const v=r.value;
+function metricDescFor(v){
+  if(!v||v==='none')return '';
   let text=LAYER_HELP[v];
   if(!text&&/^chg_\d+_\d+$/.test(v)){
     const m=v.match(/^chg_(\d+)_(\d+)$/);
     text='Year-over-year median appraised value change: 20'+m[1].padStart(2,'0')+' \u2192 20'+m[2].padStart(2,'0')+'.';
   }
+  return text||'';
+}
+function updateMetricDesc(){
+  const el=document.getElementById('metricDesc');
+  if(!el)return;
+  if(bivarActive){
+    const x=document.getElementById('bivarX'), y=document.getElementById('bivarY');
+    const xName=x.selectedOptions[0].text, yName=y.selectedOptions[0].text;
+    const xD=metricDescFor(x.value), yD=metricDescFor(y.value);
+    el.innerHTML='<b>Bivariate:</b> '+esc(xName)+' \u00d7 '+esc(yName)+(xD?'<br><b>X:</b> '+esc(xD):'')+(yD?'<br><b>Y:</b> '+esc(yD):'');
+    el.style.display='';
+    return;
+  }
+  const d=metricDescFor(NBL);
+  if(d){el.textContent=d;el.style.display='';}else{el.style.display='none';}
+}
+document.querySelectorAll('input[name="nbhd_layer"],input[name="tract_layer"]').forEach(r=>{
+  const text=metricDescFor(r.value);
   if(text)r.parentElement.setAttribute('title',text);
 });
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',updateMetricDesc));
+document.getElementById('bivarMode').addEventListener('change',updateMetricDesc);
+document.getElementById('bivarX').addEventListener('change',updateMetricDesc);
+document.getElementById('bivarY').addEventListener('change',updateMetricDesc);
+updateMetricDesc();
 
 // ── URL state sharing ─────────────────────────────────────────────────────────
 let _urlApplying=false;
