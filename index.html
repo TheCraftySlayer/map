@@ -317,6 +317,16 @@ for(let i=0;i<DATA.features.length;i++){
   const parcels=p.parcels||0;
   p.walkin_rate=(parcels>0)?Math.max(0,(p.total_contacts||0)-(p.total_calls||0))/parcels:0;
   p.post_sale_rate=(parcels>0)?(p.post_sale_contacts||0)/parcels:0;
+  // Recompute appr_volatility from chg_* fields, discarding impossible YoY swings
+  // (build_data.py emits a handful of divide-by-near-zero values like 92749 for
+  // neighborhoods where the prior year had almost no valued parcels).
+  const chg=[];
+  for(const k in p){if(/^chg_\d+_\d+$/.test(k)){const v=p[k];if(v!=null&&v!==0&&v>=-1&&v<=2)chg.push(v);}}
+  if(chg.length>=2){
+    let m=0;for(let j=0;j<chg.length;j++)m+=chg[j];m/=chg.length;
+    let v=0;for(let j=0;j<chg.length;j++)v+=(chg[j]-m)*(chg[j]-m);
+    p.appr_volatility=Math.sqrt(v/(chg.length-1));
+  }
 }
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
 const TILES={
