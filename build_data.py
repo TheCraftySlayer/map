@@ -355,6 +355,11 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
         new_const = sum(1 for r in recs if safe_float(r.get('NEWCONST')) > 0)
 
         # Year-over-year value changes
+        # Medians below MIN_MED indicate a sparsely-valued baseline year — dividing
+        # by them produces divide-by-near-zero artifacts (e.g. chg=92749). Require
+        # a real baseline and clamp the ratio to a plausible range.
+        MIN_MED = 1000
+        YOY_MIN, YOY_MAX = -0.99, 5.0
         yr_pairs = [(all_years[i], all_years[i+1]) for i in range(len(all_years)-1)]
         yoy_changes = {}
         for y1, y2 in yr_pairs:
@@ -363,8 +368,10 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             if recs1 and recs2:
                 med1 = median_safe([safe_float(r.get('TOTVALUE')) for r in recs1 if safe_float(r.get('TOTVALUE')) > 0])
                 med2 = median_safe([safe_float(r.get('TOTVALUE')) for r in recs2 if safe_float(r.get('TOTVALUE')) > 0])
-                if med1 > 0:
-                    yoy_changes[f"chg_{y1%100}_{y2%100}"] = round((med2 - med1) / med1, 4)
+                if med1 >= MIN_MED and med2 >= 0:
+                    ratio = (med2 - med1) / med1
+                    ratio = max(YOY_MIN, min(YOY_MAX, ratio))
+                    yoy_changes[f"chg_{y1%100}_{y2%100}"] = round(ratio, 4)
 
         # Appraisal volatility (std dev of YoY changes)
         chg_vals = list(yoy_changes.values())

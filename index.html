@@ -312,20 +312,34 @@ _layersP.then(d=>{
 });
 
 function init() {
+// Sanitize per-feature: derived rates + mirror build_data.py's chg_* clamp
+// (older data files contain chg values like 92749 from divide-by-near-zero;
+// recompute dependent metrics from cleaned values so the UI is correct even
+// before the pipeline is rerun).
+const YOY_MIN=-0.99, YOY_MAX=5.0;
 for(let i=0;i<DATA.features.length;i++){
   const p=DATA.features[i].properties;
   const parcels=p.parcels||0;
   p.walkin_rate=(parcels>0)?Math.max(0,(p.total_contacts||0)-(p.total_calls||0))/parcels:0;
   p.post_sale_rate=(parcels>0)?(p.post_sale_contacts||0)/parcels:0;
-  // Recompute appr_volatility from chg_* fields, discarding impossible YoY swings
-  // (build_data.py emits a handful of divide-by-near-zero values like 92749 for
-  // neighborhoods where the prior year had almost no valued parcels).
   const chg=[];
-  for(const k in p){if(/^chg_\d+_\d+$/.test(k)){const v=p[k];if(v!=null&&v!==0&&v>=-1&&v<=2)chg.push(v);}}
+  for(const k in p){
+    if(!/^chg_\d+_\d+$/.test(k))continue;
+    let v=p[k];
+    if(v==null||!Number.isFinite(v)){p[k]=null;continue;}
+    if(v<YOY_MIN||v>YOY_MAX){p[k]=null;continue;}
+    if(v!==0)chg.push(v);
+  }
   if(chg.length>=2){
     let m=0;for(let j=0;j<chg.length;j++)m+=chg[j];m/=chg.length;
-    let v=0;for(let j=0;j<chg.length;j++)v+=(chg[j]-m)*(chg[j]-m);
-    p.appr_volatility=Math.sqrt(v/(chg.length-1));
+    let s=0;for(let j=0;j<chg.length;j++)s+=(chg[j]-m)*(chg[j]-m);
+    p.appr_volatility=Math.sqrt(s/(chg.length-1));
+  }
+  if(chg.length){
+    let sumAbs=0, cum=1;
+    for(let j=0;j<chg.length;j++){sumAbs+=Math.abs(chg[j]);cum*=(1+chg[j]);}
+    p.volatility=sumAbs;
+    p.val_change_pct=cum-1;
   }
 }
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
@@ -399,11 +413,8 @@ const CS={
   chg_7_8:YOY,chg_8_9:YOY,chg_9_10:YOY,chg_10_11:YOY,chg_11_12:YOY,chg_12_13:YOY,chg_13_14:YOY,chg_14_15:YOY,chg_15_16:YOY,chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,
   appr_volatility:[[0,'#f7fbff'],[.02,'#c6dbef'],[.04,'#6baed6'],[.06,'#2171b5'],[.1,'#084594'],[.2,'#08306b']],
   exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
-    addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
-  volatility:[[0,'#f7f7f7'],[.1,'#d9f0d3'],[.2,'#a6dba0'],[.3,'#5aae61'],[.4,'#1b7837'],[.6,'#00441b']],
-  exstab:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.4,'#00441b'],[.8,'#001a09']],
-  volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']],
-  exemption_stability:[[0,'#fff7ec'],[.03,'#fee8c8'],[.06,'#fdbb84'],[.1,'#fc8d59'],[.2,'#e34a33'],[.4,'#b30000']]
+  addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
+  volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']]
 };
 const LG={
   demand:{l:'0',h:'2+',n:'contacts/parcel'},
@@ -441,13 +452,10 @@ const LG={
   chg_22_23:{l:'\u221210%',h:'+20%',n:'value change 2022\u219223'},
   chg_23_24:{l:'\u221210%',h:'+20%',n:'value change 2023\u219224'},
   chg_24_25:{l:'\u221210%',h:'+20%',n:'value change 2024\u219225'},
-  appr_volatility:{l:'0%',h:'20%+',n:'appraisal volatility (std dev of YoY changes 2020–26)'},
-  exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOHΔ|+|VETΔ| 2020 vs 2026)'},
-    addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
-  volatility:{l:'0%',h:'60%+',n:'cumulative appraisal volatility (2020\u21922026)'},
-  exstab:{l:'0%',h:'80%+',n:'exemption stability delta (HOH+VET 2020 vs 2026)'},
-  volatility:{l:'0%',h:'80%+',n:'appraisal volatility (sum |YoY| 2020\u219226)'},
-  exemption_stability:{l:'0%',h:'40%+',n:'exemption instability (|\u0394HOH|+|\u0394VET| 2020 vs 2026)'}
+  appr_volatility:{l:'0%',h:'20%+',n:'appraisal volatility (std dev of YoY changes 2007\u20132025)'},
+  exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOH\u0394|+|VET\u0394| earliest vs latest year)'},
+  addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
+  volatility:{l:'0%',h:'80%+',n:'cumulative appraisal volatility (sum |YoY| 2007\u20132025)'}
 };
 
 // Map layer key → property field used for coloring
@@ -463,7 +471,7 @@ const LAYER_FIELD={
   chg_16_17:'chg_16_17',chg_17_18:'chg_17_18',chg_18_19:'chg_18_19',chg_19_20:'chg_19_20',
   chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',
   appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',
-  volatility:'volatility',exstab:'exstab'
+  volatility:'volatility'
 };
 
 let _visFeatCache=null, _visFeatKey=null;
@@ -476,7 +484,7 @@ function getVisibleFeatures(){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','exstab','appr_volatility','exemp_drift'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','appr_volatility','exemp_drift'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
   if(layer==='avg_visit_min')return v.toFixed(1)+' min';
@@ -494,11 +502,13 @@ function updateStatsBar(layer){
   let rangeHtml='';
   const field=LAYER_FIELD[layer];
   if(field){
-    const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
+    const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
     if(vals.length){
-      let mn=vals[0],mx=vals[0],sum=0;
-      for(let i=0;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];sum+=vals[i];}
-      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(mn,layer)+' \u2013 '+formatStat(mx,layer)+' (avg '+formatStat(sum/vals.length,layer)+')</span>';
+      const sorted=vals.slice().sort((a,b)=>a-b);
+      const lo=sorted[Math.floor(sorted.length*0.01)];
+      const hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*0.99))];
+      let sum=0;for(let i=0;i<vals.length;i++)sum+=vals[i];
+      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(lo,layer)+' \u2013 '+formatStat(hi,layer)+' (avg '+formatStat(sum/vals.length,layer)+')</span>';
     }
   }
   bar.innerHTML=
@@ -513,7 +523,7 @@ function updateStatsBar(layer){
   if(note){
     const allNbhd=DATA.features.length;
     const prefix=hideCommercial?totNbhd+' of '+allNbhd+' neighborhoods (commercial hidden)':allNbhd+' neighborhoods';
-    note.innerHTML=prefix+' &middot; 176 census tracts &middot; '+totParcels.toLocaleString()+' parcels (2026)<br>63,890 visitors &middot; 8,700 geocoded &middot; Tax rolls 2020&ndash;2026';
+    note.innerHTML=prefix+' &middot; 176 census tracts &middot; '+totParcels.toLocaleString()+' parcels (2025)<br>63,890 visitors &middot; 8,700 geocoded &middot; Tax rolls 2007&ndash;2025';
   }
 }
 
@@ -522,12 +532,13 @@ function updateLegendRange(layer){
   const field=LAYER_FIELD[layer];
   if(!field)return;
   const feats=getVisibleFeatures();
-  const vals=feats.map(f=>f.properties[field]||0).filter(v=>v!==0||layer==='demand'||layer==='calls_per_parcel');
+  const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
   if(!vals.length)return;
-  let mn=vals[0],mx=vals[0];
-  for(let i=1;i<vals.length;i++){if(vals[i]<mn)mn=vals[i];if(vals[i]>mx)mx=vals[i];}
-  document.getElementById('lL').textContent=formatStat(mn,layer);
-  document.getElementById('lH').textContent=formatStat(mx,layer);
+  const sorted=vals.slice().sort((a,b)=>a-b);
+  const lo=sorted[Math.floor(sorted.length*0.01)];
+  const hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*0.99))];
+  document.getElementById('lL').textContent=formatStat(lo,layer);
+  document.getElementById('lH').textContent=formatStat(hi,layer);
   document.getElementById('lG').style.background=grad(CS[layer]||CS[NBL]);
 }
 
