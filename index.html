@@ -615,6 +615,7 @@ info._buildHtml=function(p){
     (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
     (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=esc(parts[0]);var why=esc(parts[1]||'');var what=esc(parts[2]||'');return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
     (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
+    '<div style="margin-top:6px;display:flex;justify-content:flex-end"><button data-action="print-brief" data-nbhd="'+esc(p.nbhd)+'" title="Open a print-friendly one-page brief" style="font-size:10px;padding:2px 8px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer">Print brief</button></div>'+
     annotationsHtml(p.nbhd);
 };
 // Annotations (persisted per nbhd in localStorage)
@@ -650,9 +651,71 @@ setTimeout(()=>{
       if(t){annotAdd(nbhd,t);annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
     }else if(b.dataset.action==='annot-del'){
       if(window.confirm('Delete this note?')){annotDel(nbhd,parseInt(b.dataset.idx));annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
+    }else if(b.dataset.action==='print-brief'){
+      printBrief(nbhd);
     }
   });
 },0);
+
+function printBrief(nbhdStr){
+  const nbhd=parseFloat(nbhdStr);
+  const feat=DATA.features.find(f=>f.properties.nbhd===nbhd);
+  if(!feat)return;
+  const p=feat.properties;
+  const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
+  const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
+  const row=(l,v)=>'<tr><td style="padding:3px 10px 3px 0;color:#555">'+l+'</td><td style="padding:3px 0;font-weight:600">'+v+'</td></tr>';
+  const recs=p.outreach_recs?p.outreach_recs.split('|').map(r=>{const pt=r.split('::');return '<div style="margin-bottom:8px;padding:8px 10px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:3px"><div style="font-weight:600;color:#08306b;margin-bottom:3px">'+esc(pt[0])+'</div>'+(pt[1]?'<div style="font-size:11px;color:#555;margin-bottom:2px"><b>Why:</b> '+esc(pt[1])+'</div>':'')+(pt[2]?'<div style="font-size:11px;color:#08306b"><b>What:</b> '+esc(pt[2])+'</div>':'')+'</div>';}).join(''):'';
+  const notes=annotGet(nbhd).map(n=>'<div style="padding:4px 8px;background:#fafafa;border-left:2px solid #888;margin:3px 0;font-size:11px"><span style="color:#888">'+esc(n.d)+'</span> &middot; '+esc(n.t)+'</div>').join('');
+  const today=new Date().toISOString().slice(0,10);
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Outreach brief \u2013 Nbhd '+esc(p.nbhd)+'</title><style>'+
+    'body{font-family:system-ui,-apple-system,sans-serif;margin:24px;color:#222;max-width:720px}'+
+    'h1{margin:0 0 4px;font-size:22px;color:#08306b}'+
+    'h2{margin:18px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#888;border-bottom:1px solid #ddd;padding-bottom:3px}'+
+    'table{border-collapse:collapse;font-size:12px}'+
+    '.score{display:inline-block;padding:2px 10px;border-radius:4px;font-weight:700;color:#fff}'+
+    '@media print{@page{size:letter;margin:.5in}body{max-width:none}}'+
+    '.footer{margin-top:24px;padding-top:8px;border-top:1px solid #ddd;font-size:10px;color:#888;display:flex;justify-content:space-between}'+
+    '</style></head><body>'+
+    '<h1>Neighborhood '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:12px;color:#888;font-weight:400">['+esc(p.nbhd_type)+']</span>':'')+'</h1>'+
+    '<div style="color:#555;font-size:12px">Outreach priority brief \u00b7 generated '+today+'</div>'+
+    (p.outreach_need!=null?'<div style="margin-top:10px"><span class="score" style="background:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'">Outreach need: '+(p.outreach_need*100).toFixed(0)+'%</span>'+(p.outreach_severity!=null?' <span style="font-size:11px;color:#666;margin-left:8px">Severity '+(p.outreach_severity*100).toFixed(0)+'% \u00b7 Vulnerability '+(p.outreach_vulnerability*100).toFixed(0)+'% \u00b7 Service gap '+(p.outreach_service_gap*100).toFixed(0)+'%</span>':'')+'</div>':'')+
+    (p.outreach_why?'<div style="margin-top:6px;font-size:12px;color:#555;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
+    '<h2>Snapshot</h2><table>'+
+      row('Parcels',(p.parcels||0).toLocaleString())+
+      row('Median value 2025',dlr(p.median_val_25))+
+      row('Median year built',p.median_yrbuilt||'\u2014')+
+      row('Owner turnover',pct(p.owner_turnover))+
+      row('Appraisal volatility',pct(p.appr_volatility))+
+    '</table>'+
+    '<h2>Exemptions</h2><table>'+
+      row('HOH rate',pct(p.pct_hoh))+
+      row('Veteran rate',pct(p.pct_vet))+
+      row('Value freeze',pct(p.pct_val_freeze))+
+      row('VF denial rate',pct(p.pct_vf_denied))+
+      row('Exemption drift',pct(p.exemp_drift))+
+    '</table>'+
+    '<h2>Contact center</h2><table>'+
+      row('Total contacts',(p.total_contacts||0).toLocaleString())+
+      row('Total calls',(p.total_calls||0).toLocaleString())+
+      row('Contacts/parcel',(p.contacts_per_parcel||0).toFixed(2))+
+      row('Failure rate',pct(p.failure_rate))+
+      row('Avg visit',p.avg_visit_min?p.avg_visit_min.toFixed(1)+' min':'\u2014')+
+    '</table>'+
+    (p.zip_poverty_rate?'<h2>Demographics</h2><table>'+
+      row('ZIP codes',esc(p.zip_codes||'\u2014'))+
+      row('Poverty rate',pct(p.zip_poverty_rate))+
+    '</table>':'')+
+    (recs?'<h2>Recommended outreach</h2>'+recs:'')+
+    (p.nearest_cc?'<div style="margin-top:10px;padding:8px 12px;background:#fff8e6;border-left:3px solid #d4a017;font-size:12px"><b>Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
+    (notes?'<h2>Staff notes</h2>'+notes:'')+
+    '<div class="footer"><span>Bernalillo County Assessor \u00b7 Spatial Equity v4</span><span>Page '+esc(p.nbhd)+'</span></div>'+
+    '<script>window.onload=()=>setTimeout(()=>window.print(),200);<\/script>'+
+    '</body></html>';
+  const w=window.open('','_blank','width=800,height=900');
+  if(!w){alert('Pop-up blocked \u2014 allow pop-ups and try again');return;}
+  w.document.open();w.document.write(html);w.document.close();
+}
 
 // Precompute tract density stats for percentile ranking
 const _tractCounts=TRACT_GEO.features.map(f=>f.properties.address_count||0).sort((a,b)=>a-b);
