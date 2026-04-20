@@ -46,6 +46,7 @@
   <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span>
     <button id="exportCsvBtn" title="Download visible neighborhoods with the current layer, outreach score, and recommendations as CSV" style="float:right;margin-top:-2px;padding:2px 8px;font-size:10px;font-weight:600;background:#185FA5;color:#fff;border:none;border-radius:4px;cursor:pointer">Export CSV</button>
   </h4>
+  <div id="ccCatchmentBanner" style="display:none;padding:4px 8px;background:#fff4e0;border:1px solid #d4a017;border-radius:4px;margin:0 0 6px;font-size:11px;color:#6b4a00"></div>
 
   <div style="margin-bottom:6px">
     <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
@@ -366,18 +367,55 @@ L.geoJSON(COUNTY,{style:{fillColor:'none',weight:2,color:'#aaa',fillOpacity:0}})
 const office=L.marker(OFC,{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ffff00;border:2px solid #333;border-radius:2px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).bindPopup("Assessor's Office").addTo(map);
 
 const CC_DATA=[
-  {n:'Vista Grande',a:'15 La Madera Rd, Sandia Park',la:35.1769943,ln:-106.3409576},
-  {n:'Los Vecinos',a:'478 NM-333, Tijeras',la:35.0788198,ln:-106.3923734},
-  {n:'Paradise Hills',a:'5901 Paradise Blvd NW',la:35.1950907,ln:-106.7129307},
-  {n:'Raymond G. Sanchez',a:'9800 4th St NW',la:35.193073,ln:-106.6157715},
-  {n:'Westside',a:'1250 Isleta Blvd SW',la:35.0537822,ln:-106.672675},
-  {n:'Los Padillas',a:'2117 Los Padillas Rd SW',la:34.9569792,ln:-106.696385},
-  {n:'Henry "Kiki" Saavedra',a:'201 Prosperity Ave SE',la:35.0158333,ln:-106.6577778},
-  {n:'South Valley Multipurpose Senior',a:'2008 Larrazolo Rd SW',la:35.069824,ln:-106.6881653},
-  {n:'Alamosa (@ Ted M. Gallegos)',a:'6900 Gonzales Rd SW',la:35.0714679,ln:-106.7101371},
+  {n:'Vista Grande',k:'Vista Grande',a:'15 La Madera Rd, Sandia Park',la:35.1769943,ln:-106.3409576},
+  {n:'Los Vecinos',k:'Los Vecinos',a:'478 NM-333, Tijeras',la:35.0788198,ln:-106.3923734},
+  {n:'Paradise Hills',k:'Paradise Hills',a:'5901 Paradise Blvd NW',la:35.1950907,ln:-106.7129307},
+  {n:'Raymond G. Sanchez',k:'Raymond G. Sanchez',a:'9800 4th St NW',la:35.193073,ln:-106.6157715},
+  {n:'Westside',k:'Westside',a:'1250 Isleta Blvd SW',la:35.0537822,ln:-106.672675},
+  {n:'Los Padillas',k:'Los Padillas',a:'2117 Los Padillas Rd SW',la:34.9569792,ln:-106.696385},
+  {n:'Henry "Kiki" Saavedra',k:'Kiki Saavedra',a:'201 Prosperity Ave SE',la:35.0158333,ln:-106.6577778},
+  {n:'South Valley Multipurpose Senior',k:'South Valley Senior',a:'2008 Larrazolo Rd SW',la:35.069824,ln:-106.6881653},
+  {n:'Alamosa (@ Ted M. Gallegos)',k:'Alamosa',a:'6900 Gonzales Rd SW',la:35.0714679,ln:-106.7101371},
 ];
+let activeCcKey=null;
 const ccIcon=L.divIcon({className:'',html:'<div style="width:12px;height:12px;background:#00bfff;border:2px solid #005f7f;border-radius:2px"></div>',iconSize:[12,12],iconAnchor:[6,6]});
-const ccLayer=L.layerGroup(CC_DATA.map(c=>L.marker([c.la,c.ln],{icon:ccIcon}).bindPopup('<b>'+c.n+'</b><br>'+c.a)));
+const ccIconActive=L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ff9500;border:2px solid #804000;border-radius:2px;box-shadow:0 0 6px rgba(255,149,0,.6)"></div>',iconSize:[14,14],iconAnchor:[7,7]});
+const ccMarkers={};
+const ccLayer=L.layerGroup(CC_DATA.map(c=>{
+  const m=L.marker([c.la,c.ln],{icon:ccIcon}).bindPopup('<b>'+c.n+'</b><br>'+c.a+'<br><button data-cc-key="'+c.k+'" style="margin-top:4px;font-size:11px;padding:2px 8px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">Show catchment</button>');
+  ccMarkers[c.k]=m;
+  return m;
+}));
+function setCcCatchment(key){
+  activeCcKey=key||null;
+  Object.entries(ccMarkers).forEach(([k,m])=>m.setIcon(k===activeCcKey?ccIconActive:ccIcon));
+  _visFeatCache=null;
+  const banner=document.getElementById('ccCatchmentBanner');
+  if(banner){
+    if(activeCcKey){
+      const c=CC_DATA.find(x=>x.k===activeCcKey);
+      banner.innerHTML='<b>Catchment:</b> '+esc(c?c.n:activeCcKey)+' <button id="ccCatchmentClear" style="margin-left:6px;font-size:10px;padding:1px 6px;background:#fff;color:#333;border:1px solid #aaa;border-radius:3px;cursor:pointer">Clear</button>';
+      banner.style.display='';
+      document.getElementById('ccCatchmentClear').addEventListener('click',()=>setCcCatchment(null));
+    }else{
+      banner.style.display='none';
+    }
+  }
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  updateStatsBar(NBL);
+  if(NBL!=='none')updateLegendRange(NBL);
+  renderTopOutreach();
+}
+map.on('popupopen',e=>{
+  const btn=e.popup._container&&e.popup._container.querySelector('button[data-cc-key]');
+  if(btn){
+    btn.addEventListener('click',()=>{
+      const k=btn.dataset.ccKey;
+      setCcCatchment(activeCcKey===k?null:k);
+      e.popup._source&&e.popup._source.closePopup();
+    });
+  }
+});
 
 // ── Color scales ──────────────────────────────────────────────────────────────
 const YRC={2005:'#a6cee3',2006:'#b2df8a',2007:'#fb9a99',2008:'#fdbf6f',2009:'#cab2d6',2010:'#ffff99',2011:'#b15928',2012:'#6a3d9a',2013:'#ff7f00',2014:'#33a02c',2015:'#e31a1c',2016:'#1f78b4',2017:'#a65628',2018:'#f781bf',2019:'#999999',2020:'#66c2a5',2021:'#fc8d62',2022:'#984ea3',2023:'#2166ac',2024:'#f4a11d',2025:'#1a9850',2026:'#e41a1c'};
@@ -502,6 +540,7 @@ function getVisibleFeatures(){
 function featureHidden(p){
   if(hideCommercial&&p.is_commercial)return true;
   if(_cachedRules.length&&!passesFilters(p,_cachedRules))return true;
+  if(activeCcKey&&p.nearest_cc!==activeCcKey)return true;
   return false;
 }
 
