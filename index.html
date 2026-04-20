@@ -704,12 +704,13 @@ let pinnedNbhd=null;
 function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
 function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
 function clickNbhd(e){
-  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();return;}
+  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();if(typeof updateHash==='function')updateHash();return;}
   if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
   pinnedNbhd=e.target;
   e.target.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
   e.target.bringToFront();
   info.update(e.target.feature.properties);
+  if(typeof updateHash==='function')updateHash();
 }
 function renderNbhd(){
   pinnedNbhd=null;
@@ -1171,6 +1172,68 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
 });
+
+// ── URL state sharing ─────────────────────────────────────────────────────────
+let _urlApplying=false;
+function updateHash(){
+  if(_urlApplying)return;
+  const parts=[];
+  if(NBL&&NBL!=='none')parts.push('l='+encodeURIComponent(NBL));
+  if(TRACTL&&TRACTL!=='none')parts.push('tl='+encodeURIComponent(TRACTL));
+  if(propYear)parts.push('y='+propYear);
+  if(hideCommercial)parts.push('hc=1');
+  if(swipeActive){
+    const sL=document.getElementById('swipeLeft').value, sR=document.getElementById('swipeRight').value;
+    parts.push('sw='+encodeURIComponent(sL+'|'+sR));
+  }
+  if(pinnedNbhd&&pinnedNbhd.feature)parts.push('pin='+pinnedNbhd.feature.properties.nbhd);
+  const h=parts.length?'#'+parts.join('&'):location.pathname+location.search;
+  try{history.replaceState(null,'',h);}catch(e){}
+}
+function applyHash(){
+  if(!location.hash||location.hash.length<2)return;
+  const s={};
+  location.hash.slice(1).split('&').forEach(kv=>{const eq=kv.indexOf('=');if(eq<0)return;s[kv.slice(0,eq)]=decodeURIComponent(kv.slice(eq+1));});
+  _urlApplying=true;
+  try{
+    if(s.y){
+      const sel=document.getElementById('propYearSelect');
+      if([...sel.options].some(o=>o.value===s.y)){sel.value=s.y;sel.dispatchEvent(new Event('change'));}
+    }
+    if(s.hc==='1'){const c=document.getElementById('hideCommercial');if(!c.checked){c.checked=true;c.dispatchEvent(new Event('change'));}}
+    if(s.l){const r=document.querySelector('input[name="nbhd_layer"][value="'+s.l.replace(/"/g,'\\"')+'"]');if(r){r.checked=true;r.dispatchEvent(new Event('change'));}}
+    if(s.tl){const r=document.querySelector('input[name="tract_layer"][value="'+s.tl.replace(/"/g,'\\"')+'"]');if(r){r.checked=true;r.dispatchEvent(new Event('change'));}}
+    if(s.sw){const [sL,sR]=s.sw.split('|');const selL=document.getElementById('swipeLeft'),selR=document.getElementById('swipeRight');if(sL)selL.value=sL;if(sR)selR.value=sR;const sm=document.getElementById('swipeMode');if(!sm.checked){sm.checked=true;sm.dispatchEvent(new Event('change'));}}
+  }finally{_urlApplying=false;}
+  if(s.pin){
+    const n=parseFloat(s.pin);
+    const feat=DATA.features.find(f=>f.properties.nbhd===n);
+    if(feat&&nbhdLayer){
+      nbhdLayer.eachLayer(l=>{
+        if(l.feature&&l.feature.properties.nbhd===n){
+          if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
+          pinnedNbhd=l;
+          l.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+          l.bringToFront();
+          info.update(feat.properties);
+          const tmp=L.geoJSON(feat);
+          map.fitBounds(tmp.getBounds(),{maxZoom:14,padding:[40,40]});
+        }
+      });
+    }
+  }
+  updateHash();
+}
+// Wire all relevant state changes to updateHash()
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',updateHash));
+document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',updateHash));
+document.getElementById('propYearSelect').addEventListener('change',updateHash);
+document.getElementById('hideCommercial').addEventListener('change',updateHash);
+document.getElementById('swipeMode').addEventListener('change',updateHash);
+document.getElementById('swipeLeft').addEventListener('change',updateHash);
+document.getElementById('swipeRight').addEventListener('change',updateHash);
+window.addEventListener('hashchange',()=>{if(!_urlApplying)applyHash();});
+applyHash();
 
 } // end init()
 </script></body></html>
