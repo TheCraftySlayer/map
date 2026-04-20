@@ -43,7 +43,9 @@
 <button class="toggle-btn" id="tileToggle" style="bottom:20px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
 
 <div class="ctrl">
-  <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span></h4>
+  <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span>
+    <button id="exportCsvBtn" title="Download visible neighborhoods with the current layer, outreach score, and recommendations as CSV" style="float:right;margin-top:-2px;padding:2px 8px;font-size:10px;font-weight:600;background:#185FA5;color:#fff;border:none;border-radius:4px;cursor:pointer">Export CSV</button>
+  </h4>
 
   <div style="margin-bottom:6px">
     <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
@@ -785,6 +787,37 @@ function renderTopOutreach(){
   });
 }
 renderTopOutreach();
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+function csvEsc(v){
+  if(v==null)return '';
+  const s=String(v);
+  return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+}
+function exportCsv(){
+  const feats=getVisibleFeatures();
+  const layer=NBL;
+  const field=LAYER_FIELD[layer];
+  const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
+    const p=f.properties;
+    const layerVal=field?p[field]:'';
+    const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
+    const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+  });
+  const csv=header.join(',')+'\n'+rows.join('\n');
+  const stamp=new Date().toISOString().slice(0,10);
+  const suffix=layer&&layer!=='none'?'_'+layer:'';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='spatial_equity_'+stamp+suffix+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+}
+document.getElementById('exportCsvBtn').addEventListener('click',e=>{e.stopPropagation();exportCsv();});
 
 // ── Swipe compare ─────────────────────────────────────────────────────────────
 let swipePos=50, swipeDragging=false;
