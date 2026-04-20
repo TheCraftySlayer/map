@@ -72,6 +72,8 @@
   <label><input type="radio" name="nbhd_layer" value="pct_vf_denied"> Value freeze denial rate</label>
   <label><input type="radio" name="nbhd_layer" value="owner_turnover"> Owner turnover rate</label>
   <label><input type="radio" name="nbhd_layer" value="hoh_churn"> HOH exemption churn</label>
+  <label><input type="radio" name="nbhd_layer" value="appr_volatility"> Appraisal volatility</label>
+  <label><input type="radio" name="nbhd_layer" value="exemp_drift"> Exemption drift</label>
   <label><input type="radio" name="nbhd_layer" value="outreach_need"> <b>Outreach need score</b></label>
 
   <h5>Value changes <span style="font-weight:400;color:#aaa">year-over-year</span></h5>
@@ -99,6 +101,8 @@
   <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="radio" name="nbhd_layer" value="demand"> Caller demand</label>
   <label><input type="radio" name="nbhd_layer" value="calls_per_parcel"> Call intensity</label>
+  <label><input type="radio" name="nbhd_layer" value="walkin_rate"> Walk-in intensity</label>
+  <label><input type="radio" name="nbhd_layer" value="post_sale_rate"> Post-sale contact density</label>
   <label><input type="radio" name="nbhd_layer" value="failure"> Service failure rate</label>
   <label><input type="radio" name="nbhd_layer" value="avg_visit_min"> Avg visit duration</label>
 
@@ -308,6 +312,12 @@ _layersP.then(d=>{
 });
 
 function init() {
+for(let i=0;i<DATA.features.length;i++){
+  const p=DATA.features[i].properties;
+  const parcels=p.parcels||0;
+  p.walkin_rate=(parcels>0)?Math.max(0,(p.total_contacts||0)-(p.total_calls||0))/parcels:0;
+  p.post_sale_rate=(parcels>0)?(p.post_sale_contacts||0)/parcels:0;
+}
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
 const TILES={
   sat:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri &mdash; Maxar',maxZoom:19}),
@@ -361,6 +371,8 @@ const YOY=[[-.1,'#2166ac'],[-.05,'#92c5de'],[0,'#f7f7f7'],[.05,'#f4a582'],[.1,'#
 const CS={
   demand:[[0,'#ffffcc'],[.15,'#fed976'],[.3,'#feb24c'],[.5,'#fd8d3c'],[.8,'#fc4e2a'],[1.2,'#e31a1c'],[2,'#800026']],
   calls_per_parcel:[[0,'#f7fbff'],[.05,'#c6dbef'],[.1,'#6baed6'],[.2,'#2171b5'],[.5,'#084594'],[1,'#08306b']],
+  walkin_rate:[[0,'#fff5eb'],[.02,'#fdd0a2'],[.05,'#fdae6b'],[.1,'#fd8d3c'],[.2,'#e6550d'],[.4,'#8c2d04']],
+  post_sale_rate:[[0,'#f7f4f9'],[.005,'#d4b9da'],[.01,'#c994c7'],[.02,'#df65b0'],[.04,'#ce1256'],[.08,'#67001f']],
   failure:[[0,'#1a9850'],[.05,'#66bd63'],[.1,'#a6d96a'],[.15,'#fee08b'],[.25,'#f46d43'],[.4,'#a50026']],
   avg_visit_min:[[0,'#f7fbff'],[10,'#c6dbef'],[20,'#6baed6'],[30,'#2171b5'],[45,'#08519c'],[60,'#08306b']],
   avg_appraised:[[50000,'#f7fcf5'],[150000,'#c7e9c0'],[300000,'#74c476'],[500000,'#238b45'],[800000,'#00441b'],[2000000,'#00250f']],
@@ -386,6 +398,8 @@ const CS={
 const LG={
   demand:{l:'0',h:'2+',n:'contacts/parcel'},
   calls_per_parcel:{l:'0',h:'1+',n:'calls/parcel'},
+  walkin_rate:{l:'0',h:'0.4+',n:'walk-in contacts/parcel'},
+  post_sale_rate:{l:'0',h:'0.08+',n:'post-sale contacts/parcel'},
   failure:{l:'0%',h:'40%+',n:'service failure rate'},
   avg_visit_min:{l:'0',h:'60+ min',n:'avg visit duration'},
   avg_appraised:{l:'$50k',h:'$2M+',n:'avg appraised value'},
@@ -429,6 +443,7 @@ const LG={
 // Map layer key → property field used for coloring
 const LAYER_FIELD={
   demand:'contacts_per_parcel',calls_per_parcel:'calls_per_parcel',
+  walkin_rate:'walkin_rate',post_sale_rate:'post_sale_rate',
   failure:'failure_rate',avg_visit_min:'avg_visit_min',
   avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',
   valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',
@@ -451,7 +466,7 @@ function getVisibleFeatures(){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','exstab'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','exstab','appr_volatility','exemp_drift'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
   if(layer==='avg_visit_min')return v.toFixed(1)+' min';
