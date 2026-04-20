@@ -262,7 +262,7 @@
 </div>
 <div id="bottomStack" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:6px">
 <div id="statsBar" style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;gap:16px;font-size:11px;color:#555"></div>
-<div class="lb" id="lb"><span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
+<div class="lb" id="lb"><span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -551,15 +551,49 @@ function updateStatsBar(layer){
   }
 }
 
+let _histBins=null, _histLo=0, _histHi=1;
+function renderHistogram(vals,lo,hi){
+  const svg=document.getElementById('lHist');
+  if(!svg)return;
+  const BIN_N=24, W=180, H=22;
+  if(!vals||vals.length<2||hi<=lo){svg.innerHTML='';_histBins=null;return;}
+  const bins=new Array(BIN_N).fill(0);
+  for(let i=0;i<vals.length;i++){
+    const v=vals[i];
+    if(v<lo||v>hi)continue;
+    let b=Math.floor((v-lo)/(hi-lo)*BIN_N);
+    if(b>=BIN_N)b=BIN_N-1;
+    bins[b]++;
+  }
+  let mx=0;for(let i=0;i<BIN_N;i++)if(bins[i]>mx)mx=bins[i];
+  if(!mx)mx=1;
+  const bw=W/BIN_N;
+  let html='';
+  for(let i=0;i<BIN_N;i++){
+    const h=Math.max(bins[i]/mx*H,bins[i]>0?1:0);
+    html+='<rect x="'+(i*bw).toFixed(2)+'" y="'+(H-h).toFixed(2)+'" width="'+(bw-0.5).toFixed(2)+'" height="'+h.toFixed(2)+'" fill="#8ca0b4"/>';
+  }
+  html+='<line id="lHistMark" x1="-10" y1="0" x2="-10" y2="'+H+'" stroke="#c41a1a" stroke-width="1.5"/>';
+  svg.innerHTML=html;
+  _histBins=bins;_histLo=lo;_histHi=hi;
+}
+function markHistogram(val){
+  const mark=document.getElementById('lHistMark');
+  if(!mark||_histBins==null)return;
+  if(val==null||!Number.isFinite(val)||val<_histLo||val>_histHi){mark.setAttribute('x1','-10');mark.setAttribute('x2','-10');return;}
+  const x=(val-_histLo)/(_histHi-_histLo)*180;
+  mark.setAttribute('x1',x.toFixed(2));mark.setAttribute('x2',x.toFixed(2));
+}
 function updateLegendRange(layer){
   if(swipeActive)return;
   const field=LAYER_FIELD[layer];
-  if(!field)return;
+  if(!field){renderHistogram(null);return;}
   const feats=getVisibleFeatures();
   const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
   if(!vals.length){
     document.getElementById('lL').textContent='\u2014';
     document.getElementById('lH').textContent='no data';
+    renderHistogram(null);
     return;
   }
   const sorted=vals.slice().sort((a,b)=>a-b);
@@ -568,6 +602,7 @@ function updateLegendRange(layer){
   document.getElementById('lL').textContent=formatStat(lo,layer);
   document.getElementById('lH').textContent=formatStat(hi,layer);
   document.getElementById('lG').style.background=grad(CS[layer]||CS[NBL]);
+  renderHistogram(vals,lo,hi);
 }
 
 // ── Tooltip with sparkline ────────────────────────────────────────────────────
@@ -835,15 +870,16 @@ function nbhdStyle(f){
   return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
 }
 let pinnedNbhd=null;
-function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
-function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
+function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);const f=LAYER_FIELD[NBL];if(f)markHistogram(e.target.feature.properties[f]);}
+function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);}
 function clickNbhd(e){
-  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();if(typeof updateHash==='function')updateHash();return;}
+  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);if(typeof updateHash==='function')updateHash();return;}
   if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
   pinnedNbhd=e.target;
   e.target.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
   e.target.bringToFront();
   info.update(e.target.feature.properties);
+  const f=LAYER_FIELD[NBL];if(f)markHistogram(e.target.feature.properties[f]);
   if(typeof updateHash==='function')updateHash();
 }
 function renderNbhd(){
@@ -1116,7 +1152,7 @@ function disableSwipe(){
   // Restore original legend structure
   const lb=document.getElementById('lb');
   lb.style.flexDirection='';lb.style.alignItems='center';
-  lb.innerHTML='<span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
+  lb.innerHTML='<span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
   renderNbhd();
 }
 
