@@ -895,7 +895,7 @@ tractInfo.update=function(p){
 tractInfo.addTo(map);
 
 // ── Choropleth layers ─────────────────────────────────────────────────────────
-let NBL='none', TRACTL='none', FILL_OPAC=0.72, hideCommercial=false;
+let NBL='none', TRACTL='none', FILL_OPAC=0.72, hideCommercial=false, bivarActive=false;
 // Property characteristics year selector
 const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover'};
 let propYear=null;
@@ -1445,7 +1445,6 @@ const bivarPalette=[
   ['#dfb0d6','#a5add3','#5698b9'],
   ['#be64ac','#8c62aa','#3b4994']
 ];
-let bivarActive=false;
 let _bivarThresh={xLo:0,xHi:1,yLo:0,yHi:1};
 function bivarField(layer){return LAYER_FIELD[layer]||layer;}
 function recomputeBivarThresh(){
@@ -1562,9 +1561,15 @@ const FILTER_COUNT=3;
   }
 })();
 function getFilters(){
+  // Early-exit when the filter DOM hasn't been built yet — avoids a temporal-
+  // dead-zone crash on FILTER_COUNT during the first renderNbhd() call.
+  const first=document.querySelector('.fltField[data-i="0"]');
+  if(!first)return [];
   const out=[];
   for(let i=0;i<FILTER_COUNT;i++){
-    const f=document.querySelector('.fltField[data-i="'+i+'"]').value;
+    const fEl=document.querySelector('.fltField[data-i="'+i+'"]');
+    if(!fEl)continue;
+    const f=fEl.value;
     if(!f)continue;
     const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
     const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
