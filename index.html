@@ -441,7 +441,7 @@ function setCcCatchment(key){
   }
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
-  if(NBL!=='none')updateLegendRange(NBL);
+  if(NBL!=='none'&&!(typeof bivarActive!=='undefined'&&bivarActive))updateLegendRange(NBL);
   renderTopOutreach();
 }
 map.on('popupopen',e=>{
@@ -565,20 +565,17 @@ const LAYER_FIELD={
 };
 
 let _visFeatCache=null, _cachedRules=[];
+function refreshCachedRules(){_cachedRules=(typeof getFilters==='function')?getFilters():[];}
 function getVisibleFeatures(){
   if(_visFeatCache)return _visFeatCache;
-  _cachedRules=(typeof getFilters==='function')?getFilters():[];
-  _visFeatCache=DATA.features.filter(f=>{
-    if(hideCommercial&&f.properties.is_commercial)return false;
-    if(_cachedRules.length&&!passesFilters(f.properties,_cachedRules))return false;
-    return true;
-  });
+  refreshCachedRules();
+  _visFeatCache=DATA.features.filter(f=>!featureHidden(f.properties));
   return _visFeatCache;
 }
 function featureHidden(p){
   if(hideCommercial&&p.is_commercial)return true;
   if(_cachedRules.length&&!passesFilters(p,_cachedRules))return true;
-  if(activeCcKey&&p.nearest_cc!==activeCcKey)return true;
+  if(typeof activeCcKey!=='undefined'&&activeCcKey&&p.nearest_cc!==activeCcKey)return true;
   return false;
 }
 
@@ -628,6 +625,11 @@ function updateStatsBar(layer){
   }
 }
 
+function resetLegendHtml(){
+  const lb=document.getElementById('lb');
+  lb.style.flexDirection='';lb.style.alignItems='center';lb.style.gap='';
+  lb.innerHTML='<span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
+}
 let _histBins=null, _histLo=0, _histHi=1;
 function renderHistogram(vals,lo,hi){
   const svg=document.getElementById('lHist');
@@ -1233,10 +1235,7 @@ function disableSwipe(){
   const lblL=document.getElementById('swipeLabelL');if(lblL)lblL.remove();
   const lblR=document.getElementById('swipeLabelR');if(lblR)lblR.remove();
   document.getElementById('swipeOverlay').style.display='none';
-  // Restore original legend structure
-  const lb=document.getElementById('lb');
-  lb.style.flexDirection='';lb.style.alignItems='center';
-  lb.innerHTML='<span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
+  resetLegendHtml();
   renderNbhd();
 }
 
@@ -1244,6 +1243,8 @@ document.getElementById('swipeMode').addEventListener('change',e=>{
   swipeActive=e.target.checked;
   if(swipeActive&&typeof bivarActive!=='undefined'&&bivarActive){
     document.getElementById('bivarMode').checked=false;bivarActive=false;
+    // Restore non-bivariate styling before swipe hides/overlays the base layer
+    if(nbhdLayer)nbhdLayer.setStyle(nbhdStyle);
   }
   if(swipeActive)enableSwipe(); else disableSwipe();
 });
@@ -1395,7 +1396,12 @@ document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
 document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
   NBL=e.target.value;
   for(const k in _tooltipCache)delete _tooltipCache[k];
-  if(typeof bivarActive!=='undefined'&&bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;}
+  if(typeof bivarActive!=='undefined'&&bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;resetLegendHtml();}
+  // Stop YoY autoplay if user picked a non-chg layer
+  if(typeof _yoyTimer!=='undefined'&&_yoyTimer&&!/^chg_\d+_\d+$/.test(NBL)){
+    clearInterval(_yoyTimer);_yoyTimer=null;
+    const btn=document.getElementById('yoyPlay');if(btn)btn.textContent='\u25B6';
+  }
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
 }));
 document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',e=>{
@@ -1489,7 +1495,9 @@ function applyBivar(){
     if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
     renderBivarLegend();
   }else{
+    resetLegendHtml();
     renderNbhd();
+    if(NBL&&NBL!=='none')updateLegendRange(NBL);
   }
 }
 document.getElementById('bivarMode').addEventListener('change',applyBivar);
@@ -1560,9 +1568,10 @@ function getFilters(){
     if(!f)continue;
     const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
     const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
+    if(mn===''&&mx==='')continue;
     const lo=mn===''?-Infinity:parseFloat(mn);
     const hi=mx===''?Infinity:parseFloat(mx);
-    if(!Number.isFinite(lo)&&!Number.isFinite(hi)&&lo!==-Infinity&&hi!==Infinity)continue;
+    if(Number.isNaN(lo)||Number.isNaN(hi))continue;
     out.push({f,lo,hi});
   }
   return out;
@@ -1577,10 +1586,10 @@ function passesFilters(p,rules){
 }
 function applyFilters(){
   _visFeatCache=null;
-  const rules=getFilters();
+  refreshCachedRules();
   const badge=document.getElementById('filterActiveBadge');
-  if(rules.length){
-    const kept=DATA.features.filter(f=>passesFilters(f.properties,rules)).length;
+  if(_cachedRules.length){
+    const kept=DATA.features.filter(f=>passesFilters(f.properties,_cachedRules)).length;
     badge.textContent=kept+'/'+DATA.features.length+' match';
     badge.style.display='';
   }else{
@@ -1588,7 +1597,7 @@ function applyFilters(){
   }
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
-  if(NBL!=='none')updateLegendRange(NBL);
+  if(NBL!=='none'&&!(typeof bivarActive!=='undefined'&&bivarActive))updateLegendRange(NBL);
   renderTopOutreach();
 }
 document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',applyFilters));
