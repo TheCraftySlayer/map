@@ -101,6 +101,11 @@
   <label><input type="radio" name="nbhd_layer" value="chg_23_24"> 2023&rarr;24</label>
   <label><input type="radio" name="nbhd_layer" value="chg_24_25"> 2024&rarr;25</label>
   <label><input type="radio" name="nbhd_layer" value="chg_25_26"> 2025&rarr;26</label>
+  <div id="yoyAnim" style="display:flex;align-items:center;gap:4px;margin:4px 0 6px;font-size:10px;color:#555">
+    <button id="yoyPlay" title="Play/pause year-over-year animation" style="width:20px;height:18px;padding:0;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">\u25B6</button>
+    <input type="range" id="yoySlider" min="0" max="18" value="0" step="1" style="flex:1;accent-color:#185FA5">
+    <span id="yoyLabel" style="min-width:52px;text-align:right">&mdash;</span>
+  </div>
 
   <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="radio" name="nbhd_layer" value="demand"> Caller demand</label>
@@ -1381,6 +1386,39 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   document.querySelector('.ctrl').style.display=ctrlOpen?'block':'none';
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
+});
+
+// ── YoY animation slider ──────────────────────────────────────────────────────
+const YOY_KEYS=['chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26'];
+const YOY_LABELS=["'07\u2192'08","'08\u2192'09","'09\u2192'10","'10\u2192'11","'11\u2192'12","'12\u2192'13","'13\u2192'14","'14\u2192'15","'15\u2192'16","'16\u2192'17","'17\u2192'18","'18\u2192'19","'19\u2192'20","'20\u2192'21","'21\u2192'22","'22\u2192'23","'23\u2192'24","'24\u2192'25","'25\u2192'26"];
+let _yoyTimer=null;
+function yoySelect(idx){
+  const k=YOY_KEYS[idx];
+  document.getElementById('yoyLabel').textContent=YOY_LABELS[idx];
+  document.getElementById('yoySlider').value=idx;
+  const r=document.querySelector('input[name="nbhd_layer"][value="'+k+'"]');
+  if(r&&!r.checked){r.checked=true;r.dispatchEvent(new Event('change'));}
+}
+document.getElementById('yoySlider').addEventListener('input',e=>yoySelect(parseInt(e.target.value)));
+document.getElementById('yoyPlay').addEventListener('click',()=>{
+  const btn=document.getElementById('yoyPlay');
+  if(_yoyTimer){clearInterval(_yoyTimer);_yoyTimer=null;btn.textContent='\u25B6';return;}
+  btn.textContent='\u23F8';
+  const tick=()=>{
+    const s=document.getElementById('yoySlider');
+    let i=parseInt(s.value)+1;
+    if(i>=YOY_KEYS.length)i=0;
+    yoySelect(i);
+  };
+  tick();
+  _yoyTimer=setInterval(tick,900);
+});
+// When a chg_ radio is selected directly, sync the slider position
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>{
+  r.addEventListener('change',e=>{
+    const i=YOY_KEYS.indexOf(e.target.value);
+    if(i>=0){document.getElementById('yoySlider').value=i;document.getElementById('yoyLabel').textContent=YOY_LABELS[i];}
+  });
 });
 
 // ── Threshold filters ─────────────────────────────────────────────────────────
