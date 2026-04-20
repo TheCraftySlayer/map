@@ -97,6 +97,7 @@
   <label><input type="radio" name="nbhd_layer" value="chg_22_23"> 2022&rarr;23</label>
   <label><input type="radio" name="nbhd_layer" value="chg_23_24"> 2023&rarr;24</label>
   <label><input type="radio" name="nbhd_layer" value="chg_24_25"> 2024&rarr;25</label>
+  <label><input type="radio" name="nbhd_layer" value="chg_25_26"> 2025&rarr;26</label>
 
   <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="radio" name="nbhd_layer" value="demand"> Caller demand</label>
@@ -142,6 +143,7 @@
     <option value="chg_22_23">Change 22&rarr;23</option>
     <option value="chg_23_24">Change 23&rarr;24</option>
     <option value="chg_24_25">Change 24&rarr;25</option>
+    <option value="chg_25_26">Change 25&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
     <option value="avg_visit_min">Avg visit duration</option>
@@ -173,6 +175,7 @@
     <option value="chg_22_23">Change 22&rarr;23</option>
     <option value="chg_23_24">Change 23&rarr;24</option>
     <option value="chg_24_25">Change 24&rarr;25</option>
+    <option value="chg_25_26">Change 25&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure" selected>Failure rate</option>
     <option value="avg_visit_min">Avg visit duration</option>
@@ -302,13 +305,14 @@ _coreP.then(core=>{
   const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
 });
+let _onLayersReady=null;
 _layersP.then(d=>{
   SL=d.SL; EG_H=d.EG_H; EG_V=d.EG_V; EL_H=d.EL_H; EL_V=d.EL_V; RPT=d.RPT; CO=d.CO; VO=d.VO; MC=d.MC;
   VET_V=d.VET_V; VF_V=d.VF_V; HOH_V=d.HOH_V; PRO_V=d.PRO_V; SP_GEO=d.SP_GEO;
   PRO=d.PRO||[];
   VFA=d.VFA||[]; VFD=d.VFD||[]; VFR=d.VFR||[]; DVW=d.DVW||[];
   _layersReady=true;
-  if(typeof refreshOL==='function')refreshOL(Object.keys(OL).filter(k=>k!=="rings"));
+  if(_onLayersReady)_onLayersReady();
 });
 
 function init() {
@@ -410,7 +414,7 @@ const CS={
   outreach_need:[[0,'#f7fbff'],[.2,'#c6dbef'],[.4,'#6baed6'],[.6,'#2171b5'],[.8,'#08519c'],[1,'#08306b']],
   sales:[[0,'#ffffcc'],[.02,'#c7e9b4'],[.05,'#7fcdbb'],[.08,'#41b6c4'],[.12,'#1d91c0'],[.2,'#0c2c84']],
   taxlightning:[[0,'#ffffcc'],[.05,'#fed976'],[.1,'#feb24c'],[.2,'#fd8d3c'],[.3,'#e31a1c'],[.5,'#800026']],
-  chg_7_8:YOY,chg_8_9:YOY,chg_9_10:YOY,chg_10_11:YOY,chg_11_12:YOY,chg_12_13:YOY,chg_13_14:YOY,chg_14_15:YOY,chg_15_16:YOY,chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,
+  chg_7_8:YOY,chg_8_9:YOY,chg_9_10:YOY,chg_10_11:YOY,chg_11_12:YOY,chg_12_13:YOY,chg_13_14:YOY,chg_14_15:YOY,chg_15_16:YOY,chg_16_17:YOY,chg_17_18:YOY,chg_18_19:YOY,chg_19_20:YOY,chg_20_21:YOY,chg_21_22:YOY,chg_22_23:YOY,chg_23_24:YOY,chg_24_25:YOY,chg_25_26:YOY,
   appr_volatility:[[0,'#f7fbff'],[.02,'#c6dbef'],[.04,'#6baed6'],[.06,'#2171b5'],[.1,'#084594'],[.2,'#08306b']],
   exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
   addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
@@ -452,6 +456,7 @@ const LG={
   chg_22_23:{l:'\u221210%',h:'+20%',n:'value change 2022\u219223'},
   chg_23_24:{l:'\u221210%',h:'+20%',n:'value change 2023\u219224'},
   chg_24_25:{l:'\u221210%',h:'+20%',n:'value change 2024\u219225'},
+  chg_25_26:{l:'\u221210%',h:'+20%',n:'value change 2025\u219226'},
   appr_volatility:{l:'0%',h:'20%+',n:'appraisal volatility (std dev of YoY changes 2007\u20132025)'},
   exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOH\u0394|+|VET\u0394| earliest vs latest year)'},
   addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
@@ -469,7 +474,7 @@ const LAYER_FIELD={
   hoh_churn:'hoh_churn',outreach_need:'outreach_need',sales:'pct_recent_sale',taxlightning:'sale_contact_rate',
   chg_7_8:'chg_7_8',chg_8_9:'chg_8_9',chg_9_10:'chg_9_10',chg_10_11:'chg_10_11',chg_11_12:'chg_11_12',chg_12_13:'chg_12_13',chg_13_14:'chg_13_14',chg_14_15:'chg_14_15',chg_15_16:'chg_15_16',
   chg_16_17:'chg_16_17',chg_17_18:'chg_17_18',chg_18_19:'chg_18_19',chg_19_20:'chg_19_20',
-  chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',
+  chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',chg_25_26:'chg_25_26',
   appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',
   volatility:'volatility'
 };
@@ -484,7 +489,7 @@ function getVisibleFeatures(){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','volatility','appr_volatility','exemp_drift'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','volatility','appr_volatility','exemp_drift'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
   if(layer==='avg_visit_min')return v.toFixed(1)+' min';
@@ -501,7 +506,7 @@ function updateStatsBar(layer){
 
   let rangeHtml='';
   const field=LAYER_FIELD[layer];
-  if(field){
+  if(field&&layer&&layer!=='none'){
     const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
     if(vals.length){
       const sorted=vals.slice().sort((a,b)=>a-b);
@@ -509,6 +514,8 @@ function updateStatsBar(layer){
       const hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*0.99))];
       let sum=0;for(let i=0;i<vals.length;i++)sum+=vals[i];
       rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px"><b>Visible range</b> '+formatStat(lo,layer)+' \u2013 '+formatStat(hi,layer)+' (avg '+formatStat(sum/vals.length,layer)+')</span>';
+    }else{
+      rangeHtml='<span style="border-left:1px solid #ddd;padding-left:12px;color:#c47a00"><b>No data</b> for this layer'+(propYear?' / year '+(2000+propYear):'')+'</span>';
     }
   }
   bar.innerHTML=
@@ -533,7 +540,11 @@ function updateLegendRange(layer){
   if(!field)return;
   const feats=getVisibleFeatures();
   const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
-  if(!vals.length)return;
+  if(!vals.length){
+    document.getElementById('lL').textContent='\u2014';
+    document.getElementById('lH').textContent='no data';
+    return;
+  }
   const sorted=vals.slice().sort((a,b)=>a-b);
   const lo=sorted[Math.floor(sorted.length*0.01)];
   const hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*0.99))];
@@ -546,6 +557,8 @@ function updateLegendRange(layer){
 const info=L.control({position:'topleft'});
 info.onAdd=function(){this._div=L.DomUtil.create('div','info');this.update();return this._div;};
 const _tooltipCache={};
+const _escMap={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc=s=>s==null?'':String(s).replace(/[&<>"']/g,c=>_escMap[c]);
 info._buildHtml=function(p){
   const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
   const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
@@ -572,7 +585,7 @@ info._buildHtml=function(p){
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+14)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
-  return '<h4>Nbhd '+p.nbhd+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+p.nbhd_type+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
+  return '<h4>Nbhd '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+esc(p.nbhd_type)+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Failures</span><span class="v">'+((p.total_failures||0).toLocaleString())+'</span></div>'+
@@ -596,10 +609,10 @@ info._buildHtml=function(p){
     (p.vet_20!=null?'<div class="s"><span>VET '+(p.earliest_yr||'?')+'\u2192'+(p.latest_yr||'?')+'</span><span class="v">'+(p.vet_20*100).toFixed(1)+'%\u2192'+(p.pct_vet*100).toFixed(1)+'%</span></div>':'')+
     (p.outreach_need!=null?'<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span><b>Outreach need</b></span><span class="v" style="color:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'"><b>'+(p.outreach_need*100).toFixed(0)+'%</b></span></div>':'')+
     (p.outreach_severity!=null?'<div style="margin-top:3px;font-size:10px;color:#666;display:flex;gap:8px;flex-wrap:wrap"><span>Severity: <b>'+(p.outreach_severity*100).toFixed(0)+'%</b></span><span>Vulnerability: <b>'+(p.outreach_vulnerability*100).toFixed(0)+'%</b></span><span>Service gap: <b>'+(p.outreach_service_gap*100).toFixed(0)+'%</b></span></div>':'')+
-    (p.zip_poverty_rate!=null&&p.zip_poverty_rate>0?'<div style="margin-top:2px;font-size:10px;color:#666">ZIP '+(p.zip_codes||'?')+': poverty '+(p.zip_poverty_rate*100).toFixed(0)+'%</div>':'')+
-    (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+p.outreach_why+'</div>':'')+
-    (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=parts[0];var why=parts[1]||'';var what=parts[2]||'';return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
-    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+p.nearest_cc+' Community Center</div>':'');
+    (p.zip_poverty_rate!=null&&p.zip_poverty_rate>0?'<div style="margin-top:2px;font-size:10px;color:#666">ZIP '+esc(p.zip_codes||'?')+': poverty '+(p.zip_poverty_rate*100).toFixed(0)+'%</div>':'')+
+    (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
+    (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=esc(parts[0]);var why=esc(parts[1]||'');var what=esc(parts[2]||'');return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
+    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'');
 };
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
@@ -744,9 +757,9 @@ function renderTopOutreach(){
     const p=f.properties;
     const score=(p.outreach_need*100).toFixed(0);
     const color=p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040';
-    const recs=p.outreach_recs?p.outreach_recs.split('|').map(function(r){return r.split('::')[0];}).slice(0,2).join(', '):'';
-    const cc=p.nearest_cc?' \u2192 '+p.nearest_cc:'';
-    return '<div class="outreach-row" data-nbhd="'+p.nbhd+'" style="cursor:pointer;padding:3px 4px;border-bottom:1px solid #eee;display:flex;gap:6px;align-items:flex-start"><span style="font-weight:700;color:'+color+';min-width:28px">'+score+'%</span><div style="flex:1;min-width:0"><div style="font-weight:600">Nbhd '+p.nbhd+'</div>'+(recs?'<div style="font-size:10px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+recs+'</div>':'')+(cc?'<div style="font-size:9px;color:#185FA5">'+cc+'</div>':'')+'</div></div>';
+    const recs=p.outreach_recs?esc(p.outreach_recs.split('|').map(function(r){return r.split('::')[0];}).slice(0,2).join(', ')):'';
+    const cc=p.nearest_cc?' \u2192 '+esc(p.nearest_cc):'';
+    return '<div class="outreach-row" data-nbhd="'+esc(p.nbhd)+'" style="cursor:pointer;padding:3px 4px;border-bottom:1px solid #eee;display:flex;gap:6px;align-items:flex-start"><span style="font-weight:700;color:'+color+';min-width:28px">'+score+'%</span><div style="flex:1;min-width:0"><div style="font-weight:600">Nbhd '+esc(p.nbhd)+'</div>'+(recs?'<div style="font-size:10px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+recs+'</div>':'')+(cc?'<div style="font-size:9px;color:#185FA5">'+cc+'</div>':'')+'</div></div>';
   }).join('');
   // Click to zoom + pin info panel
   el.querySelectorAll('.outreach-row').forEach(function(row){
@@ -916,6 +929,7 @@ function enableSwipe(){
 }
 
 function disableSwipe(){
+  pinnedNbhd=null;
   if(swipeLayerL){map.removeLayer(swipeLayerL);swipeLayerL=null;}
   if(swipeLayerR){map.removeLayer(swipeLayerR);swipeLayerR=null;}
   const pL=map.getPane('swipeLeft');
@@ -1061,6 +1075,9 @@ function refreshOL(keys){
     OL[k].addTo(map);
   });
 }
+// Rebuild any already-toggled overlays once the point-data JSON resolves
+_onLayersReady=()=>refreshOL(Object.keys(OL).filter(k=>k!=='rings'));
+if(_layersReady)_onLayersReady();
 
 // ── Heatmap toggle ────────────────────────────────────────────────────────────
 document.getElementById('heatMode').addEventListener('change',e=>{
