@@ -387,18 +387,28 @@ for(let i=0;i<DATA.features.length;i++){
     let v=p[k];
     if(v==null||!Number.isFinite(v)){p[k]=null;continue;}
     if(v<YOY_MIN||v>YOY_MAX){p[k]=null;continue;}
-    if(v!==0)chg.push(v);
+    // Zero-change years are real observations: a year where the median
+    // didn't move should LOWER std-dev, not be excluded. The previous
+    // !==0 filter inflated volatility for stable neighborhoods.
+    chg.push(v);
   }
   if(chg.length>=2){
     let m=0;for(let j=0;j<chg.length;j++)m+=chg[j];m/=chg.length;
     let s=0;for(let j=0;j<chg.length;j++)s+=(chg[j]-m)*(chg[j]-m);
     p.appr_volatility=Math.sqrt(s/(chg.length-1));
+  }else{
+    // Too little data to recompute. Drop the upstream value so a stale
+    // pre-clamp number from build_data.py doesn't leak into the legend.
+    p.appr_volatility=null;
   }
   if(chg.length){
     let sumAbs=0, cum=1;
     for(let j=0;j<chg.length;j++){sumAbs+=Math.abs(chg[j]);cum*=(1+chg[j]);}
     p.volatility=sumAbs;
     p.val_change_pct=cum-1;
+  }else{
+    p.volatility=null;
+    p.val_change_pct=null;
   }
 }
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
