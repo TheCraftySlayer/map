@@ -43,7 +43,10 @@
 <button class="toggle-btn" id="tileToggle" style="bottom:20px;left:10px"><span id="tileIcon">🗺️</span><span id="tileLabel">Satellite</span></button>
 
 <div class="ctrl">
-  <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span></h4>
+  <h4>Spatial equity analysis <span class="tag">v4 &middot; Tax rolls 2007&ndash;2025</span>
+    <button id="exportCsvBtn" title="Download visible neighborhoods with the current layer, outreach score, and recommendations as CSV" style="float:right;margin-top:-2px;padding:2px 8px;font-size:10px;font-weight:600;background:#185FA5;color:#fff;border:none;border-radius:4px;cursor:pointer">Export CSV</button>
+  </h4>
+  <div id="ccCatchmentBanner" style="display:none;padding:4px 8px;background:#fff4e0;border:1px solid #d4a017;border-radius:4px;margin:0 0 6px;font-size:11px;color:#6b4a00"></div>
 
   <div style="margin-bottom:6px">
     <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
@@ -98,6 +101,11 @@
   <label><input type="radio" name="nbhd_layer" value="chg_23_24"> 2023&rarr;24</label>
   <label><input type="radio" name="nbhd_layer" value="chg_24_25"> 2024&rarr;25</label>
   <label><input type="radio" name="nbhd_layer" value="chg_25_26"> 2025&rarr;26</label>
+  <div id="yoyAnim" style="display:flex;align-items:center;gap:4px;margin:4px 0 6px;font-size:10px;color:#555">
+    <button id="yoyPlay" title="Play/pause year-over-year animation" style="width:20px;height:18px;padding:0;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">\u25B6</button>
+    <input type="range" id="yoySlider" min="0" max="18" value="0" step="1" style="flex:1;accent-color:#185FA5">
+    <span id="yoyLabel" style="min-width:52px;text-align:right">&mdash;</span>
+  </div>
 
   <h5>Contact center <span style="font-weight:400;color:#aaa">Feb 2025&ndash;Apr 2026</span></h5>
   <label><input type="radio" name="nbhd_layer" value="demand"> Caller demand</label>
@@ -112,6 +120,13 @@
   <div style="margin:6px 0 2px;font-size:11px;color:#888">Opacity: <span id="opacVal">72%</span></div>
   <input type="range" class="ctrl-slider" id="opacSlider" min="10" max="95" value="72">
   <label style="margin-top:4px"><input type="checkbox" id="hideCommercial"> Hide commercial neighborhoods</label>
+
+  <details id="filterPanel" style="margin:6px 0;border:1px solid #ddd;border-radius:4px">
+    <summary style="cursor:pointer;padding:4px 8px;font-size:11px;font-weight:600;color:#444;background:#f7f7f7">Threshold filters <span id="filterActiveBadge" style="display:none;font-weight:400;color:#c41a1a;margin-left:4px"></span></summary>
+    <div id="filterRows" style="padding:4px 8px">
+    </div>
+    <div style="padding:0 8px 6px"><button id="filterClear" style="font-size:10px;padding:2px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer">Clear all</button></div>
+  </details>
 
   <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER (live)</span></h5>
   <label><input type="radio" name="tract_layer" value="none" checked> Off</label>
@@ -184,6 +199,39 @@
   </select>
   <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
 
+  <h5>Bivariate compare <span style="font-weight:400;color:#aaa">two layers, one color</span></h5>
+  <label style="font-size:11px;color:#666">X axis:</label>
+  <select id="bivarX" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="outreach_need">Outreach need</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet">Veteran rate</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="owner_turnover">Owner turnover</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption drift</option>
+    <option value="demand">Caller demand</option>
+    <option value="failure">Failure rate</option>
+    <option value="zip_poverty_rate">ZIP poverty rate</option>
+    <option value="median_val_25">Median value 2025</option>
+  </select>
+  <label style="font-size:11px;color:#666">Y axis:</label>
+  <select id="bivarY" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
+    <option value="outreach_need">Outreach need</option>
+    <option value="pct_hoh">HOH rate</option>
+    <option value="pct_vet" selected>Veteran rate</option>
+    <option value="valfreeze">Value freeze rate</option>
+    <option value="pct_vf_denied">VF denial rate</option>
+    <option value="owner_turnover">Owner turnover</option>
+    <option value="appr_volatility">Appraisal volatility</option>
+    <option value="exemp_drift">Exemption drift</option>
+    <option value="demand">Caller demand</option>
+    <option value="failure">Failure rate</option>
+    <option value="zip_poverty_rate">ZIP poverty rate</option>
+    <option value="median_val_25">Median value 2025</option>
+  </select>
+  <label><input type="checkbox" id="bivarMode"> Enable bivariate</label>
+
   <hr>
   <div class="heat-toggle">
     <label><input type="checkbox" id="heatMode"> Heatmap mode for point layers</label>
@@ -253,7 +301,7 @@
 </div>
 <div id="bottomStack" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;flex-direction:column;align-items:center;gap:6px">
 <div id="statsBar" style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;gap:16px;font-size:11px;color:#555"></div>
-<div class="lb" id="lb"><span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
+<div class="lb" id="lb"><span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -357,18 +405,55 @@ L.geoJSON(COUNTY,{style:{fillColor:'none',weight:2,color:'#aaa',fillOpacity:0}})
 const office=L.marker(OFC,{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ffff00;border:2px solid #333;border-radius:2px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).bindPopup("Assessor's Office").addTo(map);
 
 const CC_DATA=[
-  {n:'Vista Grande',a:'15 La Madera Rd, Sandia Park',la:35.1769943,ln:-106.3409576},
-  {n:'Los Vecinos',a:'478 NM-333, Tijeras',la:35.0788198,ln:-106.3923734},
-  {n:'Paradise Hills',a:'5901 Paradise Blvd NW',la:35.1950907,ln:-106.7129307},
-  {n:'Raymond G. Sanchez',a:'9800 4th St NW',la:35.193073,ln:-106.6157715},
-  {n:'Westside',a:'1250 Isleta Blvd SW',la:35.0537822,ln:-106.672675},
-  {n:'Los Padillas',a:'2117 Los Padillas Rd SW',la:34.9569792,ln:-106.696385},
-  {n:'Henry "Kiki" Saavedra',a:'201 Prosperity Ave SE',la:35.0158333,ln:-106.6577778},
-  {n:'South Valley Multipurpose Senior',a:'2008 Larrazolo Rd SW',la:35.069824,ln:-106.6881653},
-  {n:'Alamosa (@ Ted M. Gallegos)',a:'6900 Gonzales Rd SW',la:35.0714679,ln:-106.7101371},
+  {n:'Vista Grande',k:'Vista Grande',a:'15 La Madera Rd, Sandia Park',la:35.1769943,ln:-106.3409576},
+  {n:'Los Vecinos',k:'Los Vecinos',a:'478 NM-333, Tijeras',la:35.0788198,ln:-106.3923734},
+  {n:'Paradise Hills',k:'Paradise Hills',a:'5901 Paradise Blvd NW',la:35.1950907,ln:-106.7129307},
+  {n:'Raymond G. Sanchez',k:'Raymond G. Sanchez',a:'9800 4th St NW',la:35.193073,ln:-106.6157715},
+  {n:'Westside',k:'Westside',a:'1250 Isleta Blvd SW',la:35.0537822,ln:-106.672675},
+  {n:'Los Padillas',k:'Los Padillas',a:'2117 Los Padillas Rd SW',la:34.9569792,ln:-106.696385},
+  {n:'Henry "Kiki" Saavedra',k:'Kiki Saavedra',a:'201 Prosperity Ave SE',la:35.0158333,ln:-106.6577778},
+  {n:'South Valley Multipurpose Senior',k:'South Valley Senior',a:'2008 Larrazolo Rd SW',la:35.069824,ln:-106.6881653},
+  {n:'Alamosa (@ Ted M. Gallegos)',k:'Alamosa',a:'6900 Gonzales Rd SW',la:35.0714679,ln:-106.7101371},
 ];
+let activeCcKey=null;
 const ccIcon=L.divIcon({className:'',html:'<div style="width:12px;height:12px;background:#00bfff;border:2px solid #005f7f;border-radius:2px"></div>',iconSize:[12,12],iconAnchor:[6,6]});
-const ccLayer=L.layerGroup(CC_DATA.map(c=>L.marker([c.la,c.ln],{icon:ccIcon}).bindPopup('<b>'+c.n+'</b><br>'+c.a)));
+const ccIconActive=L.divIcon({className:'',html:'<div style="width:14px;height:14px;background:#ff9500;border:2px solid #804000;border-radius:2px;box-shadow:0 0 6px rgba(255,149,0,.6)"></div>',iconSize:[14,14],iconAnchor:[7,7]});
+const ccMarkers={};
+const ccLayer=L.layerGroup(CC_DATA.map(c=>{
+  const m=L.marker([c.la,c.ln],{icon:ccIcon}).bindPopup('<b>'+c.n+'</b><br>'+c.a+'<br><button data-cc-key="'+c.k+'" style="margin-top:4px;font-size:11px;padding:2px 8px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">Show catchment</button>');
+  ccMarkers[c.k]=m;
+  return m;
+}));
+function setCcCatchment(key){
+  activeCcKey=key||null;
+  Object.entries(ccMarkers).forEach(([k,m])=>m.setIcon(k===activeCcKey?ccIconActive:ccIcon));
+  _visFeatCache=null;
+  const banner=document.getElementById('ccCatchmentBanner');
+  if(banner){
+    if(activeCcKey){
+      const c=CC_DATA.find(x=>x.k===activeCcKey);
+      banner.innerHTML='<b>Catchment:</b> '+esc(c?c.n:activeCcKey)+' <button id="ccCatchmentClear" style="margin-left:6px;font-size:10px;padding:1px 6px;background:#fff;color:#333;border:1px solid #aaa;border-radius:3px;cursor:pointer">Clear</button>';
+      banner.style.display='';
+      document.getElementById('ccCatchmentClear').addEventListener('click',()=>setCcCatchment(null));
+    }else{
+      banner.style.display='none';
+    }
+  }
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  updateStatsBar(NBL);
+  if(NBL!=='none')updateLegendRange(NBL);
+  renderTopOutreach();
+}
+map.on('popupopen',e=>{
+  const btn=e.popup._container&&e.popup._container.querySelector('button[data-cc-key]');
+  if(btn){
+    btn.addEventListener('click',()=>{
+      const k=btn.dataset.ccKey;
+      setCcCatchment(activeCcKey===k?null:k);
+      e.popup._source&&e.popup._source.closePopup();
+    });
+  }
+});
 
 // ── Color scales ──────────────────────────────────────────────────────────────
 const YRC={2005:'#a6cee3',2006:'#b2df8a',2007:'#fb9a99',2008:'#fdbf6f',2009:'#cab2d6',2010:'#ffff99',2011:'#b15928',2012:'#6a3d9a',2013:'#ff7f00',2014:'#33a02c',2015:'#e31a1c',2016:'#1f78b4',2017:'#a65628',2018:'#f781bf',2019:'#999999',2020:'#66c2a5',2021:'#fc8d62',2022:'#984ea3',2023:'#2166ac',2024:'#f4a11d',2025:'#1a9850',2026:'#e41a1c'};
@@ -479,13 +564,22 @@ const LAYER_FIELD={
   volatility:'volatility'
 };
 
-let _visFeatCache=null, _visFeatKey=null;
+let _visFeatCache=null, _cachedRules=[];
 function getVisibleFeatures(){
-  const key=hideCommercial?'h':'a';
-  if(_visFeatKey===key&&_visFeatCache)return _visFeatCache;
-  _visFeatCache=DATA.features.filter(f=>!(hideCommercial&&f.properties.is_commercial));
-  _visFeatKey=key;
+  if(_visFeatCache)return _visFeatCache;
+  _cachedRules=(typeof getFilters==='function')?getFilters():[];
+  _visFeatCache=DATA.features.filter(f=>{
+    if(hideCommercial&&f.properties.is_commercial)return false;
+    if(_cachedRules.length&&!passesFilters(f.properties,_cachedRules))return false;
+    return true;
+  });
   return _visFeatCache;
+}
+function featureHidden(p){
+  if(hideCommercial&&p.is_commercial)return true;
+  if(_cachedRules.length&&!passesFilters(p,_cachedRules))return true;
+  if(activeCcKey&&p.nearest_cc!==activeCcKey)return true;
+  return false;
 }
 
 function formatStat(v,layer){
@@ -534,15 +628,49 @@ function updateStatsBar(layer){
   }
 }
 
+let _histBins=null, _histLo=0, _histHi=1;
+function renderHistogram(vals,lo,hi){
+  const svg=document.getElementById('lHist');
+  if(!svg)return;
+  const BIN_N=24, W=180, H=22;
+  if(!vals||vals.length<2||hi<=lo){svg.innerHTML='';_histBins=null;return;}
+  const bins=new Array(BIN_N).fill(0);
+  for(let i=0;i<vals.length;i++){
+    const v=vals[i];
+    if(v<lo||v>hi)continue;
+    let b=Math.floor((v-lo)/(hi-lo)*BIN_N);
+    if(b>=BIN_N)b=BIN_N-1;
+    bins[b]++;
+  }
+  let mx=0;for(let i=0;i<BIN_N;i++)if(bins[i]>mx)mx=bins[i];
+  if(!mx)mx=1;
+  const bw=W/BIN_N;
+  let html='';
+  for(let i=0;i<BIN_N;i++){
+    const h=Math.max(bins[i]/mx*H,bins[i]>0?1:0);
+    html+='<rect x="'+(i*bw).toFixed(2)+'" y="'+(H-h).toFixed(2)+'" width="'+(bw-0.5).toFixed(2)+'" height="'+h.toFixed(2)+'" fill="#8ca0b4"/>';
+  }
+  html+='<line id="lHistMark" x1="-10" y1="0" x2="-10" y2="'+H+'" stroke="#c41a1a" stroke-width="1.5"/>';
+  svg.innerHTML=html;
+  _histBins=bins;_histLo=lo;_histHi=hi;
+}
+function markHistogram(val){
+  const mark=document.getElementById('lHistMark');
+  if(!mark||_histBins==null)return;
+  if(val==null||!Number.isFinite(val)||val<_histLo||val>_histHi){mark.setAttribute('x1','-10');mark.setAttribute('x2','-10');return;}
+  const x=(val-_histLo)/(_histHi-_histLo)*180;
+  mark.setAttribute('x1',x.toFixed(2));mark.setAttribute('x2',x.toFixed(2));
+}
 function updateLegendRange(layer){
   if(swipeActive)return;
   const field=LAYER_FIELD[layer];
-  if(!field)return;
+  if(!field){renderHistogram(null);return;}
   const feats=getVisibleFeatures();
   const vals=feats.map(f=>f.properties[field]).filter(v=>Number.isFinite(v));
   if(!vals.length){
     document.getElementById('lL').textContent='\u2014';
     document.getElementById('lH').textContent='no data';
+    renderHistogram(null);
     return;
   }
   const sorted=vals.slice().sort((a,b)=>a-b);
@@ -551,6 +679,7 @@ function updateLegendRange(layer){
   document.getElementById('lL').textContent=formatStat(lo,layer);
   document.getElementById('lH').textContent=formatStat(hi,layer);
   document.getElementById('lG').style.background=grad(CS[layer]||CS[NBL]);
+  renderHistogram(vals,lo,hi);
 }
 
 // ── Tooltip with sparkline ────────────────────────────────────────────────────
@@ -585,6 +714,32 @@ info._buildHtml=function(p){
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+14)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
     bars+'</svg>';
+  // Generalized per-layer sparkline — for layers with a per-year history, show the timeline
+  const perYearBases={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',pct_vet:'pct_vet',owner_turnover:'owner_turnover'};
+  const base=perYearBases[NBL];
+  let layerSpark='';
+  if(base){
+    const pts=[],pLabs=[];
+    for(let y=7;y<=26;y++){
+      const v=p[base+'_'+y];
+      if(v!=null&&Number.isFinite(v)&&v!==0){pts.push(v);pLabs.push("'"+String(y).padStart(2,'0'));}
+    }
+    if(pts.length>=3){
+      let pMin=pts[0],pMax=pts[0];
+      for(let i=0;i<pts.length;i++){if(pts[i]<pMin)pMin=pts[i];if(pts[i]>pMax)pMax=pts[i];}
+      if(pMax===pMin)pMax=pMin+1;
+      const lw=Math.max(200,Math.min(260,pts.length*14)),lh=36,lPad=4;
+      const xs=i=>lPad+i*((lw-2*lPad)/(pts.length-1));
+      const ys=v=>lPad+(lh-2*lPad)*(1-(v-pMin)/(pMax-pMin));
+      const path=pts.map((v,i)=>(i?'L':'M')+xs(i).toFixed(1)+' '+ys(v).toFixed(1)).join(' ');
+      const dots=pts.map((v,i)=>'<circle cx="'+xs(i).toFixed(1)+'" cy="'+ys(v).toFixed(1)+'" r="1.8" fill="#185FA5"><title>'+pLabs[i]+': '+formatStat(v,NBL)+'</title></circle>').join('');
+      const fmt=v=>formatStat(v,NBL);
+      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px">'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</div>'+
+        '<svg width="'+lw+'" height="'+lh+'" style="display:block;margin:2px 0">'+
+        '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+'</svg>'+
+        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+pLabs[0]+' '+fmt(pts[0])+'</span><span>'+pLabs[pLabs.length-1]+' '+fmt(pts[pts.length-1])+'</span></div>';
+    }
+  }
   return '<h4>Nbhd '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+esc(p.nbhd_type)+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+((p.total_contacts||0).toLocaleString())+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+((p.total_calls||0).toLocaleString())+'</span></div>'+
@@ -600,7 +755,7 @@ info._buildHtml=function(p){
     '<div class="s"><span>HOH rate</span><span class="v">'+pct(p.pct_hoh)+'</span></div>'+
     '<div class="s"><span>Vet rate</span><span class="v">'+pct(p.pct_vet)+'</span></div>'+
     '<div class="s"><span>Owner turnover</span><span class="v">'+pct(p.owner_turnover)+'</span></div>'+
-    '<div style="font-size:10px;color:#888;margin-top:4px">Value change by year:</div>'+spark+
+    '<div style="font-size:10px;color:#888;margin-top:4px">Value change by year:</div>'+spark+layerSpark+
     '<div class="s"><span>Volatility</span><span class="v">'+(p.appr_volatility!=null?(p.appr_volatility*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
     '<div class="s"><span>Exemp drift</span><span class="v">'+(p.exemp_drift!=null?(p.exemp_drift*100).toFixed(1)+'%':'\u2014')+'</span></div>'+
         '<div class="s"><span>Parcels</span><span class="v">'+((p.parcels||0).toLocaleString())+(p.res_count!=null?' <span style="font-size:9px;color:#888">(R:'+p.res_count+' C:'+p.comm_count+' V:'+p.vacant_count+')</span>':'')+'</span></div>'+
@@ -612,8 +767,22 @@ info._buildHtml=function(p){
     (p.zip_poverty_rate!=null&&p.zip_poverty_rate>0?'<div style="margin-top:2px;font-size:10px;color:#666">ZIP '+esc(p.zip_codes||'?')+': poverty '+(p.zip_poverty_rate*100).toFixed(0)+'%</div>':'')+
     (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
     (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=esc(parts[0]);var why=esc(parts[1]||'');var what=esc(parts[2]||'');return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
-    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'');
+    (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
+    '<div style="margin-top:6px;display:flex;justify-content:flex-end"><button data-action="print-brief" data-nbhd="'+esc(p.nbhd)+'" title="Open a print-friendly one-page brief" style="font-size:10px;padding:2px 8px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer">Print brief</button></div>'+
+    annotationsHtml(p.nbhd);
 };
+// Annotations (persisted per nbhd in localStorage)
+const ANNOT_LS_KEY='mapv4_nbhd_annotations_v1';
+function annotAll(){try{return JSON.parse(localStorage.getItem(ANNOT_LS_KEY)||'{}');}catch(e){return {};}}
+function annotGet(nbhd){return annotAll()[String(nbhd)]||[];}
+function annotSave(all){try{localStorage.setItem(ANNOT_LS_KEY,JSON.stringify(all));}catch(e){}}
+function annotAdd(nbhd,text){const a=annotAll();const k=String(nbhd);(a[k]=a[k]||[]).push({d:new Date().toISOString().slice(0,10),t:text});annotSave(a);}
+function annotDel(nbhd,idx){const a=annotAll();const k=String(nbhd);if(a[k]){a[k].splice(idx,1);if(!a[k].length)delete a[k];annotSave(a);}}
+function annotationsHtml(nbhd){
+  const notes=annotGet(nbhd);
+  const items=notes.map((n,i)=>'<div style="font-size:10px;padding:3px 4px;background:#f7f7f7;border-left:2px solid #888;margin:2px 0;display:flex;gap:4px;align-items:flex-start"><span style="color:#888;white-space:nowrap">'+esc(n.d)+'</span><span style="flex:1">'+esc(n.t)+'</span><button data-action="annot-del" data-nbhd="'+esc(nbhd)+'" data-idx="'+i+'" title="Delete note" style="border:none;background:none;color:#c41a1a;cursor:pointer;padding:0 2px;font-size:11px">\u00d7</button></div>').join('');
+  return '<div style="margin-top:6px;padding-top:4px;border-top:1px solid #eee"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#555;font-weight:600">Notes ('+notes.length+')</span><button data-action="annot-add" data-nbhd="'+esc(nbhd)+'" style="font-size:10px;padding:1px 6px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">+ Note</button></div>'+items+'</div>';
+}
 info.update=function(p){
   if(!p){this._div.innerHTML='<h4>Hover a neighborhood</h4>';return;}
   const key=p.nbhd;
@@ -621,6 +790,85 @@ info.update=function(p){
   this._div.innerHTML=_tooltipCache[key];
 };
 info.addTo(map);
+function annotInvalidate(nbhd){delete _tooltipCache[nbhd];delete _tooltipCache[Number(nbhd)];delete _tooltipCache[String(nbhd)];}
+// Delegated handler for annotation buttons
+setTimeout(()=>{
+  const el=info._div||document.querySelector('.leaflet-top.leaflet-left .info');
+  if(!el)return;
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('button[data-action]');
+    if(!b)return;
+    const nbhd=b.dataset.nbhd;
+    if(b.dataset.action==='annot-add'){
+      const t=(window.prompt('Add note for nbhd '+nbhd+':','')||'').trim();
+      if(t){annotAdd(nbhd,t);annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
+    }else if(b.dataset.action==='annot-del'){
+      if(window.confirm('Delete this note?')){annotDel(nbhd,parseInt(b.dataset.idx));annotInvalidate(nbhd);if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);}
+    }else if(b.dataset.action==='print-brief'){
+      printBrief(nbhd);
+    }
+  });
+},0);
+
+function printBrief(nbhdStr){
+  const nbhd=parseFloat(nbhdStr);
+  const feat=DATA.features.find(f=>f.properties.nbhd===nbhd);
+  if(!feat)return;
+  const p=feat.properties;
+  const pct=v=>v!=null?(v*100).toFixed(1)+'%':'\u2014';
+  const dlr=v=>v?'$'+Math.round(v).toLocaleString():'\u2014';
+  const row=(l,v)=>'<tr><td style="padding:3px 10px 3px 0;color:#555">'+l+'</td><td style="padding:3px 0;font-weight:600">'+v+'</td></tr>';
+  const recs=p.outreach_recs?p.outreach_recs.split('|').map(r=>{const pt=r.split('::');return '<div style="margin-bottom:8px;padding:8px 10px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:3px"><div style="font-weight:600;color:#08306b;margin-bottom:3px">'+esc(pt[0])+'</div>'+(pt[1]?'<div style="font-size:11px;color:#555;margin-bottom:2px"><b>Why:</b> '+esc(pt[1])+'</div>':'')+(pt[2]?'<div style="font-size:11px;color:#08306b"><b>What:</b> '+esc(pt[2])+'</div>':'')+'</div>';}).join(''):'';
+  const notes=annotGet(nbhd).map(n=>'<div style="padding:4px 8px;background:#fafafa;border-left:2px solid #888;margin:3px 0;font-size:11px"><span style="color:#888">'+esc(n.d)+'</span> &middot; '+esc(n.t)+'</div>').join('');
+  const today=new Date().toISOString().slice(0,10);
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Outreach brief \u2013 Nbhd '+esc(p.nbhd)+'</title><style>'+
+    'body{font-family:system-ui,-apple-system,sans-serif;margin:24px;color:#222;max-width:720px}'+
+    'h1{margin:0 0 4px;font-size:22px;color:#08306b}'+
+    'h2{margin:18px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#888;border-bottom:1px solid #ddd;padding-bottom:3px}'+
+    'table{border-collapse:collapse;font-size:12px}'+
+    '.score{display:inline-block;padding:2px 10px;border-radius:4px;font-weight:700;color:#fff}'+
+    '@media print{@page{size:letter;margin:.5in}body{max-width:none}}'+
+    '.footer{margin-top:24px;padding-top:8px;border-top:1px solid #ddd;font-size:10px;color:#888;display:flex;justify-content:space-between}'+
+    '</style></head><body>'+
+    '<h1>Neighborhood '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:12px;color:#888;font-weight:400">['+esc(p.nbhd_type)+']</span>':'')+'</h1>'+
+    '<div style="color:#555;font-size:12px">Outreach priority brief \u00b7 generated '+today+'</div>'+
+    (p.outreach_need!=null?'<div style="margin-top:10px"><span class="score" style="background:'+(p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040')+'">Outreach need: '+(p.outreach_need*100).toFixed(0)+'%</span>'+(p.outreach_severity!=null?' <span style="font-size:11px;color:#666;margin-left:8px">Severity '+(p.outreach_severity*100).toFixed(0)+'% \u00b7 Vulnerability '+(p.outreach_vulnerability*100).toFixed(0)+'% \u00b7 Service gap '+(p.outreach_service_gap*100).toFixed(0)+'%</span>':'')+'</div>':'')+
+    (p.outreach_why?'<div style="margin-top:6px;font-size:12px;color:#555;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
+    '<h2>Snapshot</h2><table>'+
+      row('Parcels',(p.parcels||0).toLocaleString())+
+      row('Median value 2025',dlr(p.median_val_25))+
+      row('Median year built',p.median_yrbuilt||'\u2014')+
+      row('Owner turnover',pct(p.owner_turnover))+
+      row('Appraisal volatility',pct(p.appr_volatility))+
+    '</table>'+
+    '<h2>Exemptions</h2><table>'+
+      row('HOH rate',pct(p.pct_hoh))+
+      row('Veteran rate',pct(p.pct_vet))+
+      row('Value freeze',pct(p.pct_val_freeze))+
+      row('VF denial rate',pct(p.pct_vf_denied))+
+      row('Exemption drift',pct(p.exemp_drift))+
+    '</table>'+
+    '<h2>Contact center</h2><table>'+
+      row('Total contacts',(p.total_contacts||0).toLocaleString())+
+      row('Total calls',(p.total_calls||0).toLocaleString())+
+      row('Contacts/parcel',(p.contacts_per_parcel||0).toFixed(2))+
+      row('Failure rate',pct(p.failure_rate))+
+      row('Avg visit',p.avg_visit_min?p.avg_visit_min.toFixed(1)+' min':'\u2014')+
+    '</table>'+
+    (p.zip_poverty_rate?'<h2>Demographics</h2><table>'+
+      row('ZIP codes',esc(p.zip_codes||'\u2014'))+
+      row('Poverty rate',pct(p.zip_poverty_rate))+
+    '</table>':'')+
+    (recs?'<h2>Recommended outreach</h2>'+recs:'')+
+    (p.nearest_cc?'<div style="margin-top:10px;padding:8px 12px;background:#fff8e6;border-left:3px solid #d4a017;font-size:12px"><b>Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
+    (notes?'<h2>Staff notes</h2>'+notes:'')+
+    '<div class="footer"><span>Bernalillo County Assessor \u00b7 Spatial Equity v4</span><span>Page '+esc(p.nbhd)+'</span></div>'+
+    '<script>window.onload=()=>setTimeout(()=>window.print(),200);<\/script>'+
+    '</body></html>';
+  const w=window.open('','_blank','width=800,height=900');
+  if(!w){alert('Pop-up blocked \u2014 allow pop-ups and try again');return;}
+  w.document.open();w.document.write(html);w.document.close();
+}
 
 // Precompute tract density stats for percentile ranking
 const _tractCounts=TRACT_GEO.features.map(f=>f.properties.address_count||0).sort((a,b)=>a-b);
@@ -695,22 +943,31 @@ function getNbhdColor(p, override){
   return'#e0e0e0';
 }
 function nbhdStyle(f){
-  const hidden=hideCommercial&&f.properties.is_commercial;
+  const hidden=featureHidden(f.properties);
   return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
 }
 let pinnedNbhd=null;
-function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);}
-function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();}
+function hiNbhd(e){if(pinnedNbhd)return;e.target.setStyle({weight:2,color:'#fff',fillOpacity:Math.min(FILL_OPAC+0.1,0.95)});e.target.bringToFront();info.update(e.target.feature.properties);const f=LAYER_FIELD[NBL];if(f)markHistogram(e.target.feature.properties[f]);}
+function rhNbhd(e){if(pinnedNbhd)return;nbhdLayer&&nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);}
 function clickNbhd(e){
-  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();return;}
+  if(pinnedNbhd===e.target){pinnedNbhd=null;nbhdLayer.resetStyle(e.target);info.update();markHistogram(null);if(typeof updateHash==='function')updateHash();return;}
   if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
   pinnedNbhd=e.target;
   e.target.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
   e.target.bringToFront();
   info.update(e.target.feature.properties);
+  const f=LAYER_FIELD[NBL];if(f)markHistogram(e.target.feature.properties[f]);
+  if(typeof updateHash==='function')updateHash();
 }
 function renderNbhd(){
   pinnedNbhd=null;
+  if(typeof bivarActive!=='undefined'&&bivarActive){
+    recomputeBivarThresh();
+    if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
+    renderBivarLegend();
+    updateStatsBar(NBL);
+    return;
+  }
   if(NBL==='none'){
     if(nbhdLayer){map.removeLayer(nbhdLayer);nbhdLayer=null;}
     updateStatsBar(NBL);return;
@@ -749,7 +1006,7 @@ renderNbhd();
 function renderTopOutreach(){
   const el=document.getElementById('topOutreach');
   if(!el) return;
-  const feats=DATA.features.filter(f=>f.properties.outreach_need!=null&&!f.properties.is_commercial);
+  const feats=DATA.features.filter(f=>f.properties.outreach_need!=null&&!featureHidden(f.properties));
   feats.sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0));
   const top=feats.slice(0,15);
   if(!top.length){el.innerHTML='<div style="color:#888;padding:4px">No outreach data available. Rebuild to populate.</div>';return;}
@@ -785,6 +1042,37 @@ function renderTopOutreach(){
   });
 }
 renderTopOutreach();
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+function csvEsc(v){
+  if(v==null)return '';
+  const s=String(v);
+  return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+}
+function exportCsv(){
+  const feats=getVisibleFeatures();
+  const layer=NBL;
+  const field=LAYER_FIELD[layer];
+  const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
+    const p=f.properties;
+    const layerVal=field?p[field]:'';
+    const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
+    const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+  });
+  const csv=header.join(',')+'\n'+rows.join('\n');
+  const stamp=new Date().toISOString().slice(0,10);
+  const suffix=layer&&layer!=='none'?'_'+layer:'';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='spatial_equity_'+stamp+suffix+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+}
+document.getElementById('exportCsvBtn').addEventListener('click',e=>{e.stopPropagation();exportCsv();});
 
 // ── Swipe compare ─────────────────────────────────────────────────────────────
 let swipePos=50, swipeDragging=false;
@@ -890,12 +1178,12 @@ function enableSwipe(){
   const canvasR=L.canvas({pane:'swipeRight'});
   swipeLayerL=L.geoJSON(DATA,{
     pane:'swipeLeft',renderer:canvasL,
-    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,lName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    style:f=>{const h=featureHidden(f.properties);return{fillColor:getNbhdColor(f.properties,lName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
     onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
   }).addTo(map);
   swipeLayerR=L.geoJSON(DATA,{
     pane:'swipeRight',renderer:canvasR,
-    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,rName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    style:f=>{const h=featureHidden(f.properties);return{fillColor:getNbhdColor(f.properties,rName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
     onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
   }).addTo(map);
   createDivider();
@@ -948,12 +1236,15 @@ function disableSwipe(){
   // Restore original legend structure
   const lb=document.getElementById('lb');
   lb.style.flexDirection='';lb.style.alignItems='center';
-  lb.innerHTML='<span id="lL">0</span><div class="g" id="lG"></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
+  lb.innerHTML='<span id="lL">0</span><div style="display:flex;flex-direction:column;gap:1px;align-items:stretch"><svg id="lHist" width="180" height="22" style="display:block"></svg><div class="g" id="lG"></div></div><span id="lH">2+</span><span id="lN" style="margin-left:4px;font-weight:500">contacts/parcel</span>';
   renderNbhd();
 }
 
 document.getElementById('swipeMode').addEventListener('change',e=>{
   swipeActive=e.target.checked;
+  if(swipeActive&&typeof bivarActive!=='undefined'&&bivarActive){
+    document.getElementById('bivarMode').checked=false;bivarActive=false;
+  }
   if(swipeActive)enableSwipe(); else disableSwipe();
 });
 document.getElementById('swipeLeft').addEventListener('change',()=>{if(swipeActive){disableSwipe();enableSwipe();}});
@@ -976,7 +1267,7 @@ document.getElementById('opacSlider').addEventListener('input',e=>{
 // ── Commercial filter ─────────────────────────────────────────────────────────
 document.getElementById('hideCommercial').addEventListener('change',e=>{
   hideCommercial=e.target.checked;
-  _visFeatCache=null;_visFeatKey=null;
+  _visFeatCache=null;
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
   updateLegendRange(NBL);
@@ -1103,6 +1394,8 @@ document.querySelectorAll('.ol').forEach(cb=>cb.addEventListener('change',e=>{
 
 document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',e=>{
   NBL=e.target.value;
+  for(const k in _tooltipCache)delete _tooltipCache[k];
+  if(typeof bivarActive!=='undefined'&&bivarActive){document.getElementById('bivarMode').checked=false;bivarActive=false;}
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
 }));
 document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',e=>{
@@ -1138,6 +1431,268 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
 });
+
+// ── Bivariate choropleth ──────────────────────────────────────────────────────
+// 3x3 bivariate palette (Cynthia Brewer purple-teal). bivarPalette[xIdx][yIdx]
+const bivarPalette=[
+  ['#e8e8e8','#ace4e4','#5ac8c8'],
+  ['#dfb0d6','#a5add3','#5698b9'],
+  ['#be64ac','#8c62aa','#3b4994']
+];
+let bivarActive=false;
+let _bivarThresh={xLo:0,xHi:1,yLo:0,yHi:1};
+function bivarField(layer){return LAYER_FIELD[layer]||layer;}
+function recomputeBivarThresh(){
+  const xF=bivarField(document.getElementById('bivarX').value);
+  const yF=bivarField(document.getElementById('bivarY').value);
+  const feats=getVisibleFeatures();
+  const xs=feats.map(f=>f.properties[xF]).filter(Number.isFinite).sort((a,b)=>a-b);
+  const ys=feats.map(f=>f.properties[yF]).filter(Number.isFinite).sort((a,b)=>a-b);
+  _bivarThresh.xLo=xs.length?xs[Math.floor(xs.length/3)]:0;
+  _bivarThresh.xHi=xs.length?xs[Math.floor(xs.length*2/3)]:1;
+  _bivarThresh.yLo=ys.length?ys[Math.floor(ys.length/3)]:0;
+  _bivarThresh.yHi=ys.length?ys[Math.floor(ys.length*2/3)]:1;
+}
+function bivarColor(p){
+  const xF=bivarField(document.getElementById('bivarX').value);
+  const yF=bivarField(document.getElementById('bivarY').value);
+  const x=p[xF], y=p[yF];
+  if(!Number.isFinite(x)||!Number.isFinite(y))return '#e0e0e0';
+  const xi=x<_bivarThresh.xLo?0:(x<_bivarThresh.xHi?1:2);
+  const yi=y<_bivarThresh.yLo?0:(y<_bivarThresh.yHi?1:2);
+  return bivarPalette[xi][yi];
+}
+function bivarStyle(f){
+  const hidden=featureHidden(f.properties);
+  return{fillColor:bivarColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
+}
+function renderBivarLegend(){
+  const lb=document.getElementById('lb');
+  if(!lb)return;
+  const xName=document.getElementById('bivarX').selectedOptions[0].text;
+  const yName=document.getElementById('bivarY').selectedOptions[0].text;
+  let grid='';
+  for(let y=2;y>=0;y--){
+    for(let x=0;x<3;x++)grid+='<div style="width:14px;height:14px;background:'+bivarPalette[x][y]+'"></div>';
+  }
+  lb.style.display='flex';lb.style.flexDirection='row';lb.style.alignItems='center';lb.style.gap='8px';
+  lb.innerHTML='<div style="display:flex;flex-direction:column;align-items:flex-end;font-size:9px;color:#666;line-height:1.1;gap:2px"><span>'+esc(yName)+'</span><span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:8px">high \u2192</span></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(3,14px);grid-gap:1px">'+grid+'</div>'+
+    '<div style="font-size:9px;color:#666"><div>'+esc(xName)+' \u2192</div></div>';
+}
+function applyBivar(){
+  bivarActive=document.getElementById('bivarMode').checked;
+  if(bivarActive){
+    // Turn off conflicting modes
+    if(swipeActive){document.getElementById('swipeMode').checked=false;swipeActive=false;disableSwipe();}
+    recomputeBivarThresh();
+    if(nbhdLayer){nbhdLayer.setStyle(bivarStyle);}else{nbhdLayer=L.geoJSON(DATA,{style:bivarStyle,onEachFeature:(f,l)=>l.on({mouseover:hiNbhd,mouseout:rhNbhd,click:clickNbhd})}).addTo(map);}
+    renderBivarLegend();
+  }else{
+    renderNbhd();
+  }
+}
+document.getElementById('bivarMode').addEventListener('change',applyBivar);
+document.getElementById('bivarX').addEventListener('change',()=>{if(bivarActive){recomputeBivarThresh();nbhdLayer.setStyle(bivarStyle);renderBivarLegend();}});
+document.getElementById('bivarY').addEventListener('change',()=>{if(bivarActive){recomputeBivarThresh();nbhdLayer.setStyle(bivarStyle);renderBivarLegend();}});
+
+// ── YoY animation slider ──────────────────────────────────────────────────────
+const YOY_KEYS=['chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26'];
+const YOY_LABELS=["'07\u2192'08","'08\u2192'09","'09\u2192'10","'10\u2192'11","'11\u2192'12","'12\u2192'13","'13\u2192'14","'14\u2192'15","'15\u2192'16","'16\u2192'17","'17\u2192'18","'18\u2192'19","'19\u2192'20","'20\u2192'21","'21\u2192'22","'22\u2192'23","'23\u2192'24","'24\u2192'25","'25\u2192'26"];
+let _yoyTimer=null;
+function yoySelect(idx){
+  const k=YOY_KEYS[idx];
+  document.getElementById('yoyLabel').textContent=YOY_LABELS[idx];
+  document.getElementById('yoySlider').value=idx;
+  const r=document.querySelector('input[name="nbhd_layer"][value="'+k+'"]');
+  if(r&&!r.checked){r.checked=true;r.dispatchEvent(new Event('change'));}
+}
+document.getElementById('yoySlider').addEventListener('input',e=>yoySelect(parseInt(e.target.value)));
+document.getElementById('yoyPlay').addEventListener('click',()=>{
+  const btn=document.getElementById('yoyPlay');
+  if(_yoyTimer){clearInterval(_yoyTimer);_yoyTimer=null;btn.textContent='\u25B6';return;}
+  btn.textContent='\u23F8';
+  const tick=()=>{
+    const s=document.getElementById('yoySlider');
+    let i=parseInt(s.value)+1;
+    if(i>=YOY_KEYS.length)i=0;
+    yoySelect(i);
+  };
+  tick();
+  _yoyTimer=setInterval(tick,900);
+});
+// When a chg_ radio is selected directly, sync the slider position
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>{
+  r.addEventListener('change',e=>{
+    const i=YOY_KEYS.indexOf(e.target.value);
+    if(i>=0){document.getElementById('yoySlider').value=i;document.getElementById('yoyLabel').textContent=YOY_LABELS[i];}
+  });
+});
+
+// ── Threshold filters ─────────────────────────────────────────────────────────
+const FILTER_FIELDS=[
+  ['','(off)'],
+  ['outreach_need','Outreach need (0\u20131)'],
+  ['parcels','Parcels'],
+  ['pct_hoh','HOH rate (0\u20131)'],
+  ['pct_vet','Veteran rate (0\u20131)'],
+  ['pct_val_freeze','Value freeze rate (0\u20131)'],
+  ['owner_turnover','Owner turnover (0\u20131)'],
+  ['appr_volatility','Appraisal volatility (0\u20131)'],
+  ['exemp_drift','Exemption drift (0\u20131)'],
+  ['median_val_25','Median value 2025 ($)'],
+  ['zip_poverty_rate','ZIP poverty rate (0\u20131)'],
+  ['total_contacts','Total contacts'],
+  ['failure_rate','Failure rate (0\u20131)']
+];
+const FILTER_COUNT=3;
+(function(){
+  const rows=document.getElementById('filterRows');
+  for(let i=0;i<FILTER_COUNT;i++){
+    const sel='<select class="fltField" data-i="'+i+'" style="font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;width:140px">'+FILTER_FIELDS.map(f=>'<option value="'+f[0]+'">'+f[1]+'</option>').join('')+'</select>';
+    rows.insertAdjacentHTML('beforeend','<div style="display:flex;gap:4px;margin:2px 0;align-items:center">'+sel+'<input type="number" class="fltMin" data-i="'+i+'" placeholder="min" step="any" style="width:55px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"><input type="number" class="fltMax" data-i="'+i+'" placeholder="max" step="any" style="width:55px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"></div>');
+  }
+})();
+function getFilters(){
+  const out=[];
+  for(let i=0;i<FILTER_COUNT;i++){
+    const f=document.querySelector('.fltField[data-i="'+i+'"]').value;
+    if(!f)continue;
+    const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
+    const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
+    const lo=mn===''?-Infinity:parseFloat(mn);
+    const hi=mx===''?Infinity:parseFloat(mx);
+    if(!Number.isFinite(lo)&&!Number.isFinite(hi)&&lo!==-Infinity&&hi!==Infinity)continue;
+    out.push({f,lo,hi});
+  }
+  return out;
+}
+function passesFilters(p,rules){
+  for(let i=0;i<rules.length;i++){
+    const r=rules[i], v=p[r.f];
+    if(v==null||!Number.isFinite(v))return false;
+    if(v<r.lo||v>r.hi)return false;
+  }
+  return true;
+}
+function applyFilters(){
+  _visFeatCache=null;
+  const rules=getFilters();
+  const badge=document.getElementById('filterActiveBadge');
+  if(rules.length){
+    const kept=DATA.features.filter(f=>passesFilters(f.properties,rules)).length;
+    badge.textContent=kept+'/'+DATA.features.length+' match';
+    badge.style.display='';
+  }else{
+    badge.style.display='none';
+  }
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  updateStatsBar(NBL);
+  if(NBL!=='none')updateLegendRange(NBL);
+  renderTopOutreach();
+}
+document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',applyFilters));
+document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.addEventListener('input',applyFilters));
+document.getElementById('filterClear').addEventListener('click',()=>{
+  document.querySelectorAll('.fltField').forEach(el=>el.value='');
+  document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.value='');
+  applyFilters();
+});
+
+// ── Per-layer help text ───────────────────────────────────────────────────────
+const LAYER_HELP={
+  avg_appraised:'Average appraised value across all parcels in the neighborhood (selected tax year).',
+  median_yrbuilt:'Median year of construction. Lower = older housing stock.',
+  pct_hoh:'Share of parcels claiming the Head of Household exemption.',
+  pct_vet:'Share of parcels claiming the Veteran exemption.',
+  valfreeze:'Share of parcels with an active Value Freeze (age 65+ or disabled, income-qualified).',
+  pct_vf_denied:'Share of Value Freeze applications that were denied. Note: data missing for 2011.',
+  owner_turnover:'Share of parcels with a recent sale date recorded \u2014 a proxy for ownership churn.',
+  hoh_churn:'Year-over-year change in the HOH exemption rate. High values signal instability.',
+  appr_volatility:'Standard deviation of YoY appraised-value changes across 2007\u20132026. High = values swing unpredictably.',
+  exemp_drift:'Combined change in HOH and Veteran exemption rates between earliest and latest year.',
+  outreach_need:'Composite priority score 0\u20131: \u221a(severity \u00d7 vulnerability) \u00d7 service_gap \u00d7 1.6.',
+  sales:'Share of parcels with a recent sale transaction (from tax roll SALEPRICE).',
+  taxlightning:'Share of recent sales that received an assessor contact. Requires \u22653 recent sales per nbhd.',
+  demand:'Total contact-center interactions (calls + walk-ins) per parcel.',
+  calls_per_parcel:'Phone calls to the contact center per parcel.',
+  walkin_rate:'In-person walk-in contacts per parcel (total contacts minus phone calls).',
+  post_sale_rate:'Post-sale assessor contacts per parcel.',
+  failure:'Share of contact-center interactions that ended unresolved.',
+  avg_visit_min:'Average in-person visit duration in minutes.',
+  addr_density:'Geocoded address density per census tract (TIGER/ACS).'
+};
+document.querySelectorAll('input[name="nbhd_layer"],input[name="tract_layer"]').forEach(r=>{
+  const v=r.value;
+  let text=LAYER_HELP[v];
+  if(!text&&/^chg_\d+_\d+$/.test(v)){
+    const m=v.match(/^chg_(\d+)_(\d+)$/);
+    text='Year-over-year median appraised value change: 20'+m[1].padStart(2,'0')+' \u2192 20'+m[2].padStart(2,'0')+'.';
+  }
+  if(text)r.parentElement.setAttribute('title',text);
+});
+
+// ── URL state sharing ─────────────────────────────────────────────────────────
+let _urlApplying=false;
+function updateHash(){
+  if(_urlApplying)return;
+  const parts=[];
+  if(NBL&&NBL!=='none')parts.push('l='+encodeURIComponent(NBL));
+  if(TRACTL&&TRACTL!=='none')parts.push('tl='+encodeURIComponent(TRACTL));
+  if(propYear)parts.push('y='+propYear);
+  if(hideCommercial)parts.push('hc=1');
+  if(swipeActive){
+    const sL=document.getElementById('swipeLeft').value, sR=document.getElementById('swipeRight').value;
+    parts.push('sw='+encodeURIComponent(sL+'|'+sR));
+  }
+  if(pinnedNbhd&&pinnedNbhd.feature)parts.push('pin='+pinnedNbhd.feature.properties.nbhd);
+  const h=parts.length?'#'+parts.join('&'):location.pathname+location.search;
+  try{history.replaceState(null,'',h);}catch(e){}
+}
+function applyHash(){
+  if(!location.hash||location.hash.length<2)return;
+  const s={};
+  location.hash.slice(1).split('&').forEach(kv=>{const eq=kv.indexOf('=');if(eq<0)return;s[kv.slice(0,eq)]=decodeURIComponent(kv.slice(eq+1));});
+  _urlApplying=true;
+  try{
+    if(s.y){
+      const sel=document.getElementById('propYearSelect');
+      if([...sel.options].some(o=>o.value===s.y)){sel.value=s.y;sel.dispatchEvent(new Event('change'));}
+    }
+    if(s.hc==='1'){const c=document.getElementById('hideCommercial');if(!c.checked){c.checked=true;c.dispatchEvent(new Event('change'));}}
+    if(s.l){const r=document.querySelector('input[name="nbhd_layer"][value="'+s.l.replace(/"/g,'\\"')+'"]');if(r){r.checked=true;r.dispatchEvent(new Event('change'));}}
+    if(s.tl){const r=document.querySelector('input[name="tract_layer"][value="'+s.tl.replace(/"/g,'\\"')+'"]');if(r){r.checked=true;r.dispatchEvent(new Event('change'));}}
+    if(s.sw){const [sL,sR]=s.sw.split('|');const selL=document.getElementById('swipeLeft'),selR=document.getElementById('swipeRight');if(sL)selL.value=sL;if(sR)selR.value=sR;const sm=document.getElementById('swipeMode');if(!sm.checked){sm.checked=true;sm.dispatchEvent(new Event('change'));}}
+  }finally{_urlApplying=false;}
+  if(s.pin){
+    const n=parseFloat(s.pin);
+    const feat=DATA.features.find(f=>f.properties.nbhd===n);
+    if(feat&&nbhdLayer){
+      nbhdLayer.eachLayer(l=>{
+        if(l.feature&&l.feature.properties.nbhd===n){
+          if(pinnedNbhd)nbhdLayer.resetStyle(pinnedNbhd);
+          pinnedNbhd=l;
+          l.setStyle({weight:3,color:'#ff0',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+          l.bringToFront();
+          info.update(feat.properties);
+          const tmp=L.geoJSON(feat);
+          map.fitBounds(tmp.getBounds(),{maxZoom:14,padding:[40,40]});
+        }
+      });
+    }
+  }
+  updateHash();
+}
+// Wire all relevant state changes to updateHash()
+document.querySelectorAll('input[name="nbhd_layer"]').forEach(r=>r.addEventListener('change',updateHash));
+document.querySelectorAll('input[name="tract_layer"]').forEach(r=>r.addEventListener('change',updateHash));
+document.getElementById('propYearSelect').addEventListener('change',updateHash);
+document.getElementById('hideCommercial').addEventListener('change',updateHash);
+document.getElementById('swipeMode').addEventListener('change',updateHash);
+document.getElementById('swipeLeft').addEventListener('change',updateHash);
+document.getElementById('swipeRight').addEventListener('change',updateHash);
+window.addEventListener('hashchange',()=>{if(!_urlApplying)applyHash();});
+applyHash();
 
 } // end init()
 </script></body></html>
