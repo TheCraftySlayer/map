@@ -115,6 +115,13 @@
   <input type="range" class="ctrl-slider" id="opacSlider" min="10" max="95" value="72">
   <label style="margin-top:4px"><input type="checkbox" id="hideCommercial"> Hide commercial neighborhoods</label>
 
+  <details id="filterPanel" style="margin:6px 0;border:1px solid #ddd;border-radius:4px">
+    <summary style="cursor:pointer;padding:4px 8px;font-size:11px;font-weight:600;color:#444;background:#f7f7f7">Threshold filters <span id="filterActiveBadge" style="display:none;font-weight:400;color:#c41a1a;margin-left:4px"></span></summary>
+    <div id="filterRows" style="padding:4px 8px">
+    </div>
+    <div style="padding:0 8px 6px"><button id="filterClear" style="font-size:10px;padding:2px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer">Clear all</button></div>
+  </details>
+
   <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER (live)</span></h5>
   <label><input type="radio" name="tract_layer" value="none" checked> Off</label>
   <label><input type="radio" name="tract_layer" value="addr_density"> Geocoded address density</label>
@@ -481,13 +488,21 @@ const LAYER_FIELD={
   volatility:'volatility'
 };
 
-let _visFeatCache=null, _visFeatKey=null;
+let _visFeatCache=null, _cachedRules=[];
 function getVisibleFeatures(){
-  const key=hideCommercial?'h':'a';
-  if(_visFeatKey===key&&_visFeatCache)return _visFeatCache;
-  _visFeatCache=DATA.features.filter(f=>!(hideCommercial&&f.properties.is_commercial));
-  _visFeatKey=key;
+  if(_visFeatCache)return _visFeatCache;
+  _cachedRules=(typeof getFilters==='function')?getFilters():[];
+  _visFeatCache=DATA.features.filter(f=>{
+    if(hideCommercial&&f.properties.is_commercial)return false;
+    if(_cachedRules.length&&!passesFilters(f.properties,_cachedRules))return false;
+    return true;
+  });
   return _visFeatCache;
+}
+function featureHidden(p){
+  if(hideCommercial&&p.is_commercial)return true;
+  if(_cachedRules.length&&!passesFilters(p,_cachedRules))return true;
+  return false;
 }
 
 function formatStat(v,layer){
@@ -790,7 +805,7 @@ function getNbhdColor(p, override){
   return'#e0e0e0';
 }
 function nbhdStyle(f){
-  const hidden=hideCommercial&&f.properties.is_commercial;
+  const hidden=featureHidden(f.properties);
   return{fillColor:getNbhdColor(f.properties),weight:hidden?0:.6,opacity:hidden?0:.6,color:'#fff',fillOpacity:hidden?0:FILL_OPAC};
 }
 let pinnedNbhd=null;
@@ -845,7 +860,7 @@ renderNbhd();
 function renderTopOutreach(){
   const el=document.getElementById('topOutreach');
   if(!el) return;
-  const feats=DATA.features.filter(f=>f.properties.outreach_need!=null&&!f.properties.is_commercial);
+  const feats=DATA.features.filter(f=>f.properties.outreach_need!=null&&!featureHidden(f.properties));
   feats.sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0));
   const top=feats.slice(0,15);
   if(!top.length){el.innerHTML='<div style="color:#888;padding:4px">No outreach data available. Rebuild to populate.</div>';return;}
@@ -1017,12 +1032,12 @@ function enableSwipe(){
   const canvasR=L.canvas({pane:'swipeRight'});
   swipeLayerL=L.geoJSON(DATA,{
     pane:'swipeLeft',renderer:canvasL,
-    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,lName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    style:f=>{const h=featureHidden(f.properties);return{fillColor:getNbhdColor(f.properties,lName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
     onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
   }).addTo(map);
   swipeLayerR=L.geoJSON(DATA,{
     pane:'swipeRight',renderer:canvasR,
-    style:f=>{const h=hideCommercial&&f.properties.is_commercial;return{fillColor:getNbhdColor(f.properties,rName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
+    style:f=>{const h=featureHidden(f.properties);return{fillColor:getNbhdColor(f.properties,rName),weight:h?0:.6,opacity:h?0:.7,color:'#fff',fillOpacity:h?0:FILL_OPAC};},
     onEachFeature:(f,l)=>l.on({mouseover:()=>info.update(f.properties),mouseout:()=>info.update()})
   }).addTo(map);
   createDivider();
@@ -1103,7 +1118,7 @@ document.getElementById('opacSlider').addEventListener('input',e=>{
 // ── Commercial filter ─────────────────────────────────────────────────────────
 document.getElementById('hideCommercial').addEventListener('change',e=>{
   hideCommercial=e.target.checked;
-  _visFeatCache=null;_visFeatKey=null;
+  _visFeatCache=null;
   if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
   updateStatsBar(NBL);
   updateLegendRange(NBL);
@@ -1264,6 +1279,76 @@ document.getElementById('ctrlToggle').addEventListener('click',function(){
   document.querySelector('.ctrl').style.display=ctrlOpen?'block':'none';
   this.textContent=ctrlOpen?'\u276e':'\u276f';
   this.style.right=ctrlOpen?'296px':'10px';
+});
+
+// ── Threshold filters ─────────────────────────────────────────────────────────
+const FILTER_FIELDS=[
+  ['','(off)'],
+  ['outreach_need','Outreach need (0\u20131)'],
+  ['parcels','Parcels'],
+  ['pct_hoh','HOH rate (0\u20131)'],
+  ['pct_vet','Veteran rate (0\u20131)'],
+  ['pct_val_freeze','Value freeze rate (0\u20131)'],
+  ['owner_turnover','Owner turnover (0\u20131)'],
+  ['appr_volatility','Appraisal volatility (0\u20131)'],
+  ['exemp_drift','Exemption drift (0\u20131)'],
+  ['median_val_25','Median value 2025 ($)'],
+  ['zip_poverty_rate','ZIP poverty rate (0\u20131)'],
+  ['total_contacts','Total contacts'],
+  ['failure_rate','Failure rate (0\u20131)']
+];
+const FILTER_COUNT=3;
+(function(){
+  const rows=document.getElementById('filterRows');
+  for(let i=0;i<FILTER_COUNT;i++){
+    const sel='<select class="fltField" data-i="'+i+'" style="font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;width:140px">'+FILTER_FIELDS.map(f=>'<option value="'+f[0]+'">'+f[1]+'</option>').join('')+'</select>';
+    rows.insertAdjacentHTML('beforeend','<div style="display:flex;gap:4px;margin:2px 0;align-items:center">'+sel+'<input type="number" class="fltMin" data-i="'+i+'" placeholder="min" step="any" style="width:55px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"><input type="number" class="fltMax" data-i="'+i+'" placeholder="max" step="any" style="width:55px;font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px"></div>');
+  }
+})();
+function getFilters(){
+  const out=[];
+  for(let i=0;i<FILTER_COUNT;i++){
+    const f=document.querySelector('.fltField[data-i="'+i+'"]').value;
+    if(!f)continue;
+    const mn=document.querySelector('.fltMin[data-i="'+i+'"]').value;
+    const mx=document.querySelector('.fltMax[data-i="'+i+'"]').value;
+    const lo=mn===''?-Infinity:parseFloat(mn);
+    const hi=mx===''?Infinity:parseFloat(mx);
+    if(!Number.isFinite(lo)&&!Number.isFinite(hi)&&lo!==-Infinity&&hi!==Infinity)continue;
+    out.push({f,lo,hi});
+  }
+  return out;
+}
+function passesFilters(p,rules){
+  for(let i=0;i<rules.length;i++){
+    const r=rules[i], v=p[r.f];
+    if(v==null||!Number.isFinite(v))return false;
+    if(v<r.lo||v>r.hi)return false;
+  }
+  return true;
+}
+function applyFilters(){
+  _visFeatCache=null;
+  const rules=getFilters();
+  const badge=document.getElementById('filterActiveBadge');
+  if(rules.length){
+    const kept=DATA.features.filter(f=>passesFilters(f.properties,rules)).length;
+    badge.textContent=kept+'/'+DATA.features.length+' match';
+    badge.style.display='';
+  }else{
+    badge.style.display='none';
+  }
+  if(swipeActive){disableSwipe();enableSwipe();}else renderNbhd();
+  updateStatsBar(NBL);
+  if(NBL!=='none')updateLegendRange(NBL);
+  renderTopOutreach();
+}
+document.querySelectorAll('.fltField,.fltMin,.fltMax').forEach(el=>el.addEventListener('change',applyFilters));
+document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.addEventListener('input',applyFilters));
+document.getElementById('filterClear').addEventListener('click',()=>{
+  document.querySelectorAll('.fltField').forEach(el=>el.value='');
+  document.querySelectorAll('.fltMin,.fltMax').forEach(el=>el.value='');
+  applyFilters();
 });
 
 // ── Per-layer help text ───────────────────────────────────────────────────────
