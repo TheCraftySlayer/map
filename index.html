@@ -699,22 +699,27 @@ info._buildHtml=function(p){
   const min=v=>v?v.toFixed(1)+' min':'\u2014';
   const allVals=[p.chg_7_8,p.chg_8_9,p.chg_9_10,p.chg_10_11,p.chg_11_12,p.chg_12_13,p.chg_13_14,p.chg_14_15,p.chg_15_16,p.chg_16_17,p.chg_17_18,p.chg_18_19,p.chg_19_20,p.chg_20_21,p.chg_21_22,p.chg_22_23,p.chg_23_24,p.chg_24_25,p.chg_25_26];
   const allLabs=["'08","'09","'10","'11","'12","'13","'14","'15","'16","'17","'18","'19","'20","'21","'22","'23","'24","'25","'26"];
-  const vals=[],labs=[];
-  for(let i=0;i<allVals.length;i++){if(allVals[i]!=null&&Number.isFinite(allVals[i])){vals.push(allVals[i]);labs.push(allLabs[i]);}}
-  let maxAbs=0.01;for(let i=0;i<vals.length;i++){const a=Math.abs(vals[i]);if(a>maxAbs)maxAbs=a;}
-  const bw=Math.max(12,Math.min(22,Math.floor(260/vals.length))),bh=36,svgW=bw*vals.length,mid=40;
-  const bars=vals.map((v,i)=>{
+  // Keep all 19 year slots so missing years render as visible gaps instead
+  // of collapsing and misaligning the timeline.
+  let maxAbs=0.01;for(let i=0;i<allVals.length;i++){const v=allVals[i];if(v!=null&&Number.isFinite(v)){const a=Math.abs(v);if(a>maxAbs)maxAbs=a;}}
+  const bw=Math.max(12,Math.min(22,Math.floor(260/allVals.length))),bh=36,svgW=bw*allVals.length,mid=40;
+  const bars=allVals.map((v,i)=>{
+    const x=i*bw, cx=x+bw/2;
+    const showLab=(i===0||i===allVals.length-1||i%3===0);
+    const labEl=showLab?'<text x="'+cx+'" y="'+(mid+bh+10)+'" text-anchor="middle" font-size="7" fill="#999">'+allLabs[i]+'</text>':'';
+    if(v==null||!Number.isFinite(v)){
+      return '<g><title>'+allLabs[i]+': no data</title>'+
+        '<line x1="'+cx+'" y1="'+(mid-3)+'" x2="'+cx+'" y2="'+(mid+3)+'" stroke="#ccc" stroke-width="1"/>'+
+        labEl+'</g>';
+    }
     const h=Math.round(Math.abs(v)/maxAbs*bh);
     const col=v>=0?'#d6604d':'#2166ac';
     const pct_=(v>=0?'+':'')+(v*100).toFixed(1)+'%';
-    const x=i*bw, cx=x+bw/2;
     const barY=v>=0?mid-h:mid;
-    const showLab=(i===0||i===vals.length-1||i%3===0);
     return '<g>'+
-      '<title>'+labs[i]+': '+pct_+'</title>'+
+      '<title>'+allLabs[i]+': '+pct_+'</title>'+
       '<rect x="'+(x+1)+'" y="'+barY+'" width="'+(bw-2)+'" height="'+Math.max(h,1)+'" rx="1" fill="'+col+'"/>'+
-      (showLab?'<text x="'+cx+'" y="'+(mid+bh+10)+'" text-anchor="middle" font-size="7" fill="#999">'+labs[i]+'</text>':'')+
-      '</g>';
+      labEl+'</g>';
   }).join('');
   const spark='<svg width="'+svgW+'" height="'+(mid+bh+14)+'" style="display:block;margin:6px 0">'+
     '<line x1="0" y1="'+mid+'" x2="'+svgW+'" y2="'+mid+'" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>'+
@@ -728,25 +733,39 @@ info._buildHtml=function(p){
   const _zeroIsMissing=(base==='avg_appraised'||base==='median_yrbuilt');
   let layerSpark='';
   if(base){
-    const pts=[],pLabs=[];
-    for(let y=7;y<=26;y++){
+    // Keep year-offset for every slot so gaps are visually preserved.
+    const Y0=7,Y1=26,YN=Y1-Y0; // 19 intervals, 20 slots
+    const slots=[]; // {y, off, v|null}
+    let haveCount=0,firstHave=null,lastHave=null;
+    for(let y=Y0;y<=Y1;y++){
       const v=p[base+'_'+y];
-      if(v!=null&&Number.isFinite(v)&&(!_zeroIsMissing||v!==0)){pts.push(v);pLabs.push("'"+String(y).padStart(2,'0'));}
+      const ok=(v!=null&&Number.isFinite(v)&&(!_zeroIsMissing||v!==0));
+      const slot={y,off:y-Y0,v:ok?v:null};
+      slots.push(slot);
+      if(ok){haveCount++;if(firstHave==null)firstHave=slot;lastHave=slot;}
     }
-    if(pts.length>=3){
-      let pMin=pts[0],pMax=pts[0];
-      for(let i=0;i<pts.length;i++){if(pts[i]<pMin)pMin=pts[i];if(pts[i]>pMax)pMax=pts[i];}
+    if(haveCount>=3){
+      let pMin=Infinity,pMax=-Infinity;
+      for(const s of slots){if(s.v!=null){if(s.v<pMin)pMin=s.v;if(s.v>pMax)pMax=s.v;}}
       if(pMax===pMin)pMax=pMin+1;
-      const lw=Math.max(200,Math.min(260,pts.length*14)),lh=36,lPad=4;
-      const xs=i=>lPad+i*((lw-2*lPad)/(pts.length-1));
+      const lw=Math.max(200,Math.min(260,(YN+1)*14)),lh=36,lPad=4;
+      const xs=off=>lPad+off*((lw-2*lPad)/YN);
       const ys=v=>lPad+(lh-2*lPad)*(1-(v-pMin)/(pMax-pMin));
-      const path=pts.map((v,i)=>(i?'L':'M')+xs(i).toFixed(1)+' '+ys(v).toFixed(1)).join(' ');
-      const dots=pts.map((v,i)=>'<circle cx="'+xs(i).toFixed(1)+'" cy="'+ys(v).toFixed(1)+'" r="1.8" fill="#185FA5"><title>'+pLabs[i]+': '+formatStat(v,NBL)+'</title></circle>').join('');
+      // Break path into subpaths at null gaps — each run of consecutive
+      // present years becomes one M..L..L segment so gaps read visually.
+      const segs=[];let cur=[];
+      for(const s of slots){if(s.v==null){if(cur.length)segs.push(cur);cur=[];}else{cur.push(s);}}
+      if(cur.length)segs.push(cur);
+      const path=segs.map(seg=>seg.map((s,i)=>(i?'L':'M')+xs(s.off).toFixed(1)+' '+ys(s.v).toFixed(1)).join(' ')).join(' ');
+      const lab=s=>"'"+String(s.y).padStart(2,'0');
+      const dots=slots.filter(s=>s.v!=null).map(s=>'<circle cx="'+xs(s.off).toFixed(1)+'" cy="'+ys(s.v).toFixed(1)+'" r="1.8" fill="#185FA5"><title>'+lab(s)+': '+formatStat(s.v,NBL)+'</title></circle>').join('');
+      // Light tick marks on missing-year x positions to make gaps readable.
+      const gaps=slots.filter(s=>s.v==null).map(s=>'<line x1="'+xs(s.off).toFixed(1)+'" y1="'+(lh-2)+'" x2="'+xs(s.off).toFixed(1)+'" y2="'+lh+'" stroke="#ddd" stroke-width="1"><title>'+lab(s)+': no data</title></line>').join('');
       const fmt=v=>formatStat(v,NBL);
       layerSpark='<div style="font-size:10px;color:#888;margin-top:4px">'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</div>'+
         '<svg width="'+lw+'" height="'+lh+'" style="display:block;margin:2px 0">'+
-        '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+'</svg>'+
-        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+pLabs[0]+' '+fmt(pts[0])+'</span><span>'+pLabs[pLabs.length-1]+' '+fmt(pts[pts.length-1])+'</span></div>';
+        '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+gaps+'</svg>'+
+        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+lab(firstHave)+' '+fmt(firstHave.v)+'</span><span>'+lab(lastHave)+' '+fmt(lastHave.v)+'</span></div>';
     }
   }
   return '<h4>Nbhd '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+esc(p.nbhd_type)+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
