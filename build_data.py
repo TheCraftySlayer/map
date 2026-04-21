@@ -422,37 +422,74 @@ def _mean_of(field, nbhd_stats):
 
 
 def _compute_exemption_gaps(nbhd_stats):
-    """Populate hoh_gap, vet_gap, vf_gap per neighborhood as residuals
-    against a simple demographic predictor (or county mean fallback).
-    Mirrors the client-side logic in index.html so the values are
-    available for CSV export and can feed the outreach_need score."""
-    # HOH and VF regress against ZIP poverty; Vet uses county-mean baseline
-    # (vet claims are driven by proximity to Kirtland / VA, not ZIP demog).
-    pairs_hoh = [(p.get('zip_poverty_rate'), p.get('pct_hoh')) for p in nbhd_stats.values()]
-    pairs_vf = [(p.get('zip_poverty_rate'), p.get('pct_val_freeze')) for p in nbhd_stats.values()]
-    hoh_fit = _ols_fit(pairs_hoh)
-    vf_fit = _ols_fit(pairs_vf)
-    hoh_mean = _mean_of('pct_hoh', nbhd_stats)
-    vet_mean = _mean_of('pct_vet', nbhd_stats)
-    vf_mean = _mean_of('pct_val_freeze', nbhd_stats)
+    """Populate hoh_gap / vet_gap / vf_gap per neighborhood — both for the
+    latest year (bare field, e.g. 'hoh_gap') AND for every per-year field
+    the roll produced (e.g. 'hoh_gap_13' .. 'hoh_gap_25') so the UI's
+    tax-year selector can switch these layers just like the base rates.
 
-    def predict(fit, x, mean):
-        if fit and x is not None:
-            try:
-                return fit['intercept'] + fit['slope'] * float(x)
-            except (TypeError, ValueError):
-                pass
-        return mean
-
+    Each field: residual = actual − predicted, where predicted is either
+    a single-predictor OLS against zip_poverty_rate or the county mean
+    as a fallback when the regression has no data.
+    """
+    # Discover which per-year suffixes are available on at least one
+    # neighborhood — we'll loop over those plus a "" (bare/latest) pass.
+    year_suffixes = set()
+    import re as _re
+    year_pat = _re.compile(r'^pct_hoh_(\d+)$')
     for p in nbhd_stats.values():
-        hoh_pred = predict(hoh_fit, p.get('zip_poverty_rate'), hoh_mean)
-        if hoh_pred is not None and p.get('pct_hoh') is not None:
-            p['hoh_gap'] = round(p['pct_hoh'] - hoh_pred, 4)
-        if vet_mean is not None and p.get('pct_vet') is not None:
-            p['vet_gap'] = round(p['pct_vet'] - vet_mean, 4)
-        vf_pred = predict(vf_fit, p.get('zip_poverty_rate'), vf_mean)
-        if vf_pred is not None and p.get('pct_val_freeze') is not None:
-            p['vf_gap'] = round(p['pct_val_freeze'] - vf_pred, 4)
+        for k in p.keys():
+            m = year_pat.match(k)
+            if m:
+                year_suffixes.add(m.group(1))
+
+    # Process one base+suffix at a time. Empty suffix means the
+    # "current/latest" field the rest of the code already expects.
+    def _run_pair(base, predictor_field, gap_base, suffix):
+        suf = f'_{suffix}' if suffix else ''
+        field = f'{base}{suf}'
+        predictor = predictor_field  # zip_poverty_rate is year-invariant
+        pairs = [(p.get(predictor), p.get(field)) for p in nbhd_stats.values()]
+        fit = _ols_fit(pairs)
+        mean = _mean_of(field, nbhd_stats)
+        for p in nbhd_stats.values():
+            v = p.get(field)
+            if v is None:
+                continue
+            if fit and p.get(predictor) is not None:
+                try:
+                    pred = fit['intercept'] + fit['slope'] * float(p[predictor])
+                except (TypeError, ValueError):
+                    pred = mean
+            else:
+                pred = mean
+            if pred is None:
+                continue
+            p[f'{gap_base}{suf}'] = round(v - pred, 4)
+
+    def _run_mean_baseline(base, gap_base, suffix):
+        """Vet gaps use a plain county-mean baseline (no ZIP predictor) —
+        vet claims track Kirtland / VA proximity more than ZIP income."""
+        suf = f'_{suffix}' if suffix else ''
+        field = f'{base}{suf}'
+        mean = _mean_of(field, nbhd_stats)
+        if mean is None:
+            return
+        for p in nbhd_stats.values():
+            v = p.get(field)
+            if v is None:
+                continue
+            p[f'{gap_base}{suf}'] = round(v - mean, 4)
+
+    # Latest-year (bare) pass
+    _run_pair('pct_hoh', 'zip_poverty_rate', 'hoh_gap', '')
+    _run_pair('pct_val_freeze', 'zip_poverty_rate', 'vf_gap', '')
+    _run_mean_baseline('pct_vet', 'vet_gap', '')
+
+    # Per-year passes
+    for ys in sorted(year_suffixes):
+        _run_pair('pct_hoh', 'zip_poverty_rate', 'hoh_gap', ys)
+        _run_pair('pct_val_freeze', 'zip_poverty_rate', 'vf_gap', ys)
+        _run_mean_baseline('pct_vet', 'vet_gap', ys)
 
 
 def _boost_outreach_with_gaps(nbhd_stats):
