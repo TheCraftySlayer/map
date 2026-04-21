@@ -718,6 +718,13 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             'owner_turnover': owner_turnover,
             'pct_recent_sale': round(recent_sales / parcels, 4) if parcels else 0,
             'recent_sales': float(recent_sales),
+        })
+        # Multi-year fields: only overwrite when THIS build actually computed
+        # a value. A roll-only rebuild with a single year (e.g. just
+        # Asr_Tax25.dbf) can't derive hoh_churn / exemp_drift / volatility —
+        # they'd come out None and silently clobber the valid values stored
+        # by an earlier multi-roll build.
+        _multi_yr = {
             'appr_volatility': appr_vol,
             'volatility': volatility,
             'hoh_churn': hoh_churn,
@@ -726,7 +733,10 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             'pct_hoh_20': pct_hoh_20,
             'pct_vet_20': pct_vet_20,
             'exemp_drift': exemp_drift,
-        })
+        }
+        for _k, _v in _multi_yr.items():
+            if _v is not None:
+                props[_k] = _v
         # Add year-over-year changes
         for key, val in yoy_changes.items():
             props[key] = val
