@@ -364,15 +364,33 @@ const _coreP=fetch("data/core.json").then(r=>r.json());
 const _layersP=fetch("data/layers.json").then(r=>r.json());
 _coreP.then(core=>{
   COUNTY=core.COUNTY; DATA=core.DATA; NBHD_CENTERS=core.NBHD_CENTERS; TRACT_GEO=core.TRACT_GEO;
-  fetch(TIGER_URL).then(r=>r.json()).then(geo=>{
-    if(geo&&geo.features&&geo.features.length>0){
-      const addrLookup={};
-      TRACT_GEO.features.forEach(f=>{if(f.properties.GEOID)addrLookup[f.properties.GEOID]=f.properties.address_count||0;});
-      geo.features.forEach(f=>{f.properties.address_count=addrLookup[f.properties.GEOID]||0;});
-      TRACT_GEO=geo;
-      console.log('Loaded '+geo.features.length+' tracts from TIGERweb API');
-    }
-  }).catch(()=>console.log('TIGERweb API unavailable, using stored tracts'));
+  fetch(TIGER_URL).then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status))).then(geo=>{
+    if(!(geo&&geo.features&&geo.features.length>0))return;
+    // Preserve EVERY enriched property we previously merged into the
+    // stored TRACT_GEO (address_count, plus any ACS fields added by
+    // build_data.py). Without this the live-tract swap silently drops
+    // poverty_rate / median_age / spanish_at_home / elderly_alone and
+    // those choropleths all render as empty gray.
+    const enriched={};
+    const KEEP=['address_count','poverty_rate','median_age','spanish_at_home','elderly_alone','acs_year','tract_pop'];
+    TRACT_GEO.features.forEach(f=>{
+      const g=f.properties&&f.properties.GEOID;
+      if(!g)return;
+      const saved={};
+      for(const k of KEEP)if(f.properties[k]!=null)saved[k]=f.properties[k];
+      enriched[g]=saved;
+    });
+    geo.features.forEach(f=>{
+      const g=f.properties.GEOID;
+      const e=enriched[g]||{};
+      for(const k of KEEP)f.properties[k]=e[k]!=null?e[k]:(k==='address_count'?0:undefined);
+    });
+    TRACT_GEO=geo;
+    console.log('Loaded '+geo.features.length+' tracts from TIGERweb API');
+    // If a tract layer is already active, rebuild it so the user sees
+    // the freshly downloaded geometry instead of the stored snapshot.
+    if(typeof TRACTL!=='undefined'&&TRACTL&&TRACTL!=='none'&&typeof renderTract==='function')renderTract();
+  }).catch(err=>console.log('TIGERweb API unavailable, using stored tracts:',err&&err.message||err));
   const _m=document.getElementById("map"); _m.innerHTML=""; _m.removeAttribute("style");
   init();
 });
