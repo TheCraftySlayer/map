@@ -36,9 +36,10 @@ import re
 import sys
 import math
 import statistics
+import time
 from collections import defaultdict
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 try:
@@ -1214,15 +1215,39 @@ def fetch_drive_times_osrm(centroid_lookup, cc_coords, outdir,
             f'{osrm_url.rstrip("/")}/table/v1/driving/{coord_str}'
             f'?sources={sources}&destinations={destinations}&annotations=duration'
         )
+        # Per OSRM public-demo etiquette: explicit User-Agent so requests
+        # aren't blocked as anonymous, and a short pause between batches
+        # so we don't trip the rate limiter. Public demo's max-table-size
+        # defaults to 100 coords total, which is why batch_size=90 +
+        # 9 CCs = 99 fits under the limit.
+        if batch_idx > 0:
+            time.sleep(0.3)
+        req = Request(url, headers={
+            'User-Agent': 'map-bernalillo-outreach/1.0 (+build_data.py)',
+            'Accept': 'application/json',
+        })
         try:
-            with urlopen(url, timeout=timeout) as resp:
+            with urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
         except (URLError, Exception) as e:
             print(f"  OSRM batch {batch_idx + 1}/{len(batches)} failed: {e}")
-            return {}
-        if data.get('code') != 'Ok':
-            print(f"  OSRM returned: {data.get('message', data.get('code', 'unknown'))}")
-            return {}
+            # Return whatever we've collected so far rather than discarding
+            # partial results — a batch failure shouldn't lose the earlier
+            # successful ones.
+            return times
+        code = data.get('code')
+        if code == 'TooBig':
+            # Retry this batch at half the size. A permanent failure at
+            # minimum batch size falls through to the generic error path.
+            if batch_size > 20:
+                print(f"  OSRM TooBig at batch_size={batch_size}; retrying whole run at {batch_size // 2}")
+                return fetch_drive_times_osrm(
+                    centroid_lookup, cc_coords, outdir,
+                    osrm_url=osrm_url, timeout=timeout, batch_size=batch_size // 2,
+                )
+        if code != 'Ok':
+            print(f"  OSRM returned: {data.get('message', code or 'unknown')}")
+            return times
         durations = data.get('durations') or []  # [num_sources][num_destinations]
         for j, nbhd_id in enumerate(batch):
             col = [durations[i][j] for i in range(num_ccs)
