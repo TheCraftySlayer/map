@@ -305,6 +305,22 @@ def build_point_layers_from_roll(joined_by_yr):
     return layers
 
 
+# Community center coordinates used for nearest-CC tagging and drive-time
+# queries. Kept at module level so compute_nbhd_stats and the OSRM query
+# in main() reference the same source of truth.
+CC_LOCATIONS = [
+    ('Vista Grande', 35.1769943, -106.3409576),
+    ('Los Vecinos', 35.0788198, -106.3923734),
+    ('Paradise Hills', 35.1950907, -106.7129307),
+    ('Raymond G. Sanchez', 35.193073, -106.6157715),
+    ('Westside', 35.0537822, -106.672675),
+    ('Los Padillas', 34.9569792, -106.696385),
+    ('Kiki Saavedra', 35.0158333, -106.6577778),
+    ('South Valley Senior', 35.069824, -106.6881653),
+    ('Alamosa', 35.0714679, -106.7101371),
+]
+
+
 def _point_in_ring(px, py, ring):
     """Ray-casting point-in-polygon test for a single ring (pure Python)."""
     inside = False
@@ -899,21 +915,12 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         drivers.sort(key=lambda x: -x[1])
         props['outreach_why'] = ', '.join(d[0] for d in drivers[:3]) if drivers else ''
 
-        # Find nearest community center
-        cc_locations = [
-            ('Vista Grande', 35.1769943, -106.3409576),
-            ('Los Vecinos', 35.0788198, -106.3923734),
-            ('Paradise Hills', 35.1950907, -106.7129307),
-            ('Raymond G. Sanchez', 35.193073, -106.6157715),
-            ('Westside', 35.0537822, -106.672675),
-            ('Los Padillas', 34.9569792, -106.696385),
-            ('Kiki Saavedra', 35.0158333, -106.6577778),
-            ('South Valley Senior', 35.069824, -106.6881653),
-            ('Alamosa', 35.0714679, -106.7101371),
-        ]
+        # Nearest community center by straight-line distance (quick,
+        # geometry-free). Drive-time via OSRM is added later in main()
+        # and overrides this if --osrm succeeds.
         nbhd_center = centroid_lookup.get(nbhd)
         if nbhd_center:
-            best_cc = min(cc_locations, key=lambda c: (c[1]-nbhd_center[0])**2 + (c[2]-nbhd_center[1])**2)
+            best_cc = min(CC_LOCATIONS, key=lambda c: (c[1]-nbhd_center[0])**2 + (c[2]-nbhd_center[1])**2)
             props['nearest_cc'] = best_cc[0]
 
         updated[nbhd] = props
@@ -924,7 +931,10 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
     # dict so they run after the per-nbhd loop.
     _compute_exemption_gaps(updated)
     _boost_outreach_with_gaps(updated)
-    return updated
+    # Return centroid_lookup alongside so callers (main) can reuse it for
+    # downstream spatial queries like OSRM drive-time catchments without
+    # rebuilding the per-nbhd centroid map.
+    return updated, centroid_lookup
 
 
 def build_point_layers(enriched_by_yr):
@@ -1143,6 +1153,97 @@ YRC = {
     2020:'#3a9e75',2021:'#d45a20',2022:'#7b3ea3',2023:'#1a5090',2024:'#c47a00',
     2025:'#157040',2026:'#c41a1a',
 }
+
+
+def fetch_drive_times_osrm(centroid_lookup, cc_coords, outdir,
+                           osrm_url='https://router.project-osrm.org',
+                           timeout=60, batch_size=90):
+    """Query OSRM's Table service for driving duration from each community
+    center to every neighborhood centroid. Returns {nbhd_id: minutes} using
+    the minimum duration across all community centers.
+
+    Results are cached in data/osrm_drive_times.json so only the first build
+    after a change to centroid_lookup or cc_coords hits the network. If the
+    OSRM request fails (timeout, rate limit, service down), the fallback
+    Haversine proxy in index.html still produces a usable cc_time_min on
+    the client side — this function just returns {}.
+
+    The public OSRM demo (router.project-osrm.org) is rate-limited and may
+    truncate very long URLs. We batch at ~90 destinations per request so
+    each call stays well under 4 KB of query string.
+    """
+    cache_path = Path(outdir) / 'osrm_drive_times.json'
+    # Cache key: fingerprint of the inputs. Change either the centroids
+    # (new nbhds added) or the CC list and the cache is invalidated.
+    nbhd_ids = sorted(centroid_lookup.keys())
+    fingerprint_parts = [
+        ';'.join(f'{n}:{centroid_lookup[n][0]:.4f},{centroid_lookup[n][1]:.4f}'
+                 for n in nbhd_ids),
+        ';'.join(f'{cc[0]}:{cc[1]:.4f},{cc[2]:.4f}' for cc in cc_coords),
+    ]
+    import hashlib
+    fingerprint = hashlib.sha1('\n'.join(fingerprint_parts).encode()).hexdigest()[:12]
+
+    if cache_path.exists():
+        try:
+            with open(cache_path) as f:
+                cached = json.load(f)
+            if cached.get('fingerprint') == fingerprint:
+                print(f"  OSRM drive times: cache hit ({len(cached.get('times', {}))} nbhds)")
+                return {int(k): v for k, v in cached.get('times', {}).items()}
+        except Exception as e:
+            print(f"  OSRM drive-time cache read failed: {e}")
+
+    print(f"  OSRM drive times: querying {osrm_url} for {len(nbhd_ids)} nbhds × {len(cc_coords)} CCs...")
+
+    # Source coords = community centers. Destination coords = nbhd centroids.
+    # A single Table request carries len(ccs) sources and up to batch_size
+    # destinations. OSRM format: "lon1,lat1;lon2,lat2;...?sources=0;1;...&destinations=N;N+1;..."
+    cc_lonlat = [(cc[2], cc[1]) for cc in cc_coords]  # CC_DATA is (name,lat,lon)
+    num_ccs = len(cc_lonlat)
+    times = {}
+    batches = [nbhd_ids[i:i + batch_size] for i in range(0, len(nbhd_ids), batch_size)]
+
+    for batch_idx, batch in enumerate(batches):
+        batch_lonlat = [(centroid_lookup[n][1], centroid_lookup[n][0]) for n in batch]
+        all_coords = cc_lonlat + batch_lonlat
+        coord_str = ';'.join(f'{lon:.5f},{lat:.5f}' for lon, lat in all_coords)
+        sources = ';'.join(str(i) for i in range(num_ccs))
+        destinations = ';'.join(str(num_ccs + i) for i in range(len(batch)))
+        url = (
+            f'{osrm_url.rstrip("/")}/table/v1/driving/{coord_str}'
+            f'?sources={sources}&destinations={destinations}&annotations=duration'
+        )
+        try:
+            with urlopen(url, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+        except (URLError, Exception) as e:
+            print(f"  OSRM batch {batch_idx + 1}/{len(batches)} failed: {e}")
+            return {}
+        if data.get('code') != 'Ok':
+            print(f"  OSRM returned: {data.get('message', data.get('code', 'unknown'))}")
+            return {}
+        durations = data.get('durations') or []  # [num_sources][num_destinations]
+        for j, nbhd_id in enumerate(batch):
+            col = [durations[i][j] for i in range(num_ccs)
+                   if i < len(durations) and j < len(durations[i]) and durations[i][j] is not None]
+            if col:
+                times[nbhd_id] = round(min(col) / 60.0, 1)
+
+    # Save to cache
+    try:
+        cache_path.parent.mkdir(exist_ok=True)
+        with open(cache_path, 'w') as f:
+            json.dump({
+                'fingerprint': fingerprint,
+                'source': osrm_url,
+                'times': {str(k): v for k, v in times.items()},
+            }, f)
+        print(f"  OSRM drive times: cached {len(times)} nbhds to {cache_path}")
+    except Exception as e:
+        print(f"  OSRM drive-time cache write failed: {e}")
+
+    return times
 
 
 def fetch_tract_acs(tract_geo):
@@ -1496,6 +1597,13 @@ def main():
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
+    parser.add_argument('--osrm-url', default='https://router.project-osrm.org',
+                        help='OSRM Table-service endpoint for drive-time catchments '
+                             '(default: public demo; rate-limited). Set to your own instance '
+                             'for production use.')
+    parser.add_argument('--no-osrm', action='store_true',
+                        help='Skip OSRM drive-time query and fall back to the client-side '
+                             'Haversine proxy in index.html.')
     parser.add_argument('--mdf', help='Path to MDF Complete .xlsx (multi-sheet data warehouse)')
     parser.add_argument('--mdf-dir', help='Path to folder of MDF CSV exports (faster than xlsx)')
     args = parser.parse_args()
@@ -1553,12 +1661,31 @@ def main():
 
     # Compute neighborhood stats from roll (census is used to amplify outreach score)
     print("\nComputing neighborhood stats...")
-    nbhd_stats = compute_nbhd_stats(
+    nbhd_stats, centroid_lookup = compute_nbhd_stats(
         by_nbhd_yr,
         existing_core['DATA']['features'],
         census=census,
         tract_geo=existing_core.get('TRACT_GEO'),
     )
+
+    # Drive-time catchments via OSRM (optional). Produces real driving
+    # minutes that respect the street network / Rio Grande crossings
+    # instead of the Haversine proxy the client falls back to.
+    if not args.no_osrm:
+        print("\nFetching drive-time catchments from OSRM...")
+        osrm_times = fetch_drive_times_osrm(
+            centroid_lookup, CC_LOCATIONS, outdir, osrm_url=args.osrm_url,
+        )
+        if osrm_times:
+            for nbhd_id, t_min in osrm_times.items():
+                if nbhd_id in nbhd_stats:
+                    nbhd_stats[nbhd_id]['cc_time_min'] = t_min
+                    nbhd_stats[nbhd_id]['cc_time_source'] = 'osrm'
+            print(f"  OSRM cc_time_min: {len(osrm_times)}/{len(nbhd_stats)} nbhds")
+        else:
+            print("  OSRM unavailable — index.html will compute Haversine proxy on load")
+    else:
+        print("\nSkipping OSRM drive-time fetch (--no-osrm)")
 
     # All possible layer keys
     all_layer_keys = [
