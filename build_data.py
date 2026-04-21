@@ -1235,19 +1235,30 @@ def fetch_census_acs():
             with urlopen(url, timeout=5) as resp:
                 data = json.loads(resp.read())
                 h, v = data[0], data[1]
-                g = lambda k: v[h.index(k)]
-                pop = int(g('B01001_001E') or 0)
+
+                # Parse a single ACS cell as int, treating missing-data
+                # sentinels (large negative values like -666666666) as 0
+                # so they don't render as literal -$666,666,666 in the UI.
+                def _cv(k):
+                    raw = v[h.index(k)]
+                    try:
+                        x = int(raw) if raw not in (None, '', '-', '*') else 0
+                    except (ValueError, TypeError):
+                        return 0
+                    return x if x >= 0 else 0
+
+                pop = _cv('B01001_001E')
                 result['county'] = {
-                    'year': yr, 'name': g('NAME'), 'population': pop,
-                    'median_income': int(g('B19013_001E') or 0),
-                    'poverty': int(g('B17001_002E') or 0),
-                    'hispanic': int(g('B03003_003E') or 0),
-                    'white': int(g('B02001_002E') or 0),
-                    'black': int(g('B02001_003E') or 0),
-                    'native_american': int(g('B02001_004E') or 0),
-                    'asian': int(g('B02001_005E') or 0),
-                    'housing_units': int(g('B25001_001E') or 0),
-                    'median_home_value': int(g('B25077_001E') or 0),
+                    'year': yr, 'name': v[h.index('NAME')], 'population': pop,
+                    'median_income': _cv('B19013_001E'),
+                    'poverty': _cv('B17001_002E'),
+                    'hispanic': _cv('B03003_003E'),
+                    'white': _cv('B02001_002E'),
+                    'black': _cv('B02001_003E'),
+                    'native_american': _cv('B02001_004E'),
+                    'asian': _cv('B02001_005E'),
+                    'housing_units': _cv('B25001_001E'),
+                    'median_home_value': _cv('B25077_001E'),
                 }
                 print(f"  County ACS {yr}: pop {pop:,}")
         except (URLError, Exception) as e:
@@ -1274,21 +1285,32 @@ def fetch_census_acs():
                 zdata = json.loads(resp.read())
                 zh = zdata[0]
                 zips = {}
+                # ACS missing-data sentinels — large negative integers
+                # (-666666666 etc.) mean "suppressed for privacy" on
+                # low-population ZCTAs. Normalize those to 0 so they
+                # don't flow into the UI as literal -$666,666,666.
+                def _zv(row, col):
+                    raw = row[zh.index(col)]
+                    try:
+                        v = int(raw) if raw not in (None, '', '-', '*') else 0
+                    except (ValueError, TypeError):
+                        return 0
+                    return v if v >= 0 else 0
                 for row in zdata[1:]:
                     zcta = row[zh.index('zip code tabulation area')]
                     if zcta not in bern_zips:
                         continue
-                    zpop = int(row[zh.index('B01001_001E')] or 0)
+                    zpop = _zv(row, 'B01001_001E')
                     if zpop == 0:
                         continue
                     zips[zcta] = {
                         'name': row[zh.index('NAME')],
                         'pop': zpop,
-                        'income': int(row[zh.index('B19013_001E')] or 0),
-                        'poverty': int(row[zh.index('B17001_002E')] or 0),
-                        'hispanic': int(row[zh.index('B03003_003E')] or 0),
-                        'units': int(row[zh.index('B25001_001E')] or 0),
-                        'home_val': int(row[zh.index('B25077_001E')] or 0),
+                        'income': _zv(row, 'B19013_001E'),
+                        'poverty': _zv(row, 'B17001_002E'),
+                        'hispanic': _zv(row, 'B03003_003E'),
+                        'units': _zv(row, 'B25001_001E'),
+                        'home_val': _zv(row, 'B25077_001E'),
                     }
                 result['zips'] = zips
                 print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
@@ -1409,12 +1431,16 @@ def update_html_sidebar(final_layers, html_path, stats=None):
             )
             for z, zd in sorted_zips:
                 zpct = lambda n: f'{n/zd["pop"]*100:.0f}%' if zd['pop'] else '—'
+                # Low-population ZCTAs (e.g. Kirtland AFB at pop ~24)
+                # have income/home_val suppressed by Census. Show '—'
+                # for any zeroed-out value rather than a misleading $0.
+                dollar = lambda v: f'${v:,}' if v and v > 0 else '—'
                 census_html += (
                     f'<tr style="border-bottom:1px solid #f0f0f0">'
                     f'<td style="padding:2px 4px"><b>{z}</b></td>'
                     f'<td style="text-align:right;padding:2px 4px">{zd["pop"]:,}</td>'
-                    f'<td style="text-align:right;padding:2px 4px">${zd["income"]:,}</td>'
-                    f'<td style="text-align:right;padding:2px 4px">${zd["home_val"]:,}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{dollar(zd["income"])}</td>'
+                    f'<td style="text-align:right;padding:2px 4px">{dollar(zd["home_val"])}</td>'
                     f'<td style="text-align:right;padding:2px 4px">{zpct(zd["poverty"])}</td>'
                     f'<td style="text-align:right;padding:2px 4px">{zpct(zd["hispanic"])}</td>'
                     f'</tr>'
