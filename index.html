@@ -541,6 +541,7 @@ function _olsFit(pairs){
   const K=8;
   const feats=DATA.features;
   const N=feats.length;
+  if(N<=K)return;
   const centers=[];
   for(const f of feats){
     const c=NBHD_CENTERS&&NBHD_CENTERS[f.properties.nbhd];
@@ -828,6 +829,13 @@ const LG={
   cc_time_min:{l:'0 min',h:'60+ min',n:'est. drive time to nearest community center'},
   volatility:{l:'0%',h:'80%+',n:'cumulative appraisal volatility (sum |YoY| 2007\u20132025)'}
 };
+// Gi* hot/cold-spot layers share a diverging palette. Alias the CS
+// and LG entries under the actual layer keys so renderNbhd /
+// updateLegendRange can look them up directly instead of a special case.
+CS.gi_outreach_need=CS.gi_hotspot;
+CS.gi_pct_vf_denied=CS.gi_hotspot;
+LG.gi_outreach_need={l:'cold',h:'hot',n:'Gi* cluster (outreach need)'};
+LG.gi_pct_vf_denied={l:'cold',h:'hot',n:'Gi* cluster (VF denial)'};
 
 // Map layer key → property field used for coloring
 const LAYER_FIELD={
