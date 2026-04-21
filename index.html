@@ -850,9 +850,15 @@ const CS={
   spanish_at_home:[[0,'#f7fbff'],[0.1,'#c6dbef'],[0.25,'#6baed6'],[0.4,'#2171b5'],[0.6,'#08306b']],
   elderly_alone:[[0,'#f2f0f7'],[0.05,'#cbc9e2'],[0.1,'#9e9ac8'],[0.15,'#756bb1'],[0.25,'#54278f']],
   gi_hotspot:[[-2.5,'#2166ac'],[-1.5,'#92c5de'],[-.5,'#f7f7f7'],[.5,'#f7f7f7'],[1.5,'#f4a582'],[2.5,'#b2182b']],
+  // Gap scales calibrated to the actual distribution of residuals:
+  //   HOH county mean ~25%, residuals typically ±15pp   → full scale ±30pp
+  //   Vet county mean ~5%,  residuals typically ±5pp    → full scale ±10pp
+  //   VF  county mean ~3%,  residuals typically ±3pp    → full scale ±8pp
+  // Previous VF scale (±20pp) was far too wide so virtually every nbhd
+  // fell in the flat gray neutral band.
   hoh_gap:[[-.3,'#b2182b'],[-.1,'#f4a582'],[-.02,'#f7f7f7'],[.02,'#f7f7f7'],[.1,'#92c5de'],[.3,'#2166ac']],
-  vet_gap:[[-.15,'#b2182b'],[-.05,'#f4a582'],[-.01,'#f7f7f7'],[.01,'#f7f7f7'],[.05,'#92c5de'],[.15,'#2166ac']],
-  vf_gap:[[-.2,'#b2182b'],[-.05,'#f4a582'],[-.01,'#f7f7f7'],[.01,'#f7f7f7'],[.05,'#92c5de'],[.2,'#2166ac']],
+  vet_gap:[[-.1,'#b2182b'],[-.04,'#f4a582'],[-.008,'#f7f7f7'],[.008,'#f7f7f7'],[.04,'#92c5de'],[.1,'#2166ac']],
+  vf_gap:[[-.08,'#b2182b'],[-.03,'#f4a582'],[-.006,'#f7f7f7'],[.006,'#f7f7f7'],[.03,'#92c5de'],[.08,'#2166ac']],
   cc_time_min:[[0,'#f7fbff'],[8,'#c6dbef'],[15,'#6baed6'],[25,'#2171b5'],[40,'#08519c'],[60,'#08306b']]
 };
 const LG={
