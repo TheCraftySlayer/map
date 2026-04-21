@@ -68,7 +68,7 @@
 
   <h5>Neighborhood choropleth</h5>
 
-  <h5>Property characteristics <span style="font-weight:400;color:#aaa">2025 roll &middot; 257,443 parcels</span></h5>
+  <h5>Property characteristics <span style="font-weight:400;color:#aaa">2025 roll &middot; 256,988 parcels</span></h5>
   <div style="margin:2px 0 6px;font-size:11px">
     <label>Tax year: <select id="propYearSelect" style="font-size:11px;padding:2px;border-radius:4px;border:1px solid #ddd"></select></label>
   </div>
@@ -182,6 +182,12 @@
     <option value="avg_visit_min">Avg visit duration</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption stability</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
   </select>
   <label style="font-size:11px;color:#666">Right pane:</label>
   <select id="swipeRight" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
@@ -215,6 +221,12 @@
     <option value="avg_visit_min">Avg visit duration</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption stability</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
   </select>
   <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
 
@@ -232,6 +244,12 @@
     <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
     <option value="median_val_25">Median value 2025</option>
   </select>
@@ -248,6 +266,12 @@
     <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
     <option value="median_val_25">Median value 2025</option>
   </select>
@@ -313,7 +337,7 @@
   <label><input type="checkbox" class="ol" data-layer="mc"> <span class="d" style="width:8px;height:8px;background:#BA7517"></span> Multichannel (1,238)</label>
 
   <h5>County demographics <span style="font-weight:400;color:#aaa">ACS 5-Year</span></h5>
-  <div id="censusData" style="font-size:11px;color:#666"><div style="margin-bottom:2px;color:#888">Bernalillo County, New Mexico &middot; 2023 ACS 5-Year</div><div class="s"><span>Population</span><span class="v">674,357</span></div><div class="s"><span>Median income</span><span class="v">$66,514</span></div><div class="s"><span>Poverty rate</span><span class="v">15.6%</span></div><div class="s"><span>Hispanic/Latino</span><span class="v">48.9%</span></div><div class="s"><span>White alone</span><span class="v">54.8%</span></div><div class="s"><span>Black</span><span class="v">3.0%</span></div><div class="s"><span>Native American</span><span class="v">5.1%</span></div><div class="s"><span>Asian</span><span class="v">2.9%</span></div><div class="s"><span>Housing units</span><span class="v">301,278</span></div><div class="s"><span>Median home value</span><span class="v">$268,500</span></div></div>
+  <div id="censusData" style="font-size:11px;color:#666"><div style="margin-bottom:2px;color:#888">Bernalillo County, New Mexico &middot; 2023 ACS 5-Year</div><div class="s"><span>Population</span><span class="v">674,357</span></div><div class="s"><span>Median income</span><span class="v">$66,514</span></div><div class="s"><span>Poverty rate</span><span class="v">15.6%</span></div><div class="s"><span>Hispanic/Latino</span><span class="v">48.9%</span></div><div class="s"><span>White alone</span><span class="v">54.8%</span></div><div class="s"><span>Black</span><span class="v">3.0%</span></div><div class="s"><span>Native American</span><span class="v">5.1%</span></div><div class="s"><span>Asian</span><span class="v">2.9%</span></div><div class="s"><span>Housing units</span><span class="v">301,278</span></div><div class="s"><span>Median home value</span><span class="v">$268,500</span></div><details style="margin-top:6px" open><summary style="cursor:pointer;font-size:10px;color:#555;font-weight:600">By ZIP &middot; 32 ZCTAs &middot; pop 899,790 &middot; avg income $70,923 &middot; avg home $270,179</summary><table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px"><thead><tr style="border-bottom:1px solid #ddd;color:#777"><th style="text-align:left;padding:2px 4px">ZIP</th><th style="text-align:right;padding:2px 4px">Pop</th><th style="text-align:right;padding:2px 4px">Income</th><th style="text-align:right;padding:2px 4px">Home val</th><th style="text-align:right;padding:2px 4px">Pov</th><th style="text-align:right;padding:2px 4px">Hisp</th></tr></thead><tbody><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87121</b></td><td style="text-align:right;padding:2px 4px">76,135</td><td style="text-align:right;padding:2px 4px">$59,184</td><td style="text-align:right;padding:2px 4px">$192,500</td><td style="text-align:right;padding:2px 4px">22%</td><td style="text-align:right;padding:2px 4px">82%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87114</b></td><td style="text-align:right;padding:2px 4px">70,064</td><td style="text-align:right;padding:2px 4px">$81,768</td><td style="text-align:right;padding:2px 4px">$296,200</td><td style="text-align:right;padding:2px 4px">11%</td><td style="text-align:right;padding:2px 4px">46%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87120</b></td><td style="text-align:right;padding:2px 4px">65,477</td><td style="text-align:right;padding:2px 4px">$84,887</td><td style="text-align:right;padding:2px 4px">$276,900</td><td style="text-align:right;padding:2px 4px">12%</td><td style="text-align:right;padding:2px 4px">54%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87124</b></td><td style="text-align:right;padding:2px 4px">58,402</td><td style="text-align:right;padding:2px 4px">$82,278</td><td style="text-align:right;padding:2px 4px">$262,800</td><td style="text-align:right;padding:2px 4px">8%</td><td style="text-align:right;padding:2px 4px">41%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87111</b></td><td style="text-align:right;padding:2px 4px">57,219</td><td style="text-align:right;padding:2px 4px">$84,511</td><td style="text-align:right;padding:2px 4px">$349,200</td><td style="text-align:right;padding:2px 4px">9%</td><td style="text-align:right;padding:2px 4px">28%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87105</b></td><td style="text-align:right;padding:2px 4px">54,215</td><td style="text-align:right;padding:2px 4px">$49,928</td><td style="text-align:right;padding:2px 4px">$200,300</td><td style="text-align:right;padding:2px 4px">19%</td><td style="text-align:right;padding:2px 4px">80%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87144</b></td><td style="text-align:right;padding:2px 4px">49,976</td><td style="text-align:right;padding:2px 4px">$90,973</td><td style="text-align:right;padding:2px 4px">$280,600</td><td style="text-align:right;padding:2px 4px">8%</td><td style="text-align:right;padding:2px 4px">44%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87031</b></td><td style="text-align:right;padding:2px 4px">46,211</td><td style="text-align:right;padding:2px 4px">$61,947</td><td style="text-align:right;padding:2px 4px">$206,600</td><td style="text-align:right;padding:2px 4px">18%</td><td style="text-align:right;padding:2px 4px">63%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87123</b></td><td style="text-align:right;padding:2px 4px">43,515</td><td style="text-align:right;padding:2px 4px">$61,552</td><td style="text-align:right;padding:2px 4px">$236,400</td><td style="text-align:right;padding:2px 4px">21%</td><td style="text-align:right;padding:2px 4px">44%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87112</b></td><td style="text-align:right;padding:2px 4px">42,523</td><td style="text-align:right;padding:2px 4px">$69,610</td><td style="text-align:right;padding:2px 4px">$254,400</td><td style="text-align:right;padding:2px 4px">10%</td><td style="text-align:right;padding:2px 4px">36%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87110</b></td><td style="text-align:right;padding:2px 4px">40,142</td><td style="text-align:right;padding:2px 4px">$63,593</td><td style="text-align:right;padding:2px 4px">$251,400</td><td style="text-align:right;padding:2px 4px">14%</td><td style="text-align:right;padding:2px 4px">39%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87109</b></td><td style="text-align:right;padding:2px 4px">39,323</td><td style="text-align:right;padding:2px 4px">$56,295</td><td style="text-align:right;padding:2px 4px">$298,300</td><td style="text-align:right;padding:2px 4px">15%</td><td style="text-align:right;padding:2px 4px">36%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87108</b></td><td style="text-align:right;padding:2px 4px">35,985</td><td style="text-align:right;padding:2px 4px">$39,578</td><td style="text-align:right;padding:2px 4px">$227,600</td><td style="text-align:right;padding:2px 4px">29%</td><td style="text-align:right;padding:2px 4px">49%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87107</b></td><td style="text-align:right;padding:2px 4px">26,993</td><td style="text-align:right;padding:2px 4px">$59,663</td><td style="text-align:right;padding:2px 4px">$282,000</td><td style="text-align:right;padding:2px 4px">17%</td><td style="text-align:right;padding:2px 4px">49%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87106</b></td><td style="text-align:right;padding:2px 4px">26,815</td><td style="text-align:right;padding:2px 4px">$51,079</td><td style="text-align:right;padding:2px 4px">$332,100</td><td style="text-align:right;padding:2px 4px">24%</td><td style="text-align:right;padding:2px 4px">39%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87002</b></td><td style="text-align:right;padding:2px 4px">21,375</td><td style="text-align:right;padding:2px 4px">$51,537</td><td style="text-align:right;padding:2px 4px">$183,700</td><td style="text-align:right;padding:2px 4px">19%</td><td style="text-align:right;padding:2px 4px">63%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87102</b></td><td style="text-align:right;padding:2px 4px">20,258</td><td style="text-align:right;padding:2px 4px">$37,276</td><td style="text-align:right;padding:2px 4px">$174,400</td><td style="text-align:right;padding:2px 4px">28%</td><td style="text-align:right;padding:2px 4px">57%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87122</b></td><td style="text-align:right;padding:2px 4px">18,776</td><td style="text-align:right;padding:2px 4px">$161,299</td><td style="text-align:right;padding:2px 4px">$614,200</td><td style="text-align:right;padding:2px 4px">3%</td><td style="text-align:right;padding:2px 4px">24%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87113</b></td><td style="text-align:right;padding:2px 4px">16,369</td><td style="text-align:right;padding:2px 4px">$92,083</td><td style="text-align:right;padding:2px 4px">$362,100</td><td style="text-align:right;padding:2px 4px">4%</td><td style="text-align:right;padding:2px 4px">28%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87015</b></td><td style="text-align:right;padding:2px 4px">14,476</td><td style="text-align:right;padding:2px 4px">$72,681</td><td style="text-align:right;padding:2px 4px">$263,200</td><td style="text-align:right;padding:2px 4px">9%</td><td style="text-align:right;padding:2px 4px">32%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87104</b></td><td style="text-align:right;padding:2px 4px">13,369</td><td style="text-align:right;padding:2px 4px">$67,714</td><td style="text-align:right;padding:2px 4px">$300,000</td><td style="text-align:right;padding:2px 4px">13%</td><td style="text-align:right;padding:2px 4px">55%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87004</b></td><td style="text-align:right;padding:2px 4px">11,274</td><td style="text-align:right;padding:2px 4px">$63,319</td><td style="text-align:right;padding:2px 4px">$235,200</td><td style="text-align:right;padding:2px 4px">15%</td><td style="text-align:right;padding:2px 4px">56%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87059</b></td><td style="text-align:right;padding:2px 4px">10,012</td><td style="text-align:right;padding:2px 4px">$89,267</td><td style="text-align:right;padding:2px 4px">$322,100</td><td style="text-align:right;padding:2px 4px">12%</td><td style="text-align:right;padding:2px 4px">28%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87048</b></td><td style="text-align:right;padding:2px 4px">9,173</td><td style="text-align:right;padding:2px 4px">$112,716</td><td style="text-align:right;padding:2px 4px">$552,000</td><td style="text-align:right;padding:2px 4px">8%</td><td style="text-align:right;padding:2px 4px">30%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87035</b></td><td style="text-align:right;padding:2px 4px">6,847</td><td style="text-align:right;padding:2px 4px">$40,688</td><td style="text-align:right;padding:2px 4px">$147,600</td><td style="text-align:right;padding:2px 4px">26%</td><td style="text-align:right;padding:2px 4px">45%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87068</b></td><td style="text-align:right;padding:2px 4px">5,554</td><td style="text-align:right;padding:2px 4px">$63,287</td><td style="text-align:right;padding:2px 4px">$246,300</td><td style="text-align:right;padding:2px 4px">18%</td><td style="text-align:right;padding:2px 4px">38%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87047</b></td><td style="text-align:right;padding:2px 4px">5,166</td><td style="text-align:right;padding:2px 4px">$111,546</td><td style="text-align:right;padding:2px 4px">$399,400</td><td style="text-align:right;padding:2px 4px">3%</td><td style="text-align:right;padding:2px 4px">22%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87043</b></td><td style="text-align:right;padding:2px 4px">4,375</td><td style="text-align:right;padding:2px 4px">$110,268</td><td style="text-align:right;padding:2px 4px">$520,200</td><td style="text-align:right;padding:2px 4px">2%</td><td style="text-align:right;padding:2px 4px">15%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87116</b></td><td style="text-align:right;padding:2px 4px">3,953</td><td style="text-align:right;padding:2px 4px">$78,877</td><td style="text-align:right;padding:2px 4px">$-666,666,666</td><td style="text-align:right;padding:2px 4px">10%</td><td style="text-align:right;padding:2px 4px">26%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87042</b></td><td style="text-align:right;padding:2px 4px">3,456</td><td style="text-align:right;padding:2px 4px">$61,181</td><td style="text-align:right;padding:2px 4px">$275,000</td><td style="text-align:right;padding:2px 4px">11%</td><td style="text-align:right;padding:2px 4px">47%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87008</b></td><td style="text-align:right;padding:2px 4px">2,338</td><td style="text-align:right;padding:2px 4px">$108,523</td><td style="text-align:right;padding:2px 4px">$352,900</td><td style="text-align:right;padding:2px 4px">11%</td><td style="text-align:right;padding:2px 4px">16%</td></tr><tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 4px"><b>87117</b></td><td style="text-align:right;padding:2px 4px">24</td><td style="text-align:right;padding:2px 4px">$-666,666,666</td><td style="text-align:right;padding:2px 4px">$-666,666,666</td><td style="text-align:right;padding:2px 4px">0%</td><td style="text-align:right;padding:2px 4px">54%</td></tr></tbody></table></details></div>
 
   <h5>Reference</h5>
   <label><input type="checkbox" class="ol" data-layer="rings"> Distance rings (2/5/10/15 mi)</label>
@@ -533,20 +557,33 @@ function _olsFit(pairs){
   return{slope:(sxy-n*mx*my)/vx, intercept:my-((sxy-n*mx*my)/vx)*mx, n};
 }
 (function(){
-  // HOH ~ ZIP poverty (higher poverty → more HOH eligibility)
+  // HOH and VF use ZIP poverty as the predictor (higher poverty → more
+  // eligible households). Vet claims are dominated by proximity to Kirtland
+  // AFB / VA services, not ZIP demographics, so we use a county-mean
+  // baseline instead of fitting a weak regression that would just fit noise.
   const hohFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_hoh]));
-  // Vet ~ ZIP income (higher income → fewer vet claimants, weak relationship)
-  const vetFit=_olsFit(DATA.features.map(f=>[f.properties.zip_income_factor,f.properties.pct_vet]));
-  // VF (value freeze) ~ ZIP poverty (elderly poor more likely eligible)
   const vfFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_val_freeze]));
+  // If the ZIP ACS fetch failed at build time, zip_poverty_rate is missing
+  // for every feature so _olsFit returns null. Fall back to county mean so
+  // the gap layers still carry a useful "above/below county" signal.
+  const _meanOf=field=>{
+    let n=0,s=0;
+    for(const f of DATA.features){const v=f.properties[field];if(v!=null&&Number.isFinite(v)){n++;s+=v;}}
+    return n?s/n:null;
+  };
+  const hohMean=hohFit?null:_meanOf('pct_hoh');
+  const vetMean=_meanOf('pct_vet');  // always used — vet baseline is the county mean
+  const vfMean=vfFit?null:_meanOf('pct_val_freeze');
   for(const f of DATA.features){
     const p=f.properties;
-    const predict=(fit,x)=>(fit&&x!=null&&Number.isFinite(x))?(fit.intercept+fit.slope*x):null;
-    const hohPred=predict(hohFit,p.zip_poverty_rate);
+    const predict=(fit,x,mean)=>{
+      if(fit&&x!=null&&Number.isFinite(x))return fit.intercept+fit.slope*x;
+      return mean;  // falls back to county mean when fit is unavailable
+    };
+    const hohPred=predict(hohFit,p.zip_poverty_rate,hohMean);
     if(hohPred!=null&&p.pct_hoh!=null)p.hoh_gap=p.pct_hoh-hohPred;
-    const vetPred=predict(vetFit,p.zip_income_factor);
-    if(vetPred!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetPred;
-    const vfPred=predict(vfFit,p.zip_poverty_rate);
+    if(vetMean!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetMean;
+    const vfPred=predict(vfFit,p.zip_poverty_rate,vfMean);
     if(vfPred!=null&&p.pct_val_freeze!=null)p.vf_gap=p.pct_val_freeze-vfPred;
   }
 })();
@@ -588,7 +625,9 @@ function _olsFit(pairs){
     const mean=sum/cnt;
     let sq=0;
     for(const v of vals)if(v!=null&&Number.isFinite(v))sq+=(v-mean)*(v-mean);
-    const stdev=Math.sqrt(sq/cnt);
+    // Sample stdev (N-1 denominator) to match the (N-1) scaling in the
+    // Gi* z-score normalization below.
+    const stdev=cnt>1?Math.sqrt(sq/(cnt-1)):0;
     if(stdev<=0)continue;
     const scale=stdev*Math.sqrt((K*(N-K))/(N-1));
     for(let i=0;i<N;i++){
@@ -638,7 +677,12 @@ const _changePoints={};  // nbhd -> { base -> {year, deltaPct, before, after} }
       }
       if(bestT<0)continue;
       const shift=Math.abs(bestAfter-bestBefore);
-      if(shift<1.5*sd)continue;
+      // A smoothly monotonic trend also produces a large mid-point "shift",
+      // so a 1.5σ threshold generates false positives. Require a stronger
+      // 2σ shift AND a minimum absolute gap (1 pp for rates, $25k for
+      // dollar series) to keep only structural breaks.
+      const absFloor=(base==='avg_appraised')?25000:0.01;
+      if(shift<2.0*sd||shift<absFloor)continue;
       perNbhd[base]={year:series[bestT].y, delta:bestAfter-bestBefore, before:bestBefore, after:bestAfter};
     }
     if(Object.keys(perNbhd).length)_changePoints[p.nbhd]=perNbhd;
@@ -1639,7 +1683,7 @@ function computeInsights(feats){
     const under=hohGapArr[0];
     if((under.properties.hoh_gap||0)<-0.1){
       out.push({id:'hoh-underclaim',severity:'med',
-        text:'Biggest HOH under-claim: Nbhd '+under.properties.nbhd+' is '+(under.properties.hoh_gap*100).toFixed(1)+' pp below the rate predicted for its demographics.',
+        text:'Biggest HOH under-claim: Nbhd '+under.properties.nbhd+' is '+Math.abs(under.properties.hoh_gap*100).toFixed(1)+' pp below the rate predicted for its demographics.',
         nbhd:under.properties.nbhd,hint:'Target for HOH clinic outreach.'});
     }
   }
@@ -1722,13 +1766,13 @@ function exportCsv(){
   const layer=NBL;
   const field=LAYER_FIELD[layer];
   const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
-  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover','val_change_pct','appr_volatility','exemp_drift','hoh_gap','vet_gap','vf_gap','gi_outreach_need','gi_pct_vf_denied','cc_time_min','zip_poverty_rate'];
   const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
     const p=f.properties;
     const layerVal=field?p[field]:'';
     const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
     const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
-    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||'',p.val_change_pct==null?'':p.val_change_pct,p.appr_volatility==null?'':p.appr_volatility,p.exemp_drift==null?'':p.exemp_drift,p.hoh_gap==null?'':p.hoh_gap,p.vet_gap==null?'':p.vet_gap,p.vf_gap==null?'':p.vf_gap,p.gi_outreach_need==null?'':p.gi_outreach_need,p.gi_pct_vf_denied==null?'':p.gi_pct_vf_denied,p.cc_time_min==null?'':p.cc_time_min,p.zip_poverty_rate==null?'':p.zip_poverty_rate].map(csvEsc).join(',');
   });
   const csv=header.join(',')+'\n'+rows.join('\n');
   const stamp=new Date().toISOString().slice(0,10);
@@ -1769,13 +1813,13 @@ function exportSelectionCsv(){
   const layer=NBL;
   const field=LAYER_FIELD[layer];
   const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
-  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover','val_change_pct','appr_volatility','exemp_drift','hoh_gap','vet_gap','vf_gap','gi_outreach_need','gi_pct_vf_denied','cc_time_min','zip_poverty_rate'];
   const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
     const p=f.properties;
     const layerVal=field?p[field]:'';
     const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
     const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
-    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||'',p.val_change_pct==null?'':p.val_change_pct,p.appr_volatility==null?'':p.appr_volatility,p.exemp_drift==null?'':p.exemp_drift,p.hoh_gap==null?'':p.hoh_gap,p.vet_gap==null?'':p.vet_gap,p.vf_gap==null?'':p.vf_gap,p.gi_outreach_need==null?'':p.gi_outreach_need,p.gi_pct_vf_denied==null?'':p.gi_pct_vf_denied,p.cc_time_min==null?'':p.cc_time_min,p.zip_poverty_rate==null?'':p.zip_poverty_rate].map(csvEsc).join(',');
   });
   const csv=header.join(',')+'\n'+rows.join('\n');
   const stamp=new Date().toISOString().slice(0,10);
