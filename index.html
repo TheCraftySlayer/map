@@ -182,6 +182,12 @@
     <option value="avg_visit_min">Avg visit duration</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption stability</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
   </select>
   <label style="font-size:11px;color:#666">Right pane:</label>
   <select id="swipeRight" style="width:100%;margin:2px 0 4px;font-size:11px;padding:3px;border-radius:4px;border:1px solid #ddd">
@@ -215,6 +221,12 @@
     <option value="avg_visit_min">Avg visit duration</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption stability</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
   </select>
   <label><input type="checkbox" id="swipeMode"> Enable split compare</label>
 
@@ -232,6 +244,12 @@
     <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
     <option value="median_val_25">Median value 2025</option>
   </select>
@@ -248,6 +266,12 @@
     <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
+    <option value="gi_outreach_need">Hot/cold cluster (outreach)</option>
+    <option value="gi_pct_vf_denied">Hot/cold cluster (VF denial)</option>
+    <option value="hoh_gap">Exemption gap &mdash; HOH</option>
+    <option value="vet_gap">Exemption gap &mdash; Vet</option>
+    <option value="vf_gap">Exemption gap &mdash; VF</option>
+    <option value="cc_time_min">Drive-time to CC</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
     <option value="median_val_25">Median value 2025</option>
   </select>
@@ -1742,13 +1766,13 @@ function exportCsv(){
   const layer=NBL;
   const field=LAYER_FIELD[layer];
   const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
-  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover','val_change_pct','appr_volatility','exemp_drift','hoh_gap','vet_gap','vf_gap','gi_outreach_need','gi_pct_vf_denied','cc_time_min','zip_poverty_rate'];
   const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
     const p=f.properties;
     const layerVal=field?p[field]:'';
     const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
     const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
-    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||'',p.val_change_pct==null?'':p.val_change_pct,p.appr_volatility==null?'':p.appr_volatility,p.exemp_drift==null?'':p.exemp_drift,p.hoh_gap==null?'':p.hoh_gap,p.vet_gap==null?'':p.vet_gap,p.vf_gap==null?'':p.vf_gap,p.gi_outreach_need==null?'':p.gi_outreach_need,p.gi_pct_vf_denied==null?'':p.gi_pct_vf_denied,p.cc_time_min==null?'':p.cc_time_min,p.zip_poverty_rate==null?'':p.zip_poverty_rate].map(csvEsc).join(',');
   });
   const csv=header.join(',')+'\n'+rows.join('\n');
   const stamp=new Date().toISOString().slice(0,10);
@@ -1789,13 +1813,13 @@ function exportSelectionCsv(){
   const layer=NBL;
   const field=LAYER_FIELD[layer];
   const fieldLabel=layer&&layer!=='none'?(LG[layer]&&LG[layer].n||layer):'(no layer)';
-  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover'];
+  const header=['nbhd','nbhd_type','parcels','nearest_cc',fieldLabel,'outreach_need_pct','outreach_severity','outreach_vulnerability','outreach_service_gap','outreach_why','outreach_recs','median_val_25','pct_hoh','pct_vet','pct_val_freeze','owner_turnover','val_change_pct','appr_volatility','exemp_drift','hoh_gap','vet_gap','vf_gap','gi_outreach_need','gi_pct_vf_denied','cc_time_min','zip_poverty_rate'];
   const rows=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).map(f=>{
     const p=f.properties;
     const layerVal=field?p[field]:'';
     const onPct=p.outreach_need!=null?(p.outreach_need*100).toFixed(0):'';
     const recsCleaned=p.outreach_recs?p.outreach_recs.split('|').map(r=>r.split('::')[0]).join(' | '):'';
-    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||''].map(csvEsc).join(',');
+    return [p.nbhd,p.nbhd_type||'',p.parcels||'',p.nearest_cc||'',layerVal,onPct,p.outreach_severity||'',p.outreach_vulnerability||'',p.outreach_service_gap||'',p.outreach_why||'',recsCleaned,p.median_val_25||'',p.pct_hoh||'',p.pct_vet||'',p.pct_val_freeze||'',p.owner_turnover||'',p.val_change_pct==null?'':p.val_change_pct,p.appr_volatility==null?'':p.appr_volatility,p.exemp_drift==null?'':p.exemp_drift,p.hoh_gap==null?'':p.hoh_gap,p.vet_gap==null?'':p.vet_gap,p.vf_gap==null?'':p.vf_gap,p.gi_outreach_need==null?'':p.gi_outreach_need,p.gi_pct_vf_denied==null?'':p.gi_pct_vf_denied,p.cc_time_min==null?'':p.cc_time_min,p.zip_poverty_rate==null?'':p.zip_poverty_rate].map(csvEsc).join(',');
   });
   const csv=header.join(',')+'\n'+rows.join('\n');
   const stamp=new Date().toISOString().slice(0,10);
