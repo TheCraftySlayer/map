@@ -515,25 +515,42 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             props['zip_poverty_rate'] = round(zip_poverty, 4)
             props['zip_income_factor'] = round(zip_low_income, 4)
 
-        # Severity: worst current problem
+        # ── Severity, vulnerability, service-gap aggregation ─────────────
+        # Switched from max() to a complement-product ("noisy-OR") so
+        # multiple moderate issues correctly rank ABOVE a single extreme
+        # issue. Each signal is still capped to [0,1] by _cap, then
+        # combined as: 1 - Π(1 - vᵢ). Bounded in [0,1] by construction.
+        def _noisy_or(*vals):
+            p = 1.0
+            for v in vals:
+                p *= (1.0 - max(0.0, min(1.0, v or 0.0)))
+            return 1.0 - p
+
+        # Severity: current problems. Capturing HOH churn, VF denial, and
+        # appraisal volatility. A nbhd with all three moderately elevated
+        # should rank higher than one with a single extreme issue.
         sev_vf_denied = _cap(props.get('pct_vf_denied'), 0.4)
         sev_hoh_churn = _cap(hoh_churn, 0.04)
         sev_volatility = _cap(volatility, 0.5)
-        severity = max(sev_vf_denied, sev_hoh_churn, sev_volatility)
+        severity = _noisy_or(sev_vf_denied, sev_hoh_churn, sev_volatility)
 
-        # Vulnerability: concentration of at-risk residents
-        # Include Census poverty/income as strong vulnerability amplifiers
+        # Vulnerability: concentration of at-risk residents. ZIP poverty
+        # and low-income feed in as Census amplifiers; elderly and
+        # veteran concentrations capture assessor-specific vulnerability.
         vul_elderly = _cap(props.get('pct_val_freeze'), 0.15)
         vul_veterans = _cap(props.get('pct_vet'), 0.12)
         vul_new_owners = _cap(owner_turnover, 0.25)
         vul_poverty = _cap(zip_poverty, 0.25)       # 25% poverty → max
         vul_low_income = zip_low_income              # already 0-1 (<=$35k → max)
-        vulnerability = max(
+        vulnerability = _noisy_or(
             vul_elderly, vul_veterans, vul_new_owners,
             vul_poverty, vul_low_income,
         )
 
-        # Service gap: low engagement is the strongest equity signal
+        # Service gap: low engagement is the strongest equity signal.
+        # Still uses max() — these two components (low contact rate and
+        # high failure rate) measure the SAME underlying deficiency from
+        # two angles, so compounding them would double-count.
         cpp = props.get('contacts_per_parcel', 0) or 0
         gap_low_contact = max(0, 1.0 - cpp / 0.5)    # <0.1 cpp → ~max
         gap_failure = _cap(props.get('failure_rate'), 0.15)
@@ -544,19 +561,28 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             gap_low_contact = min(1.0, gap_low_contact * (1 + demographic_disadvantage * 0.5))
         service_gap = max(gap_low_contact, gap_failure)
 
-        # Weighted formula: emphasize service gap (equity priority)
-        # Geometric mean style with service_gap weighted 2x
+        # Weighted geometric mean: sqrt(severity * vulnerability) *
+        # service_gap. Each dimension must be non-trivial for a high
+        # score. Noisy-OR aggregation above already inflates the
+        # per-dimension values, so dropped the arbitrary 1.6 multiplier
+        # that was previously needed to push max-aggregated scores up.
         sev_f = max(severity, 0.15)
         vul_f = max(vulnerability, 0.15)
         gap_f = max(service_gap, 0.15)
-        # score = sqrt(severity * vulnerability) * service_gap (heavier weight on gap)
         import math
         base = math.sqrt(sev_f * vul_f)
-        props['outreach_need'] = round(min(1.0, base * gap_f * 1.6), 4)
-        # Store component scores for transparency
+        props['outreach_need'] = round(min(1.0, base * gap_f), 4)
+        # Store component scores for transparency (both aggregates and
+        # the individual signals so users can debug rankings).
         props['outreach_severity'] = round(severity, 4)
         props['outreach_vulnerability'] = round(vulnerability, 4)
         props['outreach_service_gap'] = round(service_gap, 4)
+        props['sev_vf_denied'] = round(sev_vf_denied, 4)
+        props['sev_hoh_churn'] = round(sev_hoh_churn, 4)
+        props['sev_volatility'] = round(sev_volatility, 4)
+        props['vul_elderly'] = round(vul_elderly, 4)
+        props['vul_veterans'] = round(vul_veterans, 4)
+        props['vul_new_owners'] = round(vul_new_owners, 4)
 
         # Generate outreach recommendations with explicit reasoning
         # Format: "Title::Why::What" split by | for multiple recs
