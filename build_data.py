@@ -770,6 +770,48 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             props[f'owner_turnover_{ys}'] = round(yot / yp, 4) if yp else 0
             props[f'parcels_{ys}'] = float(yp)
 
+        # Fallback: compute exemp_drift (and hoh_20 / vet_20 / earliest_yr /
+        # latest_yr) from the per-year fields stored on this feature across
+        # all historical builds, even when the current roll is single-year.
+        # The per-year fields survive roll-only rebuilds because we initialize
+        # props from existing.get(nbhd). Without this fallback, the drift
+        # layer shows "no data" for anyone who first built the site with
+        # a single roll.
+        _hoh_by_yr = {}
+        _vet_by_yr = {}
+        for _k, _v in props.items():
+            if _v is None or not isinstance(_v, (int, float)):
+                continue
+            if _k.startswith('pct_hoh_') and _k[8:].isdigit():
+                _hoh_by_yr[int(_k[8:])] = _v
+            elif _k.startswith('pct_vet_') and _k[8:].isdigit():
+                _vet_by_yr[int(_k[8:])] = _v
+        _common = sorted(set(_hoh_by_yr) & set(_vet_by_yr))
+        # Ignore zeros — build_data stores 0 as a sentinel when a year has
+        # no parcels at all. Keep only years with a plausible rate.
+        _common = [y for y in _common if _hoh_by_yr[y] or _vet_by_yr[y]]
+        if len(_common) >= 2:
+            _early, _late = _common[0], _common[-1]
+            _drift = round(
+                abs(_hoh_by_yr[_late] - _hoh_by_yr[_early])
+                + abs(_vet_by_yr[_late] - _vet_by_yr[_early]), 4,
+            )
+            # Only write if this build didn't already compute a value —
+            # the multi-year branch above is authoritative when present.
+            if props.get('exemp_drift') is None:
+                props['exemp_drift'] = _drift
+            if props.get('hoh_20') is None:
+                props['hoh_20'] = _hoh_by_yr[_early]
+            if props.get('vet_20') is None:
+                props['vet_20'] = _vet_by_yr[_early]
+            if props.get('pct_hoh_20') is None:
+                props['pct_hoh_20'] = _hoh_by_yr[_early]
+            if props.get('pct_vet_20') is None:
+                props['pct_vet_20'] = _vet_by_yr[_early]
+            # earliest_yr / latest_yr drive the tooltip "HOH 2007→2025" labels.
+            props['earliest_yr'] = 2000 + _early
+            props['latest_yr'] = 2000 + _late
+
         # Outreach need score (0-1): multi-signal weighted composite
         # Design: need = severity × vulnerability × service_gap
         # High score requires ALL three: a real problem, a vulnerable group,
