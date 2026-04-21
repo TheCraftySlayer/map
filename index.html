@@ -83,6 +83,12 @@
   <label><input type="radio" name="nbhd_layer" value="appr_volatility"> Appraisal volatility</label>
   <label><input type="radio" name="nbhd_layer" value="exemp_drift"> Exemption drift</label>
   <label><input type="radio" name="nbhd_layer" value="outreach_need"> <b>Outreach need score</b></label>
+  <label><input type="radio" name="nbhd_layer" value="gi_outreach_need"> Hot/cold-spot cluster (outreach)</label>
+  <label><input type="radio" name="nbhd_layer" value="gi_pct_vf_denied"> Hot/cold-spot cluster (VF denial)</label>
+  <label><input type="radio" name="nbhd_layer" value="hoh_gap"> Exemption gap &mdash; HOH</label>
+  <label><input type="radio" name="nbhd_layer" value="vet_gap"> Exemption gap &mdash; Vet</label>
+  <label><input type="radio" name="nbhd_layer" value="vf_gap"> Exemption gap &mdash; VF</label>
+  <label><input type="radio" name="nbhd_layer" value="cc_time_min"> Drive-time to nearest CC (proxy)</label>
 
   <h5>Value changes <span style="font-weight:400;color:#aaa">year-over-year</span></h5>
   <label><input type="radio" name="nbhd_layer" value="sales"> Recent sale density</label>
@@ -135,9 +141,13 @@
     <div style="padding:0 8px 6px;display:flex;gap:4px"><button id="filterAdd" style="font-size:10px;padding:2px 8px;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">+ row</button><button id="filterClear" style="font-size:10px;padding:2px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer">Clear all</button></div>
   </details>
 
-  <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER (live)</span></h5>
+  <h5>Census tract choropleth <span style="font-weight:400;color:#aaa">TIGER + ACS 5-Year</span></h5>
   <label><input type="radio" name="tract_layer" value="none" checked> Off</label>
   <label><input type="radio" name="tract_layer" value="addr_density"> Geocoded address density</label>
+  <label><input type="radio" name="tract_layer" value="poverty_rate"> Poverty rate</label>
+  <label><input type="radio" name="tract_layer" value="median_age"> Median age</label>
+  <label><input type="radio" name="tract_layer" value="spanish_at_home"> Spanish at home %</label>
+  <label><input type="radio" name="tract_layer" value="elderly_alone"> Elderly living alone %</label>
 
   <h5>Compare choropleth layers</h5>
   <label style="font-size:11px;color:#666">Left pane:</label>
@@ -491,6 +501,160 @@ const _countyMedianByYear={};  // base -> { year -> median }
     _countyMedianByYear[base]=perYear;
   }
 })();
+
+// ── Expected-vs-actual exemption gap ─────────────────────────────────────────
+// Fit a one-predictor OLS regression of each exemption rate on a ZIP
+// demographic predictor; store residuals so "low rate" becomes "low vs who
+// lives there" instead of a raw count.
+function _olsFit(pairs){
+  let n=0,sx=0,sy=0,sxx=0,sxy=0;
+  for(const [x,y] of pairs){if(x==null||!Number.isFinite(x)||y==null||!Number.isFinite(y))continue;n++;sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;}
+  if(n<8)return null;
+  const mx=sx/n, my=sy/n, vx=(sxx-n*mx*mx);
+  if(vx<=0)return{slope:0,intercept:my,n};
+  return{slope:(sxy-n*mx*my)/vx, intercept:my-((sxy-n*mx*my)/vx)*mx, n};
+}
+(function(){
+  // HOH ~ ZIP poverty (higher poverty → more HOH eligibility)
+  const hohFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_hoh]));
+  // Vet ~ ZIP income (higher income → fewer vet claimants, weak relationship)
+  const vetFit=_olsFit(DATA.features.map(f=>[f.properties.zip_income_factor,f.properties.pct_vet]));
+  // VF (value freeze) ~ ZIP poverty (elderly poor more likely eligible)
+  const vfFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_val_freeze]));
+  for(const f of DATA.features){
+    const p=f.properties;
+    const predict=(fit,x)=>(fit&&x!=null&&Number.isFinite(x))?(fit.intercept+fit.slope*x):null;
+    const hohPred=predict(hohFit,p.zip_poverty_rate);
+    if(hohPred!=null&&p.pct_hoh!=null)p.hoh_gap=p.pct_hoh-hohPred;
+    const vetPred=predict(vetFit,p.zip_income_factor);
+    if(vetPred!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetPred;
+    const vfPred=predict(vfFit,p.zip_poverty_rate);
+    if(vfPred!=null&&p.pct_val_freeze!=null)p.vf_gap=p.pct_val_freeze-vfPred;
+  }
+})();
+
+// ── Hot-spot / cluster detection (Getis-Ord Gi*) ─────────────────────────────
+// k-nearest-neighbors spatial weights (including self). For each nbhd and
+// each focal field, compute a local z-score: positive = hot cluster,
+// negative = cold cluster. Uses stored NBHD_CENTERS for centroids.
+(function(){
+  const K=8;
+  const feats=DATA.features;
+  const N=feats.length;
+  const centers=[];
+  for(const f of feats){
+    const c=NBHD_CENTERS&&NBHD_CENTERS[f.properties.nbhd];
+    centers.push(c?[c[0],c[1]]:null);
+  }
+  // Precompute k-NN indices (including self) for each nbhd.
+  const knn=new Array(N);
+  for(let i=0;i<N;i++){
+    if(!centers[i]){knn[i]=null;continue;}
+    const dists=[];
+    for(let j=0;j<N;j++){
+      if(!centers[j])continue;
+      const dy=centers[i][0]-centers[j][0];
+      const dx=centers[i][1]-centers[j][1];
+      dists.push([j,dx*dx+dy*dy]);
+    }
+    dists.sort((a,b)=>a[1]-b[1]);
+    knn[i]=dists.slice(0,K).map(d=>d[0]);
+  }
+  const fields=['outreach_need','pct_vf_denied'];
+  for(const field of fields){
+    const vals=feats.map(f=>f.properties[field]);
+    let sum=0,cnt=0;
+    for(const v of vals)if(v!=null&&Number.isFinite(v)){sum+=v;cnt++;}
+    if(cnt<20)continue;
+    const mean=sum/cnt;
+    let sq=0;
+    for(const v of vals)if(v!=null&&Number.isFinite(v))sq+=(v-mean)*(v-mean);
+    const stdev=Math.sqrt(sq/cnt);
+    if(stdev<=0)continue;
+    const scale=stdev*Math.sqrt((K*(N-K))/(N-1));
+    for(let i=0;i<N;i++){
+      if(!knn[i]){feats[i].properties['gi_'+field]=null;continue;}
+      let localSum=0,localCnt=0;
+      for(const j of knn[i]){const v=vals[j];if(v!=null&&Number.isFinite(v)){localSum+=v;localCnt++;}}
+      if(localCnt<K/2){feats[i].properties['gi_'+field]=null;continue;}
+      feats[i].properties['gi_'+field]=(localSum-K*mean)/scale;
+    }
+  }
+})();
+
+// ── Change-point detection on per-year series ────────────────────────────────
+// For each nbhd × per-year base, locate the split year with the largest
+// mean-shift (weighted by shorter-segment size). Surface only when the
+// shift exceeds 1.5× the series' standard deviation — i.e., a visibly
+// distinct break, not normal drift.
+const _changePoints={};  // nbhd -> { base -> {year, deltaPct, before, after} }
+(function(){
+  const Y0=7,Y1=26;
+  const bases=['pct_hoh','pct_vet','pct_val_freeze','pct_vf_denied','owner_turnover','avg_appraised'];
+  for(const f of DATA.features){
+    const p=f.properties;
+    const perNbhd={};
+    for(const base of bases){
+      const series=[];
+      const zeroMissing=(base==='avg_appraised');
+      for(let y=Y0;y<=Y1;y++){
+        const v=p[base+'_'+y];
+        if(v==null||!Number.isFinite(v))continue;
+        if(zeroMissing&&v===0)continue;
+        series.push({y,v});
+      }
+      if(series.length<6)continue;
+      const mean=series.reduce((a,s)=>a+s.v,0)/series.length;
+      const variance=series.reduce((a,s)=>a+(s.v-mean)*(s.v-mean),0)/series.length;
+      const sd=Math.sqrt(variance);
+      if(sd<=0)continue;
+      let bestCost=0,bestT=-1,bestBefore=0,bestAfter=0;
+      for(let t=2;t<=series.length-2;t++){
+        let mb=0;for(let i=0;i<t;i++)mb+=series[i].v;mb/=t;
+        let ma=0;for(let i=t;i<series.length;i++)ma+=series[i].v;ma/=(series.length-t);
+        const delta=Math.abs(ma-mb);
+        const weight=Math.min(t,series.length-t);
+        const cost=delta*weight;
+        if(cost>bestCost){bestCost=cost;bestT=t;bestBefore=mb;bestAfter=ma;}
+      }
+      if(bestT<0)continue;
+      const shift=Math.abs(bestAfter-bestBefore);
+      if(shift<1.5*sd)continue;
+      perNbhd[base]={year:series[bestT].y, delta:bestAfter-bestBefore, before:bestBefore, after:bestAfter};
+    }
+    if(Object.keys(perNbhd).length)_changePoints[p.nbhd]=perNbhd;
+  }
+})();
+
+// ── Drive-time catchment proxy ──────────────────────────────────────────────
+// Haversine distance from each nbhd centroid to each of the 9 community
+// centers, converted to minutes using a ~25 mph urban-speed proxy. True
+// isochrones require an OSRM/Mapbox endpoint — see the note in LAYER_HELP.
+(function(){
+  const CC_COORDS=[
+    [35.1769943,-106.3409576],[35.0788198,-106.3923734],[35.1950907,-106.7129307],
+    [35.193073,-106.6157715],[35.0537822,-106.672675],[34.9569792,-106.696385],
+    [35.0158333,-106.6577778],[35.069824,-106.6881653],[35.0714679,-106.7101371]
+  ];
+  const MPH=25;
+  const haversineMi=(lat1,lon1,lat2,lon2)=>{
+    const R=3958.8, toRad=d=>d*Math.PI/180;
+    const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  };
+  for(const f of DATA.features){
+    const p=f.properties;
+    const c=NBHD_CENTERS&&NBHD_CENTERS[p.nbhd];
+    if(!c){p.cc_time_min=null;continue;}
+    let best=Infinity;
+    for(const cc of CC_COORDS){
+      const mi=haversineMi(c[0],c[1],cc[0],cc[1]);
+      if(mi<best)best=mi;
+    }
+    p.cc_time_min=best===Infinity?null:(best/MPH)*60;
+  }
+})();
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
 const TILES={
   sat:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri &mdash; Maxar',maxZoom:19}),
@@ -601,7 +765,16 @@ const CS={
   exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
   addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
   volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']],
-  val_change_pct:[[-.5,'#40004b'],[-.25,'#762a83'],[-.1,'#c2a5cf'],[0,'#f7f7f7'],[.25,'#d9f0d3'],[.75,'#5aae61'],[1.5,'#00441b'],[3,'#002d10']]
+  val_change_pct:[[-.5,'#40004b'],[-.25,'#762a83'],[-.1,'#c2a5cf'],[0,'#f7f7f7'],[.25,'#d9f0d3'],[.75,'#5aae61'],[1.5,'#00441b'],[3,'#002d10']],
+  poverty_rate:[[0,'#fff5f0'],[0.05,'#fdd0a2'],[.1,'#fdae6b'],[.2,'#fd8d3c'],[.3,'#e6550d'],[.5,'#8c2d04']],
+  median_age:[[20,'#440154'],[28,'#3b528b'],[35,'#21918c'],[42,'#5ec962'],[50,'#fde725']],
+  spanish_at_home:[[0,'#f7fbff'],[0.1,'#c6dbef'],[0.25,'#6baed6'],[0.4,'#2171b5'],[0.6,'#08306b']],
+  elderly_alone:[[0,'#f2f0f7'],[0.05,'#cbc9e2'],[0.1,'#9e9ac8'],[0.15,'#756bb1'],[0.25,'#54278f']],
+  gi_hotspot:[[-2.5,'#2166ac'],[-1.5,'#92c5de'],[-.5,'#f7f7f7'],[.5,'#f7f7f7'],[1.5,'#f4a582'],[2.5,'#b2182b']],
+  hoh_gap:[[-.3,'#b2182b'],[-.1,'#f4a582'],[-.02,'#f7f7f7'],[.02,'#f7f7f7'],[.1,'#92c5de'],[.3,'#2166ac']],
+  vet_gap:[[-.15,'#b2182b'],[-.05,'#f4a582'],[-.01,'#f7f7f7'],[.01,'#f7f7f7'],[.05,'#92c5de'],[.15,'#2166ac']],
+  vf_gap:[[-.2,'#b2182b'],[-.05,'#f4a582'],[-.01,'#f7f7f7'],[.01,'#f7f7f7'],[.05,'#92c5de'],[.2,'#2166ac']],
+  cc_time_min:[[0,'#f7fbff'],[8,'#c6dbef'],[15,'#6baed6'],[25,'#2171b5'],[40,'#08519c'],[60,'#08306b']]
 };
 const LG={
   demand:{l:'0',h:'2+',n:'contacts/parcel'},
@@ -644,6 +817,15 @@ const LG={
   exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOH\u0394|+|VET\u0394| earliest vs latest year)'},
   addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
   val_change_pct:{l:'-50%',h:'+300%',n:'cumulative median value change 2007-26'},
+  poverty_rate:{l:'0%',h:'50%+',n:'population below poverty (ACS)'},
+  median_age:{l:'20',h:'50+',n:'median age (ACS)'},
+  spanish_at_home:{l:'0%',h:'60%+',n:'Spanish spoken at home (ACS)'},
+  elderly_alone:{l:'0%',h:'25%+',n:'households 65+ living alone (ACS)'},
+  gi_hotspot:{l:'cold',h:'hot',n:'Gi* hot/cold cluster z-score'},
+  hoh_gap:{l:'under-claim',h:'over-claim',n:'HOH rate gap vs. demographic prediction'},
+  vet_gap:{l:'under-claim',h:'over-claim',n:'veteran rate gap vs. demographic prediction'},
+  vf_gap:{l:'under-claim',h:'over-claim',n:'value-freeze rate gap vs. demographic prediction'},
+  cc_time_min:{l:'0 min',h:'60+ min',n:'est. drive time to nearest community center'},
   volatility:{l:'0%',h:'80%+',n:'cumulative appraisal volatility (sum |YoY| 2007\u20132025)'}
 };
 
@@ -661,7 +843,13 @@ const LAYER_FIELD={
   chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',chg_25_26:'chg_25_26',
   appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',
   volatility:'volatility',
-  val_change_pct:'val_change_pct'
+  val_change_pct:'val_change_pct',
+  gi_outreach_need:'gi_outreach_need',
+  gi_pct_vf_denied:'gi_pct_vf_denied',
+  hoh_gap:'hoh_gap',
+  vet_gap:'vet_gap',
+  vf_gap:'vf_gap',
+  cc_time_min:'cc_time_min'
 };
 
 let _visFeatCache=null, _cachedRules=[];
@@ -680,11 +868,13 @@ function featureHidden(p){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','val_change_pct','volatility','appr_volatility','exemp_drift'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','val_change_pct','volatility','appr_volatility','exemp_drift','zip_poverty_rate','outreach_need','outreach_severity','outreach_vulnerability','outreach_service_gap'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
-  if(layer==='avg_visit_min')return v.toFixed(1)+' min';
-  if(layer==='median_yrbuilt')return Math.round(v).toString();
+  if(layer==='avg_visit_min'||layer==='cc_time_min')return v.toFixed(1)+' min';
+  if(layer==='median_yrbuilt'||layer==='median_age')return Math.round(v).toString();
+  if(layer==='gi_outreach_need'||layer==='gi_pct_vf_denied')return(v>=0?'+':'')+v.toFixed(2)+' σ';
+  if(layer==='hoh_gap'||layer==='vet_gap'||layer==='vf_gap')return(v>=0?'+':'')+(v*100).toFixed(1)+' pp';
   return v.toFixed(2);
 }
 
@@ -763,6 +953,12 @@ function markHistogram(val){
   const x=(val-_histLo)/(_histHi-_histLo)*180;
   mark.setAttribute('x1',x.toFixed(2));mark.setAttribute('x2',x.toFixed(2));
 }
+// Some layers reuse a shared color palette (e.g. both gi_* layers use
+// CS.gi_hotspot). Resolve the right CS entry before drawing legends.
+function scaleFor(layer){
+  if(layer==='gi_outreach_need'||layer==='gi_pct_vf_denied')return CS.gi_hotspot;
+  return CS[layer];
+}
 function updateLegendRange(layer){
   if(swipeActive)return;
   const field=LAYER_FIELD[layer];
@@ -780,7 +976,7 @@ function updateLegendRange(layer){
   const hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*0.99))];
   document.getElementById('lL').textContent=formatStat(lo,layer);
   document.getElementById('lH').textContent=formatStat(hi,layer);
-  document.getElementById('lG').style.background=grad(CS[layer]||CS[NBL]);
+  document.getElementById('lG').style.background=grad(scaleFor(layer)||scaleFor(NBL)||CS.demand);
   renderHistogram(vals,lo,hi);
 }
 
@@ -879,11 +1075,22 @@ info._buildHtml=function(p){
         }
         return '';
       })();
-      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px;display:flex;justify-content:space-between;gap:6px"><span>'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</span>'+(medPath?'<span style="color:#aaa">— this nbhd &middot; <span style="color:#999">··· county median</span></span>':'')+'</div>'+
+      // Change-point marker: auto-detected break year for this (nbhd, base).
+      const cp=(_changePoints[p.nbhd]||{})[base];
+      let cpMark='';
+      if(cp){
+        const cpOff=cp.year-Y0;
+        const cx=xs(cpOff).toFixed(1);
+        const dir=cp.delta>=0?'+':'';
+        cpMark='<line x1="'+cx+'" y1="0" x2="'+cx+'" y2="'+lh+'" stroke="#c41a1a" stroke-width="1" stroke-dasharray="2,2" opacity="0.7"><title>Change-point detected in '+("'"+String(cp.year).padStart(2,'0'))+" ("+dir+formatStat(cp.delta,NBL)+' vs prior avg)</title></line>';
+      }
+      const cpNote=cp?'<span style="color:#c41a1a">&#x1D25C; change in '+"'"+String(cp.year).padStart(2,'0')+': '+(cp.delta>=0?'+':'')+formatStat(cp.delta,NBL)+'</span>':'';
+      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap"><span>'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</span>'+(medPath?'<span style="color:#aaa">— this nbhd &middot; <span style="color:#999">··· county median</span></span>':'')+'</div>'+
         '<svg width="'+lw+'" height="'+lh+'" style="display:block;margin:2px 0">'+
-        medLine+medEndMarker+
+        medLine+medEndMarker+cpMark+
         '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+gaps+'</svg>'+
-        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+lab(firstHave)+' '+fmt(firstHave.v)+'</span><span>'+lab(lastHave)+' '+fmt(lastHave.v)+'</span></div>';
+        '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+lab(firstHave)+' '+fmt(firstHave.v)+'</span><span>'+lab(lastHave)+' '+fmt(lastHave.v)+'</span></div>'+
+        (cpNote?'<div style="font-size:9px;margin-top:-1px;text-align:right">'+cpNote+'</div>':'');
     }
   }
   return '<h4>Nbhd '+esc(p.nbhd)+(p.nbhd_type?' <span style="font-size:10px;color:#888">['+esc(p.nbhd_type)+']</span>':'')+(p.parcels?' <span style="font-size:10px;color:#888">&middot; '+Math.round(p.parcels).toLocaleString()+' parcels</span>':'')+'</h4>'+
@@ -1099,9 +1306,19 @@ tractInfo.update=function(p){
   const cnt=p.address_count||0;
   const pct=tractPctile(cnt);
   const pctOfTotal=(_tractTotal>0?((cnt/_tractTotal)*100).toFixed(1):'0')+'%';
+  const acsRow=(label,v,fmt)=>{
+    if(v==null||!Number.isFinite(v))return '';
+    return '<div class="s"><span>'+label+'</span><span class="v">'+fmt(v)+'</span></div>';
+  };
+  const pctFmt=v=>(v*100).toFixed(1)+'%';
+  const yrFmt=v=>v.toFixed(1);
   this._div.innerHTML='<h4>'+p.NAMELSAD+'</h4>'+
     '<div class="s"><span>Geocoded addresses</span><span class="v">'+cnt.toLocaleString()+'</span></div>'+
     '<div class="s"><span>Density percentile</span><span class="v">'+pct+'th</span></div>'+
+    acsRow('Poverty rate',p.poverty_rate,pctFmt)+
+    acsRow('Median age',p.median_age,yrFmt)+
+    acsRow('Spanish at home',p.spanish_at_home,pctFmt)+
+    acsRow('Elderly alone',p.elderly_alone,pctFmt)+
     '<div class="s"><span>Share of all addresses</span><span class="v">'+pctOfTotal+'</span></div>'+
     '<div class="s"><span>County avg per tract</span><span class="v">'+_tractAvg.toLocaleString()+'</span></div>';
 };
@@ -1158,6 +1375,12 @@ function getNbhdColor(p, override){
   if(layer==='sales')return interp(CS.sales,p.pct_recent_sale||0);
   if(layer==='taxlightning')return(p.recent_sales>=3)?interp(CS.taxlightning,p.sale_contact_rate||0):'#f0f0f0';
   if(layer==='val_change_pct')return(p.val_change_pct!=null&&Number.isFinite(p.val_change_pct))?interp(CS.val_change_pct,p.val_change_pct):'#f0f0f0';
+  if(layer==='gi_outreach_need')return(p.gi_outreach_need!=null&&Number.isFinite(p.gi_outreach_need))?interp(CS.gi_hotspot,p.gi_outreach_need):'#f0f0f0';
+  if(layer==='gi_pct_vf_denied')return(p.gi_pct_vf_denied!=null&&Number.isFinite(p.gi_pct_vf_denied))?interp(CS.gi_hotspot,p.gi_pct_vf_denied):'#f0f0f0';
+  if(layer==='hoh_gap')return(p.hoh_gap!=null&&Number.isFinite(p.hoh_gap))?interp(CS.hoh_gap,p.hoh_gap):'#f0f0f0';
+  if(layer==='vet_gap')return(p.vet_gap!=null&&Number.isFinite(p.vet_gap))?interp(CS.vet_gap,p.vet_gap):'#f0f0f0';
+  if(layer==='vf_gap')return(p.vf_gap!=null&&Number.isFinite(p.vf_gap))?interp(CS.vf_gap,p.vf_gap):'#f0f0f0';
+  if(layer==='cc_time_min')return(p.cc_time_min!=null&&Number.isFinite(p.cc_time_min))?interp(CS.cc_time_min,p.cc_time_min):'#f0f0f0';
   if(CS[layer])return interp(CS[layer],p[layer]||0);
   return'#e0e0e0';
 }
@@ -1248,18 +1471,32 @@ function renderNbhd(){
   updateStatsBar(NBL);
 }
 
-function tractStyle(f){return{fillColor:interp(CS.addr_density,f.properties.address_count||0),weight:1.5,opacity:.8,color:'#555',fillOpacity:.55};}
+function tractFieldValue(p,layer){
+  if(layer==='addr_density')return p.address_count||0;
+  if(layer==='poverty_rate')return p.poverty_rate;
+  if(layer==='median_age')return p.median_age;
+  if(layer==='spanish_at_home')return p.spanish_at_home;
+  if(layer==='elderly_alone')return p.elderly_alone;
+  return null;
+}
+function tractStyle(f){
+  const layer=TRACTL;
+  const v=tractFieldValue(f.properties,layer);
+  const scale=CS[layer]||CS.addr_density;
+  const color=(v!=null&&Number.isFinite(v))?interp(scale,v):'#f0f0f0';
+  return{fillColor:color,weight:1.5,opacity:.8,color:'#555',fillOpacity:.55};
+}
 function hiTract(e){e.target.setStyle({weight:2.5,color:'#222',fillOpacity:.75});e.target.bringToFront();tractInfo.update(e.target.feature.properties);}
 function rhTract(e){tractLayer&&tractLayer.resetStyle(e.target);tractInfo.update();}
 function renderTract(){
   if(tractLayer){map.removeLayer(tractLayer);tractLayer=null;}
   if(TRACTL==='none'){tractInfo._div.style.display='none';return;}
   tractLayer=L.geoJSON(TRACT_GEO,{style:tractStyle,onEachFeature:(f,l)=>l.on({mouseover:hiTract,mouseout:rhTract})}).addTo(map);
-  const g=LG.addr_density;
+  const g=LG[TRACTL]||LG.addr_density;
   document.getElementById('lL').textContent=g.l;
   document.getElementById('lH').textContent=g.h;
   document.getElementById('lN').textContent=g.n;
-  document.getElementById('lG').style.background=grad(CS.addr_density);
+  document.getElementById('lG').style.background=grad(CS[TRACTL]||CS.addr_density);
 }
 
 renderNbhd();
@@ -1337,6 +1574,48 @@ function computeInsights(feats){
     out.push({id:'low-hoh',severity:'low',
       text:'<b>'+lowHoh.length+'</b> populated neighborhoods have HOH exemption rates below 5% — likely awareness gap.',
       hint:'Use the threshold filter: pct_hoh max 0.05.'});
+  }
+  // Change-point: biggest recent break in a meaningful series.
+  const cpCandidates=[];
+  for(const f of arr){
+    const cps=_changePoints[f.properties.nbhd];
+    if(!cps)continue;
+    for(const base of Object.keys(cps)){
+      const cp=cps[base];
+      if(cp.year<20)continue;  // prioritize breaks in the last several years
+      cpCandidates.push({nbhd:f.properties.nbhd,base,cp});
+    }
+  }
+  if(cpCandidates.length){
+    cpCandidates.sort((a,b)=>Math.abs(b.cp.delta)-Math.abs(a.cp.delta));
+    const top=cpCandidates[0];
+    const labels={pct_hoh:'HOH rate',pct_vet:'vet rate',pct_val_freeze:'VF rate',pct_vf_denied:'VF denial',owner_turnover:'owner turnover',avg_appraised:'avg value'};
+    const dirWord=top.cp.delta>=0?'jumped':'dropped';
+    out.push({id:'cpoint-'+top.nbhd+'-'+top.base,severity:'med',
+      text:'Largest recent structural break: Nbhd '+top.nbhd+"'s "+(labels[top.base]||top.base)+' '+dirWord+' in 20'+String(top.cp.year).padStart(2,'0')+'.',
+      nbhd:top.nbhd,hint:'Click to zoom — sparkline annotates the break year.'});
+  }
+  // Hot-spot cluster callout: surface extreme Gi* values.
+  const gi=arr.filter(f=>Number.isFinite(f.properties.gi_outreach_need));
+  if(gi.length){
+    gi.sort((a,b)=>(b.properties.gi_outreach_need||0)-(a.properties.gi_outreach_need||0));
+    const hot=gi[0];
+    if((hot.properties.gi_outreach_need||0)>=2){
+      out.push({id:'hot-cluster',severity:'high',
+        text:'Hot-spot cluster center: Nbhd '+hot.properties.nbhd+' sits in a cluster of high outreach need (Gi* z = +'+hot.properties.gi_outreach_need.toFixed(2)+').',
+        nbhd:hot.properties.nbhd,hint:'Switch to the Hot/cold-spot cluster layer.'});
+    }
+  }
+  // Under-claim outliers: biggest negative hoh_gap or vf_gap.
+  const hohGapArr=arr.filter(f=>Number.isFinite(f.properties.hoh_gap));
+  if(hohGapArr.length){
+    hohGapArr.sort((a,b)=>(a.properties.hoh_gap||0)-(b.properties.hoh_gap||0));
+    const under=hohGapArr[0];
+    if((under.properties.hoh_gap||0)<-0.1){
+      out.push({id:'hoh-underclaim',severity:'med',
+        text:'Biggest HOH under-claim: Nbhd '+under.properties.nbhd+' is '+(under.properties.hoh_gap*100).toFixed(1)+' pp below the rate predicted for its demographics.',
+        nbhd:under.properties.nbhd,hint:'Target for HOH clinic outreach.'});
+    }
   }
   return out;
 }
@@ -1971,7 +2250,9 @@ const YOY_LABELS=["'07\u2192'08","'08\u2192'09","'09\u2192'10","'10\u2192'11","'
 let _yoyTimer=null;
 function yoySelect(idx){
   const k=YOY_KEYS[idx];
-  document.getElementById('yoyLabel').textContent=YOY_LABELS[idx];
+  const lbl=document.getElementById('yoyLabel');
+  lbl.textContent=YOY_LABELS[idx];
+  if(typeof marketContextFor==='function'){const ctx=marketContextFor(k);lbl.title=ctx||'';}
   document.getElementById('yoySlider').value=idx;
   const r=document.querySelector('input[name="nbhd_layer"][value="'+k+'"]');
   if(r&&!r.checked){r.checked=true;r.dispatchEvent(new Event('change'));}
@@ -2059,7 +2340,7 @@ function openYoyGrid(){
       const color=v!=null&&Number.isFinite(v)?interp(YOY,v):'#e8e8e8';
       return '<use href="#'+p.id+'" fill="'+color+'" stroke="#fff" stroke-width="0.0004"/>';
     }).join('');
-    return '<button type="button" data-yoy-idx="'+idx+'" title="Load '+YOY_LABELS[idx]+' on main map" style="all:unset;cursor:pointer;display:block;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fff"><div style="padding:2px 6px;font-size:10px;font-weight:600;background:#f7f7f7;border-bottom:1px solid #eee">'+YOY_LABELS[idx]+'</div><svg viewBox="'+vb.x+' '+vb.y+' '+vb.w+' '+vb.h+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;background:#fafafa">'+uses+'</svg></button>';
+    return '<button type="button" data-yoy-idx="'+idx+'" title="Load '+YOY_LABELS[idx]+' on main map'+((typeof marketContextFor==='function'&&marketContextFor(key))?'&#10;'+marketContextFor(key):'')+'" style="all:unset;cursor:pointer;display:block;border:1px solid #ddd;border-radius:4px;overflow:hidden;background:#fff"><div style="padding:2px 6px;font-size:10px;font-weight:600;background:#f7f7f7;border-bottom:1px solid #eee">'+YOY_LABELS[idx]+'</div><svg viewBox="'+vb.x+' '+vb.y+' '+vb.w+' '+vb.h+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;background:#fafafa">'+uses+'</svg></button>';
   }).join('');
   const legendStops=YOY.map(([v,c])=>'<span style="display:inline-flex;align-items:center;gap:3px"><span style="display:inline-block;width:12px;height:12px;background:'+c+';border:1px solid #ccc"></span>'+(v>=0?'+':'')+(v*100).toFixed(0)+'%</span>').join(' ');
   const overlay=document.createElement('div');
@@ -2067,7 +2348,7 @@ function openYoyGrid(){
   overlay.innerHTML='<div id="ymGridBg" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10000;display:flex;align-items:center;justify-content:center">'+defsSvg+'<div style="background:#fff;border-radius:8px;max-width:95vw;max-height:92vh;overflow:auto;padding:14px 18px;font-family:system-ui,-apple-system,sans-serif"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap"><h3 style="margin:0;font-size:15px">Year-over-year median value change</h3><div style="font-size:10px;color:#666;display:flex;gap:8px;flex-wrap:wrap">'+legendStops+'</div><button id="ymGridClose" style="font-size:12px;padding:3px 10px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">Close</button></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">'+cells+'</div><div style="margin-top:8px;font-size:10px;color:#888">Click a tile to load that year on the main map.</div></div></div>';
   document.body.appendChild(overlay);
   const close=()=>{overlay.remove();window.removeEventListener('keydown',onKey,true);};
-  const onKey=e=>{if(e.key==='Escape')close();};
+  const onKey=e=>{if(e.key==='Escape'){e.stopPropagation();close();}};
   document.getElementById('ymGridClose').addEventListener('click',close);
   document.getElementById('ymGridBg').addEventListener('click',e=>{if(e.target.id==='ymGridBg')close();});
   overlay.querySelectorAll('[data-yoy-idx]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -2244,7 +2525,7 @@ function openScatter(){
     overlay.remove();
     window.removeEventListener('keydown',onKey,true);
   };
-  const onKey=e=>{if(e.key==='Escape')close();};
+  const onKey=e=>{if(e.key==='Escape'){e.stopPropagation();close();}};
   document.getElementById('scatClose').addEventListener('click',close);
   document.getElementById('scatBg').addEventListener('click',e=>{if(e.target.id==='scatBg')close();});
   window.addEventListener('keydown',onKey,true);
@@ -2382,7 +2663,16 @@ const LAYER_HELP={
   failure:'Share of contact-center interactions that ended unresolved.',
   avg_visit_min:'Average in-person visit duration in minutes.',
   addr_density:'Geocoded address density per census tract (TIGER/ACS).',
-  val_change_pct:'Cumulative median appraised-value change across all available YoY steps (roughly 2007–2026). Captures long-run gentrification or decline that single-year snapshots miss.'
+  val_change_pct:'Cumulative median appraised-value change across all available YoY steps (roughly 2007–2026). Captures long-run gentrification or decline that single-year snapshots miss.',
+  poverty_rate:'Share of tract population below the federal poverty line (ACS 5-year B17001).',
+  median_age:'Median age of tract population (ACS 5-year B01002).',
+  spanish_at_home:'Share of tract population 5+ that speaks Spanish at home (ACS 5-year C16001).',
+  elderly_alone:'Share of tract households where a 65+ year old lives alone (ACS 5-year B11007).',
+  gi_hotspot:'Getis-Ord Gi* local hot/cold-spot z-score. Positive = this nbhd sits within a cluster of high values; negative = within a cluster of low values.',
+  hoh_gap:'Residual of actual HOH rate minus the rate predicted from ZIP demographics. Negative = under-claiming given who lives there (outreach candidate).',
+  vet_gap:'Residual of actual veteran exemption rate vs. demographic prediction. Negative = under-claiming.',
+  vf_gap:'Residual of actual value-freeze rate vs. demographic prediction. Negative = under-claiming.',
+  cc_time_min:'Estimated drive-time (minutes) to the nearest community center, using Haversine distance and an urban-speed proxy. For true isochrones, wire an OSRM/Mapbox endpoint in build_data.py.'
 };
 function metricDescFor(v){
   if(!v||v==='none')return '';
@@ -2390,8 +2680,36 @@ function metricDescFor(v){
   if(!text&&/^chg_\d+_\d+$/.test(v)){
     const m=v.match(/^chg_(\d+)_(\d+)$/);
     text='Year-over-year median appraised value change: 20'+m[1].padStart(2,'0')+' \u2192 20'+m[2].padStart(2,'0')+'.';
+    const ctx=marketContextFor(v);
+    if(ctx)text+=' '+ctx;
   }
   return text||'';
+}
+// Brief market-context notes per YoY interval
+const YEAR_CONTEXT={
+  '7_8':  "2007-08: first subprime cracks; NM values still near peak.",
+  '8_9':  "2008-09: global financial crisis; nationwide value drops begin.",
+  '9_10': "2009-10: recession trough; foreclosures accelerate in NM.",
+  '10_11':"2010-11: slow stabilization; credit still tight (VF denial data missing for 2011).",
+  '11_12':"2011-12: flat market; national bottom in many metros.",
+  '12_13':"2012-13: recovery starts nationally; NM lags the Sun Belt.",
+  '13_14':"2013-14: institutional investors re-enter single-family market.",
+  '14_15':"2014-15: steady but modest appreciation in Albuquerque.",
+  '15_16':"2015-16: gathering momentum; inventory begins to tighten.",
+  '16_17':"2016-17: accelerating appreciation; buyer demand firms.",
+  '17_18':"2017-18: strong growth; low interest rates sustain demand.",
+  '18_19':"2018-19: continued solid appreciation pre-pandemic.",
+  '19_20':"2019-20: pandemic onset in Q2; remote-work migration begins.",
+  '20_21':"2020-21: pandemic housing boom; record low mortgage rates.",
+  '21_22':"2021-22: peak of pandemic price surge; bidding wars common.",
+  '22_23':"2022-23: Fed rate shock; transaction volume collapses, prices plateau.",
+  '23_24':"2023-24: affordability crisis; price growth cools sharply.",
+  '24_25':"2024-25: soft-landing narrative; slight correction in some segments.",
+  '25_26':"2025-26: current reappraisal cycle; protest activity typically spikes."
+};
+function marketContextFor(key){
+  const m=key&&key.match(/^chg_(\d+_\d+)$/);
+  return m?YEAR_CONTEXT[m[1]]||'':'';
 }
 function updateMetricDesc(){
   const el=document.getElementById('metricDesc');

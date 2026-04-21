@@ -886,6 +886,75 @@ YRC = {
 }
 
 
+def fetch_tract_acs(tract_geo):
+    """Merge tract-level ACS 5-year variables into TRACT_GEO.features.
+
+    Adds: poverty_rate, median_age, spanish_at_home, elderly_alone.
+    Silently no-ops on network failure so the frontend degrades gracefully
+    (tract layers other than addr_density will just render as missing).
+    """
+    if not tract_geo or not tract_geo.get('features'):
+        return
+    feats = tract_geo['features']
+    # Variables:
+    #   B01003_001E total population
+    #   B01002_001E median age
+    #   B17001_001E poverty-status universe; B17001_002E below poverty
+    #   C16001_001E language universe (pop 5+); C16001_005E Spanish speakers
+    #   B11007_001E total households; B11007_003E householder 65+ living alone
+    vars_ = ','.join([
+        'B01003_001E','B01002_001E','B17001_001E','B17001_002E',
+        'C16001_001E','C16001_005E','B11007_001E','B11007_003E',
+    ])
+    for yr in [2023, 2022, 2021]:
+        url = (
+            f'https://api.census.gov/data/{yr}/acs/acs5?get={vars_}'
+            f'&for=tract:*&in=state:35+county:001'
+        )
+        try:
+            with urlopen(url, timeout=10) as resp:
+                rows = json.loads(resp.read())
+        except (URLError, Exception) as e:
+            print(f"  Tract ACS {yr} failed: {e}")
+            continue
+        header = rows[0]
+        idx = {k: header.index(k) for k in header}
+        by_geoid = {}
+        for row in rows[1:]:
+            geoid = f"{row[idx['state']]}{row[idx['county']]}{row[idx['tract']]}"
+            def _v(k):
+                try:
+                    raw = row[idx[k]]
+                    return int(raw) if raw not in (None, '', '-', '*') else None
+                except Exception:
+                    return None
+            pop = _v('B01003_001E') or 0
+            pov_univ = _v('B17001_001E') or 0
+            pov_below = _v('B17001_002E') or 0
+            lang_univ = _v('C16001_001E') or 0
+            spanish = _v('C16001_005E') or 0
+            hh_univ = _v('B11007_001E') or 0
+            elderly_alone = _v('B11007_003E') or 0
+            median_age = _v('B01002_001E')
+            by_geoid[geoid] = {
+                'poverty_rate': round(pov_below / pov_univ, 4) if pov_univ else None,
+                'median_age': float(median_age) if median_age is not None else None,
+                'spanish_at_home': round(spanish / lang_univ, 4) if lang_univ else None,
+                'elderly_alone': round(elderly_alone / hh_univ, 4) if hh_univ else None,
+                'acs_year': yr,
+                'tract_pop': pop,
+            }
+        merged = 0
+        for feat in feats:
+            geoid = feat.get('properties', {}).get('GEOID', '')
+            if geoid in by_geoid:
+                for k, v in by_geoid[geoid].items():
+                    feat['properties'][k] = v
+                merged += 1
+        print(f"  Tract ACS {yr}: merged {merged}/{len(feats)} tracts")
+        return  # stop after first successful year
+
+
 def fetch_census_acs():
     """Fetch ACS 5-year data for Bernalillo County from Census API."""
     vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
@@ -1173,6 +1242,9 @@ def main():
     if not args.no_census:
         print("\nFetching Census ACS data...")
         census = fetch_census_acs()
+        # Enrich TRACT_GEO with tract-level ACS so the tract choropleth can
+        # color poverty/median-age/language/elderly-alone signals.
+        fetch_tract_acs(existing_core.get('TRACT_GEO'))
     else:
         print("\nSkipping Census ACS fetch (--no-census)")
 
