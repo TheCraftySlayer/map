@@ -54,7 +54,7 @@
   <div id="selSetBanner" style="display:none;padding:4px 8px;background:#e0f7f2;border:1px solid #00c2a0;border-radius:4px;margin:0 0 6px;font-size:11px;color:#04604f;align-items:center;gap:6px"><span id="selSetCount"></span><button id="selSetExport" style="font-size:10px;padding:1px 6px;background:#00c2a0;color:#fff;border:none;border-radius:3px;cursor:pointer">Export CSV</button><button id="selSetClear" style="font-size:10px;padding:1px 6px;background:#fff;color:#333;border:1px solid #aaa;border-radius:3px;cursor:pointer">Clear</button></div>
 
   <div style="margin-bottom:6px">
-    <input id="searchBox" type="text" placeholder="Search neighborhood # (e.g. 3100)" autocomplete="off"/>
+    <input id="searchBox" type="text" placeholder="Search nbhd # or ZIP (e.g. 3100 or 87106)" autocomplete="off"/>
   </div>
 
   <details id="topOutreachPanel" open style="margin:0 0 10px 0;border:2px solid #c41a1a;border-radius:6px;background:linear-gradient(180deg,#fff5f5 0%,#ffffff 100%);box-shadow:0 1px 3px rgba(196,26,26,.15)">
@@ -2066,9 +2066,55 @@ function pinByNbhd(n,{fit=true,fly=false}={}){
   }
   return found;
 }
+// Select all neighborhoods whose stored zip_codes contains the given ZIP.
+// Builds up the _selSet and fits the map to cover the matches so the user
+// can Export CSV for just that ZIP or compare/inspect the cluster.
+function selectNbhdsByZip(zip){
+  const matching=[];
+  for(const f of DATA.features){
+    const zc=f.properties.zip_codes;
+    if(!zc)continue;
+    const list=String(zc).split(',').map(s=>s.trim());
+    if(list.indexOf(zip)>=0)matching.push(f);
+  }
+  if(!matching.length)return 0;
+  // Add to the existing multi-select rather than replacing — lets the user
+  // accumulate multiple ZIPs.
+  for(const f of matching)_selSet.add(f.properties.nbhd);
+  if(nbhdLayer){
+    nbhdLayer.eachLayer(l=>{
+      if(l.feature&&_selSet.has(l.feature.properties.nbhd))nbhdLayer.resetStyle(l);
+    });
+  }
+  updateSelectionUI();
+  // Zoom to cover the selected neighborhoods.
+  try{
+    const fc={type:'FeatureCollection',features:matching};
+    const tmp=L.geoJSON(fc);
+    map.fitBounds(tmp.getBounds(),{maxZoom:13,padding:[40,40]});
+  }catch(e){}
+  return matching.length;
+}
 document.getElementById('searchBox').addEventListener('keydown',e=>{
   if(e.key!=='Enter')return;
-  const n=parseInt(e.target.value);
+  const raw=e.target.value.trim();
+  if(!raw)return;
+  // A 5-digit ZIP starting with 87 is an Albuquerque-area ZIP. Select all
+  // nbhds whose stored zip_codes contains it.
+  if(/^87\d{3}$/.test(raw)){
+    const count=selectNbhdsByZip(raw);
+    if(count>0){
+      e.target.style.borderColor='#00c2a0';
+      e.target.title=count+' neighborhoods in ZIP '+raw+' added to selection';
+      setTimeout(()=>{e.target.style.borderColor='';e.target.title='';},1500);
+    }else{
+      e.target.style.borderColor='#e41a1c';
+      e.target.title='No neighborhoods tagged with ZIP '+raw;
+      setTimeout(()=>{e.target.style.borderColor='';e.target.title='';},1500);
+    }
+    return;
+  }
+  const n=parseInt(raw);
   if(isNaN(n))return;
   if(pinByNbhd(n,{fit:true})){e.target.style.borderColor='#157040';setTimeout(()=>e.target.style.borderColor='',1000);}
   else{e.target.style.borderColor='#e41a1c';setTimeout(()=>e.target.style.borderColor='',1000);}
