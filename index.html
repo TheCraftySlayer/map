@@ -106,6 +106,7 @@
   <label><input type="radio" name="nbhd_layer" value="chg_23_24"> 2023&rarr;24</label>
   <label><input type="radio" name="nbhd_layer" value="chg_24_25"> 2024&rarr;25</label>
   <label><input type="radio" name="nbhd_layer" value="chg_25_26"> 2025&rarr;26</label>
+  <label><input type="radio" name="nbhd_layer" value="val_change_pct"> <b>Cumulative 2007&rarr;26</b></label>
   <div id="yoyAnim" style="display:flex;align-items:center;gap:4px;margin:4px 0 6px;font-size:10px;color:#555">
     <button id="yoyPlay" title="Play/pause year-over-year animation" style="width:20px;height:18px;padding:0;background:#185FA5;color:#fff;border:none;border-radius:3px;cursor:pointer">&#9654;</button>
     <input type="range" id="yoySlider" min="0" max="18" value="0" step="1" style="flex:1;accent-color:#185FA5">
@@ -165,6 +166,7 @@
     <option value="chg_23_24">Change 23&rarr;24</option>
     <option value="chg_24_25">Change 24&rarr;25</option>
     <option value="chg_25_26">Change 25&rarr;26</option>
+    <option value="val_change_pct">Cumulative 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
     <option value="avg_visit_min">Avg visit duration</option>
@@ -197,6 +199,7 @@
     <option value="chg_23_24">Change 23&rarr;24</option>
     <option value="chg_24_25">Change 24&rarr;25</option>
     <option value="chg_25_26">Change 25&rarr;26</option>
+    <option value="val_change_pct">Cumulative 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure" selected>Failure rate</option>
     <option value="avg_visit_min">Avg visit duration</option>
@@ -216,6 +219,7 @@
     <option value="owner_turnover">Owner turnover</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption drift</option>
+    <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
@@ -231,12 +235,14 @@
     <option value="owner_turnover">Owner turnover</option>
     <option value="appr_volatility">Appraisal volatility</option>
     <option value="exemp_drift">Exemption drift</option>
+    <option value="val_change_pct">Cumulative value change 07&rarr;26</option>
     <option value="demand">Caller demand</option>
     <option value="failure">Failure rate</option>
     <option value="zip_poverty_rate">ZIP poverty rate</option>
     <option value="median_val_25">Median value 2025</option>
   </select>
   <label><input type="checkbox" id="bivarMode"> Enable bivariate</label>
+  <button id="scatterBtn" title="Open scatter plot of the bivariate X/Y — brush-select points to subset the map" style="font-size:10px;padding:3px 8px;background:#eee;color:#333;border:1px solid #ccc;border-radius:3px;cursor:pointer;margin:4px 0 2px">Open scatter plot</button>
 
   <hr>
   <div class="heat-toggle">
@@ -401,6 +407,90 @@ for(let i=0;i<DATA.features.length;i++){
     p.val_change_pct=cum-1;
   }
 }
+
+// ── County-wide distributions (precomputed once) ─────────────────────────────
+// Used by outreach-component breakdown (percentile rank per field) and by
+// the per-layer sparkline overlay (median trajectory over years).
+const OUTREACH_COMPONENTS=[
+  {f:'pct_vf_denied',     bad:'high', label:'VF denial',        fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'hoh_churn',         bad:'high', label:'HOH churn',        fmt:v=>(v*100).toFixed(1)+'%'},
+  {f:'appr_volatility',   bad:'high', label:'value volatility', fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'owner_turnover',    bad:'high', label:'owner turnover',   fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'pct_hoh',           bad:'high', label:'HOH concentration',fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'pct_vet',           bad:'high', label:'vet concentration',fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'pct_val_freeze',    bad:'high', label:'elderly/disabled', fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'contacts_per_parcel',bad:'low', label:'contact rate',     fmt:v=>(v||0).toFixed(2)+' cpp'},
+  {f:'failure_rate',      bad:'high', label:'service failure',  fmt:v=>(v*100).toFixed(0)+'%'},
+  {f:'zip_poverty_rate',  bad:'high', label:'ZIP poverty',      fmt:v=>(v*100).toFixed(0)+'%'}
+];
+const _componentSorted={};  // field -> sorted array of finite values
+(function(){
+  for(const c of OUTREACH_COMPONENTS){
+    const vals=[];
+    for(let i=0;i<DATA.features.length;i++){
+      const v=DATA.features[i].properties[c.f];
+      if(v!=null&&Number.isFinite(v))vals.push(v);
+    }
+    vals.sort((a,b)=>a-b);
+    _componentSorted[c.f]=vals;
+  }
+})();
+function _pctileRank(sorted,v){
+  if(!sorted.length||v==null||!Number.isFinite(v))return null;
+  let lo=0,hi=sorted.length;
+  while(lo<hi){const mid=(lo+hi)>>>1;if(sorted[mid]<=v)lo=mid+1;else hi=mid;}
+  return lo/sorted.length;
+}
+function outreachDriverHtml(p){
+  // Rank each component by how deep into the bad tail this neighborhood sits.
+  // Only surface drivers in the worst quartile to keep the list short & meaningful.
+  const rows=[];
+  for(const c of OUTREACH_COMPONENTS){
+    const v=p[c.f];
+    if(v==null||!Number.isFinite(v))continue;
+    const r=_pctileRank(_componentSorted[c.f],v);
+    if(r==null)continue;
+    const badScore=c.bad==='high'?r:(1-r);
+    if(badScore<0.75)continue;
+    rows.push({c,v,r,badScore});
+  }
+  if(!rows.length)return '';
+  rows.sort((a,b)=>b.badScore-a.badScore);
+  const top=rows.slice(0,3).map(x=>{
+    const dir=x.c.bad==='high'?'↑':'↓';
+    const color=x.c.bad==='high'?'#c41a1a':'#c47a00';
+    const pctileTxt=Math.round(x.r*100)+(x.c.bad==='high'?'th pctile':'th pctile low');
+    return '<span style="display:inline-flex;align-items:center;gap:3px;background:#fff;border:1px solid #eee;border-radius:3px;padding:1px 5px;margin:1px 2px 1px 0;font-size:10px"><span style="color:'+color+';font-weight:700">'+dir+'</span><span style="color:#333">'+esc(x.c.label)+'</span><span style="color:#666;font-weight:600">'+esc(x.c.fmt(x.v))+'</span><span style="color:#aaa;font-size:9px">&middot; '+pctileTxt+'</span></span>';
+  }).join('');
+  return '<div style="margin-top:4px;padding:4px 6px;background:#fafafa;border-left:2px solid #888;border-radius:2px;font-size:10px"><div style="color:#555;font-weight:600;margin-bottom:2px">Top drivers</div>'+top+'</div>';
+}
+
+// Per-year county medians for every per-layer base — drives the county-median
+// reference line in the per-layer sparkline overlay.
+const _perYearBases=['avg_appraised','median_yrbuilt','pct_val_freeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover'];
+const _countyMedianByYear={};  // base -> { year -> median }
+(function(){
+  const Y0=7,Y1=26;
+  for(const base of _perYearBases){
+    const zeroIsMissing=(base==='avg_appraised'||base==='median_yrbuilt');
+    const perYear={};
+    for(let y=Y0;y<=Y1;y++){
+      const key=base+'_'+y;
+      const vals=[];
+      for(let i=0;i<DATA.features.length;i++){
+        const v=DATA.features[i].properties[key];
+        if(v==null||!Number.isFinite(v))continue;
+        if(zeroIsMissing&&v===0)continue;
+        vals.push(v);
+      }
+      if(vals.length){
+        vals.sort((a,b)=>a-b);
+        perYear[y]=vals[Math.floor(vals.length/2)];
+      }
+    }
+    _countyMedianByYear[base]=perYear;
+  }
+})();
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
 const TILES={
   sat:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles &copy; Esri &mdash; Maxar',maxZoom:19}),
@@ -510,7 +600,8 @@ const CS={
   appr_volatility:[[0,'#f7fbff'],[.02,'#c6dbef'],[.04,'#6baed6'],[.06,'#2171b5'],[.1,'#084594'],[.2,'#08306b']],
   exemp_drift:[[0,'#f7fcf5'],[.05,'#c7e9c0'],[.1,'#74c476'],[.2,'#238b45'],[.35,'#00441b']],
   addr_density:[[0,'#f7fcf5'],[500,'#c7e9c0'],[1500,'#74c476'],[2500,'#238b45'],[4000,'#00441b']],
-  volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']]
+  volatility:[[0,'#f7fcf5'],[.1,'#d9f0a3'],[.2,'#addd8e'],[.35,'#78c679'],[.5,'#31a354'],[.8,'#006837']],
+  val_change_pct:[[-.5,'#40004b'],[-.25,'#762a83'],[-.1,'#c2a5cf'],[0,'#f7f7f7'],[.25,'#d9f0d3'],[.75,'#5aae61'],[1.5,'#00441b'],[3,'#002d10']]
 };
 const LG={
   demand:{l:'0',h:'2+',n:'contacts/parcel'},
@@ -552,6 +643,7 @@ const LG={
   appr_volatility:{l:'0%',h:'20%+',n:'appraisal volatility (std dev of YoY changes 2007\u20132025)'},
   exemp_drift:{l:'0%',h:'35%+',n:'exemption drift (|HOH\u0394|+|VET\u0394| earliest vs latest year)'},
   addr_density:{l:'0',h:'3654+',n:'geocoded addresses (tract)'},
+  val_change_pct:{l:'-50%',h:'+300%',n:'cumulative median value change 2007-26'},
   volatility:{l:'0%',h:'80%+',n:'cumulative appraisal volatility (sum |YoY| 2007\u20132025)'}
 };
 
@@ -568,7 +660,8 @@ const LAYER_FIELD={
   chg_16_17:'chg_16_17',chg_17_18:'chg_17_18',chg_18_19:'chg_18_19',chg_19_20:'chg_19_20',
   chg_20_21:'chg_20_21',chg_21_22:'chg_21_22',chg_22_23:'chg_22_23',chg_23_24:'chg_23_24',chg_24_25:'chg_24_25',chg_25_26:'chg_25_26',
   appr_volatility:'appr_volatility',exemp_drift:'exemp_drift',
-  volatility:'volatility'
+  volatility:'volatility',
+  val_change_pct:'val_change_pct'
 };
 
 let _visFeatCache=null, _cachedRules=[];
@@ -587,7 +680,7 @@ function featureHidden(p){
 }
 
 function formatStat(v,layer){
-  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','volatility','appr_volatility','exemp_drift'];
+  const pctLayers=['failure','valfreeze','pct_vf_denied','pct_hoh','pct_vet','owner_turnover','hoh_churn','sales','taxlightning','chg_7_8','chg_8_9','chg_9_10','chg_10_11','chg_11_12','chg_12_13','chg_13_14','chg_14_15','chg_15_16','chg_16_17','chg_17_18','chg_18_19','chg_19_20','chg_20_21','chg_21_22','chg_22_23','chg_23_24','chg_24_25','chg_25_26','val_change_pct','volatility','appr_volatility','exemp_drift'];
   if(pctLayers.includes(layer))return(v*100).toFixed(1)+'%';
   if(layer==='avg_appraised'||layer==='median_val_25')return'$'+Math.round(v).toLocaleString();
   if(layer==='avg_visit_min')return v.toFixed(1)+' min';
@@ -749,25 +842,46 @@ info._buildHtml=function(p){
       if(ok){haveCount++;if(firstHave==null)firstHave=slot;lastHave=slot;}
     }
     if(haveCount>=3){
+      // Build county-median series for this base so the nbhd trajectory is
+      // readable against the county-wide reference. Extend the y-range to
+      // include both lines so neither gets clipped against the top/bottom.
+      const medSeries=_countyMedianByYear[base]||{};
+      const medSlots=slots.map(s=>({y:s.y,off:s.off,v:medSeries[s.y]!=null?medSeries[s.y]:null}));
       let pMin=Infinity,pMax=-Infinity;
       for(const s of slots){if(s.v!=null){if(s.v<pMin)pMin=s.v;if(s.v>pMax)pMax=s.v;}}
+      for(const s of medSlots){if(s.v!=null){if(s.v<pMin)pMin=s.v;if(s.v>pMax)pMax=s.v;}}
       if(pMax===pMin)pMax=pMin+1;
       const lw=Math.max(200,Math.min(260,(YN+1)*14)),lh=36,lPad=4;
       const xs=off=>lPad+off*((lw-2*lPad)/YN);
       const ys=v=>lPad+(lh-2*lPad)*(1-(v-pMin)/(pMax-pMin));
       // Break path into subpaths at null gaps — each run of consecutive
       // present years becomes one M..L..L segment so gaps read visually.
-      const segs=[];let cur=[];
-      for(const s of slots){if(s.v==null){if(cur.length)segs.push(cur);cur=[];}else{cur.push(s);}}
-      if(cur.length)segs.push(cur);
-      const path=segs.map(seg=>seg.map((s,i)=>(i?'L':'M')+xs(s.off).toFixed(1)+' '+ys(s.v).toFixed(1)).join(' ')).join(' ');
+      const buildPath=src=>{
+        const segs=[];let cur=[];
+        for(const s of src){if(s.v==null){if(cur.length)segs.push(cur);cur=[];}else{cur.push(s);}}
+        if(cur.length)segs.push(cur);
+        return segs.map(seg=>seg.map((s,i)=>(i?'L':'M')+xs(s.off).toFixed(1)+' '+ys(s.v).toFixed(1)).join(' ')).join(' ');
+      };
+      const path=buildPath(slots);
+      const medPath=buildPath(medSlots);
       const lab=s=>"'"+String(s.y).padStart(2,'0');
       const dots=slots.filter(s=>s.v!=null).map(s=>'<circle cx="'+xs(s.off).toFixed(1)+'" cy="'+ys(s.v).toFixed(1)+'" r="1.8" fill="#185FA5"><title>'+lab(s)+': '+formatStat(s.v,NBL)+'</title></circle>').join('');
       // Light tick marks on missing-year x positions to make gaps readable.
       const gaps=slots.filter(s=>s.v==null).map(s=>'<line x1="'+xs(s.off).toFixed(1)+'" y1="'+(lh-2)+'" x2="'+xs(s.off).toFixed(1)+'" y2="'+lh+'" stroke="#ddd" stroke-width="1"><title>'+lab(s)+': no data</title></line>').join('');
       const fmt=v=>formatStat(v,NBL);
-      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px">'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</div>'+
+      // Draw the county-median reference underneath the nbhd line so the
+      // neighborhood's path is always on top.
+      const medLine=medPath?'<path d="'+medPath+'" stroke="#bbb" stroke-width="1" fill="none" stroke-dasharray="3,2"><title>County median</title></path>':'';
+      const medEndMarker=(()=>{
+        for(let i=medSlots.length-1;i>=0;i--){
+          const ms=medSlots[i];
+          if(ms.v!=null)return '<circle cx="'+xs(ms.off).toFixed(1)+'" cy="'+ys(ms.v).toFixed(1)+'" r="1.4" fill="#bbb"><title>County median '+lab(ms)+': '+fmt(ms.v)+'</title></circle>';
+        }
+        return '';
+      })();
+      layerSpark='<div style="font-size:10px;color:#888;margin-top:4px;display:flex;justify-content:space-between;gap:6px"><span>'+(LG[NBL]&&LG[NBL].n?esc(LG[NBL].n):esc(NBL))+' over time:</span>'+(medPath?'<span style="color:#aaa">— this nbhd &middot; <span style="color:#999">··· county median</span></span>':'')+'</div>'+
         '<svg width="'+lw+'" height="'+lh+'" style="display:block;margin:2px 0">'+
+        medLine+medEndMarker+
         '<path d="'+path+'" stroke="#185FA5" stroke-width="1.5" fill="none"/>'+dots+gaps+'</svg>'+
         '<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:-2px"><span>'+lab(firstHave)+' '+fmt(firstHave.v)+'</span><span>'+lab(lastHave)+' '+fmt(lastHave.v)+'</span></div>';
     }
@@ -798,6 +912,7 @@ info._buildHtml=function(p){
     (p.outreach_severity!=null?'<div style="margin-top:3px;font-size:10px;color:#666;display:flex;gap:8px;flex-wrap:wrap"><span>Severity: <b>'+(p.outreach_severity*100).toFixed(0)+'%</b></span><span>Vulnerability: <b>'+(p.outreach_vulnerability*100).toFixed(0)+'%</b></span><span>Service gap: <b>'+(p.outreach_service_gap*100).toFixed(0)+'%</b></span></div>':'')+
     (p.zip_poverty_rate!=null&&p.zip_poverty_rate>0?'<div style="margin-top:2px;font-size:10px;color:#666">ZIP '+esc(p.zip_codes||'?')+': poverty '+(p.zip_poverty_rate*100).toFixed(0)+'%</div>':'')+
     (p.outreach_why?'<div style="margin-top:3px;font-size:10px;color:#666;font-style:italic">Driven by: '+esc(p.outreach_why)+'</div>':'')+
+    outreachDriverHtml(p)+
     (p.outreach_recs?'<div style="margin-top:4px;font-size:10px;color:#333"><b>Recommended outreach:</b><div style="margin-top:3px">'+p.outreach_recs.split('|').map(function(r){var parts=r.split('::');var title=esc(parts[0]);var why=esc(parts[1]||'');var what=esc(parts[2]||'');return'<div style="margin-bottom:6px;padding:5px 7px;background:#f4f8fc;border-left:3px solid #2171b5;border-radius:2px"><div style="font-weight:600;color:#08306b">'+title+'</div>'+(why?'<div style="font-size:10px;color:#555;margin-top:3px;line-height:1.35"><b style="color:#777">Why:</b> '+why+'</div>':'')+(what?'<div style="font-size:10px;color:#08306b;margin-top:3px;line-height:1.35"><b>What:</b> '+what+'</div>':'')+'</div>';}).join('')+'</div></div>':'')+
     (p.nearest_cc?'<div style="margin-top:4px;padding:4px 6px;background:#fff8e6;border-left:3px solid #d4a017;font-size:10px;color:#6b4a00"><b>\u2192 Host event at:</b> '+esc(p.nearest_cc)+' Community Center</div>':'')+
     '<div style="margin-top:6px;display:flex;justify-content:flex-end"><button data-action="print-brief" data-nbhd="'+esc(p.nbhd)+'" title="Open a print-friendly one-page brief" style="font-size:10px;padding:2px 8px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer">Print brief</button></div>'+
@@ -1042,6 +1157,7 @@ function getNbhdColor(p, override){
   if(layer==='hoh_churn')return interp(CS.hoh_churn,p.hoh_churn||0);
   if(layer==='sales')return interp(CS.sales,p.pct_recent_sale||0);
   if(layer==='taxlightning')return(p.recent_sales>=3)?interp(CS.taxlightning,p.sale_contact_rate||0):'#f0f0f0';
+  if(layer==='val_change_pct')return(p.val_change_pct!=null&&Number.isFinite(p.val_change_pct))?interp(CS.val_change_pct,p.val_change_pct):'#f0f0f0';
   if(CS[layer])return interp(CS[layer],p[layer]||0);
   return'#e0e0e0';
 }
@@ -1149,6 +1265,91 @@ function renderTract(){
 renderNbhd();
 
 // ── Top outreach priorities panel ────────────────────────────────────────────
+// Insight callouts: dismissed IDs persist in localStorage so a dismissed
+// callout stays dismissed even after a reload, but the set is keyed by a
+// stable id string (not by rank) so new insights still surface.
+const CALLOUT_LS_KEY='mapv4_callouts_dismissed_v1';
+function dismissedCallouts(){try{return new Set(JSON.parse(localStorage.getItem(CALLOUT_LS_KEY)||'[]'));}catch(e){return new Set();}}
+function saveDismissedCallouts(s){try{localStorage.setItem(CALLOUT_LS_KEY,JSON.stringify([...s]));}catch(e){}}
+function computeInsights(feats){
+  const out=[];
+  const arr=feats.filter(f=>f.properties.outreach_need!=null);
+  if(arr.length>=10){
+    const scores=arr.map(f=>f.properties.outreach_need).sort((a,b)=>a-b);
+    const top10Cut=scores[Math.floor(scores.length*0.9)];
+    const topN=arr.filter(f=>f.properties.outreach_need>=top10Cut).length;
+    out.push({id:'top-decile',severity:'high',
+      text:'<b>'+topN+'</b> neighborhoods sit in the top 10% of outreach need (score ≥ '+(top10Cut*100).toFixed(0)+'%).',
+      hint:'Export CSV to get the full list with recommendations.'});
+  }
+  // Concentrated VF denial
+  const vfHigh=arr.filter(f=>(f.properties.pct_vf_denied||0)>=0.5);
+  if(vfHigh.length){
+    vfHigh.sort((a,b)=>(b.properties.pct_vf_denied||0)-(a.properties.pct_vf_denied||0));
+    const worst=vfHigh[0].properties;
+    out.push({id:'vf-denial',severity:'high',
+      text:'<b>'+vfHigh.length+'</b> neighborhoods have value-freeze denial rates above 50% — worst is Nbhd '+worst.nbhd+' at '+((worst.pct_vf_denied||0)*100).toFixed(0)+'%.',
+      nbhd:worst.nbhd,hint:'Click to zoom to the worst case.'});
+  }
+  // Biggest single-year value drop in the latest available YoY
+  const yoyKeys=['chg_25_26','chg_24_25','chg_23_24','chg_22_23','chg_21_22','chg_20_21'];
+  for(const k of yoyKeys){
+    const withVals=arr.filter(f=>f.properties[k]!=null&&Number.isFinite(f.properties[k]));
+    if(withVals.length<20)continue;
+    withVals.sort((a,b)=>a.properties[k]-b.properties[k]);
+    const drop=withVals[0];
+    if((drop.properties[k]||0)<-0.05){
+      const pair=k.replace('chg_','').replace('_',"→");
+      out.push({id:'yoy-drop-'+k,severity:'med',
+        text:'Biggest '+pair+' median-value drop: Nbhd '+drop.properties.nbhd+' at '+((drop.properties[k])*100).toFixed(1)+'%.',
+        nbhd:drop.properties.nbhd,hint:'Click to zoom.'});
+    }
+    break;
+  }
+  // Cumulative gentrification leader (largest positive val_change_pct)
+  const cumArr=arr.filter(f=>f.properties.val_change_pct!=null&&Number.isFinite(f.properties.val_change_pct));
+  if(cumArr.length>=20){
+    cumArr.sort((a,b)=>(b.properties.val_change_pct||0)-(a.properties.val_change_pct||0));
+    const g=cumArr[0].properties;
+    if((g.val_change_pct||0)>0.5){
+      out.push({id:'cum-leader',severity:'med',
+        text:'Cumulative 2007→26 leader: Nbhd '+g.nbhd+' at +'+((g.val_change_pct)*100).toFixed(0)+'%. Long-run gentrification candidate.',
+        nbhd:g.nbhd,hint:'Click to zoom.'});
+    }
+  }
+  // Catchment concentration: which community center sees the most high-need nbhds
+  const ccLoad={};
+  const highCut=0.6;
+  for(const f of arr){
+    const p=f.properties;
+    if((p.outreach_need||0)<highCut||!p.nearest_cc)continue;
+    ccLoad[p.nearest_cc]=(ccLoad[p.nearest_cc]||0)+1;
+  }
+  const ccPairs=Object.entries(ccLoad).sort((a,b)=>b[1]-a[1]);
+  if(ccPairs.length&&ccPairs[0][1]>=3){
+    out.push({id:'cc-load',severity:'med',
+      text:ccPairs[0][0]+' Community Center catchment has <b>'+ccPairs[0][1]+'</b> high-need neighborhoods (score ≥ '+(highCut*100).toFixed(0)+'%).',
+      hint:'Filter to that catchment from a community-center popup.'});
+  }
+  // Low HOH awareness zones — areas with parcels and little uptake.
+  const lowHoh=arr.filter(f=>{const p=f.properties;return (p.parcels||0)>=50&&(p.pct_hoh||0)<0.05;});
+  if(lowHoh.length){
+    out.push({id:'low-hoh',severity:'low',
+      text:'<b>'+lowHoh.length+'</b> populated neighborhoods have HOH exemption rates below 5% — likely awareness gap.',
+      hint:'Use the threshold filter: pct_hoh max 0.05.'});
+  }
+  return out;
+}
+function renderInsightCallouts(feats){
+  const insights=computeInsights(feats);
+  if(!insights.length)return '';
+  const dismissed=dismissedCallouts();
+  const active=insights.filter(i=>!dismissed.has(i.id));
+  if(!active.length)return '';
+  const pill=s=>s==='high'?'#c41a1a':s==='med'?'#c47a00':'#185FA5';
+  const items=active.map(i=>'<div class="insight-row" data-cid="'+esc(i.id)+'"'+(i.nbhd!=null?' data-nbhd="'+esc(i.nbhd)+'" style="cursor:pointer"':'')+' title="'+esc(i.hint||'')+'" style="display:flex;gap:6px;align-items:flex-start;padding:4px 6px;border-left:3px solid '+pill(i.severity)+';background:#fffbea;border-radius:2px;margin:3px 0"><div style="flex:1;font-size:10px;color:#333;line-height:1.35">'+i.text+'</div><button class="insight-dismiss" data-cid="'+esc(i.id)+'" title="Dismiss" style="border:none;background:none;color:#888;cursor:pointer;padding:0 2px;font-size:12px;line-height:1">×</button></div>').join('');
+  return '<div id="insightCallouts" style="margin:4px 0 6px;padding:3px 4px;background:#fff8e6;border:1px solid #f0d77a;border-radius:3px"><div style="font-size:10px;font-weight:700;color:#6b4a00;margin-bottom:2px">Insights</div>'+items+'</div>';
+}
 function renderTopOutreach(){
   const el=document.getElementById('topOutreach');
   if(!el) return;
@@ -1156,7 +1357,8 @@ function renderTopOutreach(){
   feats.sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0));
   const top=feats.slice(0,15);
   if(!top.length){el.innerHTML='<div style="color:#888;padding:4px">No outreach data available. Rebuild to populate.</div>';return;}
-  el.innerHTML=top.map(function(f){
+  const callouts=renderInsightCallouts(feats);
+  el.innerHTML=callouts+top.map(function(f){
     const p=f.properties;
     const score=(p.outreach_need*100).toFixed(0);
     const color=p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040';
@@ -1184,6 +1386,21 @@ function renderTopOutreach(){
           }
         });
       }
+    });
+  });
+  // Insight-row click zooms to the referenced nbhd; × dismisses the callout
+  // permanently (per-browser localStorage).
+  el.querySelectorAll('.insight-row').forEach(function(row){
+    row.addEventListener('click',function(e){
+      if(e.target.closest('.insight-dismiss')){
+        const cid=e.target.closest('.insight-dismiss').dataset.cid;
+        const set=dismissedCallouts();set.add(cid);saveDismissedCallouts(set);
+        renderTopOutreach();
+        e.stopPropagation();
+        return;
+      }
+      const n=row.dataset.nbhd;
+      if(n!=null&&n!=='')pinByNbhd(parseFloat(n),{fit:true});
     });
   });
 }
@@ -1861,6 +2078,179 @@ function openYoyGrid(){
 }
 document.getElementById('yoyGridBtn').addEventListener('click',openYoyGrid);
 
+// ── Scatter-plot companion panel ─────────────────────────────────────────────
+// Shows visible neighborhoods on the bivariate X/Y axes. Hovering a dot
+// highlights the corresponding nbhd on the map; dragging a rectangle
+// brush-selects dots into the multi-select set so the subset can be exported.
+function openScatter(){
+  if(document.getElementById('scatterOverlay'))return;
+  const xKey=document.getElementById('bivarX').value;
+  const yKey=document.getElementById('bivarY').value;
+  const xName=document.getElementById('bivarX').selectedOptions[0].text;
+  const yName=document.getElementById('bivarY').selectedOptions[0].text;
+  const xF=LAYER_FIELD[xKey]||xKey;
+  const yF=LAYER_FIELD[yKey]||yKey;
+  const feats=getVisibleFeatures().filter(f=>{
+    const p=f.properties;
+    return Number.isFinite(p[xF])&&Number.isFinite(p[yF]);
+  });
+  if(!feats.length){
+    alert('No neighborhoods have finite values for both axes right now.');
+    return;
+  }
+  const W=520, H=380, PAD_L=56, PAD_R=14, PAD_T=14, PAD_B=42;
+  const xVals=feats.map(f=>f.properties[xF]);
+  const yVals=feats.map(f=>f.properties[yF]);
+  const xMin=Math.min.apply(null,xVals), xMax=Math.max.apply(null,xVals);
+  const yMin=Math.min.apply(null,yVals), yMax=Math.max.apply(null,yVals);
+  const xSpan=xMax===xMin?1:(xMax-xMin);
+  const ySpan=yMax===yMin?1:(yMax-yMin);
+  const sx=v=>PAD_L+(v-xMin)/xSpan*(W-PAD_L-PAD_R);
+  const sy=v=>PAD_T+(1-(v-yMin)/ySpan)*(H-PAD_T-PAD_B);
+  const fmtX=v=>formatStat(v,xKey);
+  const fmtY=v=>formatStat(v,yKey);
+  // Axis ticks — 4 ticks each.
+  const tickMarks=(min,max,count)=>{const out=[];for(let i=0;i<=count;i++)out.push(min+(max-min)*i/count);return out;};
+  const xt=tickMarks(xMin,xMax,4).map(v=>'<g><line x1="'+sx(v).toFixed(1)+'" y1="'+(H-PAD_B).toFixed(1)+'" x2="'+sx(v).toFixed(1)+'" y2="'+(H-PAD_B+4).toFixed(1)+'" stroke="#999"/><text x="'+sx(v).toFixed(1)+'" y="'+(H-PAD_B+15).toFixed(1)+'" text-anchor="middle" font-size="9" fill="#666">'+esc(fmtX(v))+'</text></g>').join('');
+  const yt=tickMarks(yMin,yMax,4).map(v=>'<g><line x1="'+(PAD_L-4).toFixed(1)+'" y1="'+sy(v).toFixed(1)+'" x2="'+PAD_L.toFixed(1)+'" y2="'+sy(v).toFixed(1)+'" stroke="#999"/><text x="'+(PAD_L-6).toFixed(1)+'" y="'+(sy(v)+3).toFixed(1)+'" text-anchor="end" font-size="9" fill="#666">'+esc(fmtY(v))+'</text></g>').join('');
+  const dots=feats.map(f=>{
+    const p=f.properties;
+    const x=sx(p[xF]), y=sy(p[yF]);
+    const col=p.outreach_need!=null?interp(CS.outreach_need,p.outreach_need):'#888';
+    return '<circle class="scat-pt" data-nbhd="'+esc(p.nbhd)+'" cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="3.5" fill="'+col+'" fill-opacity="0.75" stroke="#fff" stroke-width="0.5"><title>Nbhd '+esc(p.nbhd)+'\n'+esc(xName)+': '+esc(fmtX(p[xF]))+'\n'+esc(yName)+': '+esc(fmtY(p[yF]))+'\nOutreach need: '+(p.outreach_need!=null?(p.outreach_need*100).toFixed(0)+'%':'—')+'</title></circle>';
+  }).join('');
+  const overlay=document.createElement('div');
+  overlay.id='scatterOverlay';
+  overlay.innerHTML='<div id="scatBg" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10000;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:8px;max-width:95vw;max-height:92vh;overflow:auto;padding:14px 18px;font-family:system-ui,-apple-system,sans-serif">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap">'+
+      '<h3 style="margin:0;font-size:15px">Scatter &middot; '+esc(yName)+' vs '+esc(xName)+'</h3>'+
+      '<div style="font-size:10px;color:#666">'+feats.length+' neighborhoods &middot; dot color = outreach need</div>'+
+      '<button id="scatClose" style="font-size:12px;padding:3px 10px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">Close</button>'+
+    '</div>'+
+    '<div style="position:relative;width:'+W+'px;max-width:100%"><svg id="scatSvg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block;background:#fafafa;border:1px solid #ddd;border-radius:4px;user-select:none" preserveAspectRatio="xMidYMid meet">'+
+      '<line x1="'+PAD_L+'" y1="'+(H-PAD_B)+'" x2="'+(W-PAD_R)+'" y2="'+(H-PAD_B)+'" stroke="#666"/>'+
+      '<line x1="'+PAD_L+'" y1="'+PAD_T+'" x2="'+PAD_L+'" y2="'+(H-PAD_B)+'" stroke="#666"/>'+
+      xt+yt+
+      '<text x="'+((PAD_L+W-PAD_R)/2)+'" y="'+(H-8)+'" text-anchor="middle" font-size="11" fill="#333" font-weight="600">'+esc(xName)+'</text>'+
+      '<text x="14" y="'+((PAD_T+H-PAD_B)/2)+'" text-anchor="middle" font-size="11" fill="#333" font-weight="600" transform="rotate(-90 14 '+((PAD_T+H-PAD_B)/2)+')">'+esc(yName)+'</text>'+
+      dots+
+      '<rect id="scatBrush" x="0" y="0" width="0" height="0" fill="#185FA5" fill-opacity="0.12" stroke="#185FA5" stroke-width="1" stroke-dasharray="3,2" visibility="hidden" pointer-events="none"/>'+
+    '</svg></div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:10px;flex-wrap:wrap;font-size:10px;color:#666">'+
+      '<span>Drag on the plot to brush-select neighborhoods. Click a dot to pin it on the map.</span>'+
+      '<span id="scatSelInfo" style="color:#04604f;font-weight:600"></span>'+
+      '<button id="scatAddSel" style="font-size:11px;padding:3px 8px;background:#00c2a0;color:#fff;border:none;border-radius:3px;cursor:pointer" disabled>Add to selection (0)</button>'+
+    '</div>'+
+    '</div></div>';
+  document.body.appendChild(overlay);
+  const svg=document.getElementById('scatSvg');
+  const brush=document.getElementById('scatBrush');
+  const selInfo=document.getElementById('scatSelInfo');
+  const addBtn=document.getElementById('scatAddSel');
+  let brushSelected=[];  // nbhd numbers
+  let dragStart=null;
+  function svgPt(evt){
+    const r=svg.getBoundingClientRect();
+    // Convert client coords to the SVG viewBox coords so brushing still
+    // matches dot positions when the container shrinks on narrow screens.
+    const x=(evt.clientX-r.left)*(W/r.width);
+    const y=(evt.clientY-r.top)*(H/r.height);
+    return{x,y};
+  }
+  function updateSelectionDisplay(){
+    selInfo.textContent=brushSelected.length?brushSelected.length+' in brush':'';
+    addBtn.textContent='Add to selection ('+brushSelected.length+')';
+    addBtn.disabled=!brushSelected.length;
+    svg.querySelectorAll('.scat-pt').forEach(c=>{
+      const n=parseFloat(c.dataset.nbhd);
+      const sel=brushSelected.indexOf(n)>=0;
+      c.setAttribute('stroke',sel?'#04604f':'#fff');
+      c.setAttribute('stroke-width',sel?'2':'0.5');
+    });
+  }
+  svg.addEventListener('mousedown',e=>{
+    if(e.target.classList&&e.target.classList.contains('scat-pt')){
+      const n=parseFloat(e.target.dataset.nbhd);
+      // Click-to-pin: close overlay and pin the nbhd on the main map.
+      setTimeout(()=>{close();pinByNbhd(n,{fit:true});},0);
+      return;
+    }
+    dragStart=svgPt(e);
+    brush.setAttribute('x',dragStart.x);brush.setAttribute('y',dragStart.y);
+    brush.setAttribute('width',0);brush.setAttribute('height',0);
+    brush.setAttribute('visibility','visible');
+    e.preventDefault();
+  });
+  svg.addEventListener('mousemove',e=>{
+    if(!dragStart)return;
+    const p=svgPt(e);
+    const x=Math.min(dragStart.x,p.x), y=Math.min(dragStart.y,p.y);
+    const w=Math.abs(p.x-dragStart.x), h=Math.abs(p.y-dragStart.y);
+    brush.setAttribute('x',x);brush.setAttribute('y',y);
+    brush.setAttribute('width',w);brush.setAttribute('height',h);
+    brushSelected=[];
+    svg.querySelectorAll('.scat-pt').forEach(c=>{
+      const cx=parseFloat(c.getAttribute('cx')), cy=parseFloat(c.getAttribute('cy'));
+      if(cx>=x&&cx<=x+w&&cy>=y&&cy<=y+h){
+        brushSelected.push(parseFloat(c.dataset.nbhd));
+      }
+    });
+    updateSelectionDisplay();
+  });
+  const endDrag=()=>{
+    if(!dragStart)return;
+    dragStart=null;
+    // Leave brush and selection visible so the user can act on it.
+  };
+  svg.addEventListener('mouseup',endDrag);
+  svg.addEventListener('mouseleave',endDrag);
+  // Hover outside of drag highlights the target nbhd on the map without
+  // pinning it — a quick cross-reference between the scatter and the map.
+  let hoverFeat=null;
+  svg.addEventListener('mouseover',e=>{
+    if(!e.target.classList||!e.target.classList.contains('scat-pt'))return;
+    const n=parseFloat(e.target.dataset.nbhd);
+    if(nbhdLayer){
+      nbhdLayer.eachLayer(l=>{
+        if(l.feature&&l.feature.properties.nbhd===n){
+          hoverFeat=l;
+          l.setStyle({weight:2.5,color:'#00e0ff',fillOpacity:Math.min(FILL_OPAC+0.15,0.95)});
+          l.bringToFront();
+          info.update(l.feature.properties);
+        }
+      });
+    }
+  });
+  svg.addEventListener('mouseout',e=>{
+    if(!e.target.classList||!e.target.classList.contains('scat-pt'))return;
+    if(hoverFeat&&nbhdLayer&&hoverFeat!==pinnedNbhd){
+      nbhdLayer.resetStyle(hoverFeat);
+      hoverFeat=null;
+      if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);
+      else info.update();
+    }
+  });
+  addBtn.addEventListener('click',()=>{
+    if(!brushSelected.length)return;
+    for(const n of brushSelected)_selSet.add(n);
+    if(nbhdLayer)nbhdLayer.eachLayer(l=>{if(l.feature&&brushSelected.indexOf(l.feature.properties.nbhd)>=0)nbhdLayer.resetStyle(l);});
+    updateSelectionUI();
+    close();
+  });
+  const close=()=>{
+    // Restore any hover-highlighted feature so the map doesn't keep the
+    // temporary cyan outline after the overlay closes.
+    if(hoverFeat&&nbhdLayer&&hoverFeat!==pinnedNbhd)nbhdLayer.resetStyle(hoverFeat);
+    overlay.remove();
+    window.removeEventListener('keydown',onKey,true);
+  };
+  const onKey=e=>{if(e.key==='Escape')close();};
+  document.getElementById('scatClose').addEventListener('click',close);
+  document.getElementById('scatBg').addEventListener('click',e=>{if(e.target.id==='scatBg')close();});
+  window.addEventListener('keydown',onKey,true);
+}
+document.getElementById('scatterBtn').addEventListener('click',openScatter);
+
 // ── Threshold filters ─────────────────────────────────────────────────────────
 const FILTER_FIELDS=[
   ['','(off)'],
@@ -1991,7 +2381,8 @@ const LAYER_HELP={
   post_sale_rate:'Post-sale assessor contacts per parcel.',
   failure:'Share of contact-center interactions that ended unresolved.',
   avg_visit_min:'Average in-person visit duration in minutes.',
-  addr_density:'Geocoded address density per census tract (TIGER/ACS).'
+  addr_density:'Geocoded address density per census tract (TIGER/ACS).',
+  val_change_pct:'Cumulative median appraised-value change across all available YoY steps (roughly 2007–2026). Captures long-run gentrification or decline that single-year snapshots miss.'
 };
 function metricDescFor(v){
   if(!v||v==='none')return '';
