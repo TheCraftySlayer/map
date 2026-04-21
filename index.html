@@ -557,34 +557,45 @@ function _olsFit(pairs){
   return{slope:(sxy-n*mx*my)/vx, intercept:my-((sxy-n*mx*my)/vx)*mx, n};
 }
 (function(){
+  // build_data.py now computes hoh_gap / vet_gap / vf_gap server-side
+  // when census data is available. Skip the client-side recomputation
+  // if ANY feature already has the server-populated gap fields, since
+  // the server version is the authoritative one (includes gap-boost
+  // feedback into outreach_need).
+  const hasServerGaps=DATA.features.some(f=>{
+    const p=f.properties;
+    return p.hoh_gap!=null||p.vet_gap!=null||p.vf_gap!=null;
+  });
+  if(hasServerGaps)return;
   // HOH and VF use ZIP poverty as the predictor (higher poverty → more
   // eligible households). Vet claims are dominated by proximity to Kirtland
   // AFB / VA services, not ZIP demographics, so we use a county-mean
   // baseline instead of fitting a weak regression that would just fit noise.
   const hohFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_hoh]));
   const vfFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_val_freeze]));
-  // If the ZIP ACS fetch failed at build time, zip_poverty_rate is missing
-  // for every feature so _olsFit returns null. Fall back to county mean so
-  // the gap layers still carry a useful "above/below county" signal.
+  // Always compute county means so each neighborhood without ZIP data
+  // still gets a residual ("above/below county") — critical for builds
+  // where the ZIP ACS fetch failed OR where only a subset of nbhds have
+  // zip_poverty_rate populated (sparse ZIP join).
   const _meanOf=field=>{
     let n=0,s=0;
     for(const f of DATA.features){const v=f.properties[field];if(v!=null&&Number.isFinite(v)){n++;s+=v;}}
     return n?s/n:null;
   };
-  const hohMean=hohFit?null:_meanOf('pct_hoh');
-  const vetMean=_meanOf('pct_vet');  // always used — vet baseline is the county mean
-  const vfMean=vfFit?null:_meanOf('pct_val_freeze');
+  const hohMean=_meanOf('pct_hoh');
+  const vetMean=_meanOf('pct_vet');
+  const vfMean=_meanOf('pct_val_freeze');
   for(const f of DATA.features){
     const p=f.properties;
     const predict=(fit,x,mean)=>{
       if(fit&&x!=null&&Number.isFinite(x))return fit.intercept+fit.slope*x;
-      return mean;  // falls back to county mean when fit is unavailable
+      return mean;  // falls back to county mean when fit or predictor missing
     };
     const hohPred=predict(hohFit,p.zip_poverty_rate,hohMean);
-    if(hohPred!=null&&p.pct_hoh!=null)p.hoh_gap=p.pct_hoh-hohPred;
-    if(vetMean!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetMean;
+    if(hohPred!=null&&p.pct_hoh!=null&&Number.isFinite(p.pct_hoh))p.hoh_gap=p.pct_hoh-hohPred;
+    if(vetMean!=null&&p.pct_vet!=null&&Number.isFinite(p.pct_vet))p.vet_gap=p.pct_vet-vetMean;
     const vfPred=predict(vfFit,p.zip_poverty_rate,vfMean);
-    if(vfPred!=null&&p.pct_val_freeze!=null)p.vf_gap=p.pct_val_freeze-vfPred;
+    if(vfPred!=null&&p.pct_val_freeze!=null&&Number.isFinite(p.pct_val_freeze))p.vf_gap=p.pct_val_freeze-vfPred;
   }
 })();
 

@@ -34,6 +34,7 @@ import argparse
 import csv
 import re
 import sys
+import math
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -304,11 +305,170 @@ def build_point_layers_from_roll(joined_by_yr):
     return layers
 
 
-def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
+def _point_in_ring(px, py, ring):
+    """Ray-casting point-in-polygon test for a single ring (pure Python)."""
+    inside = False
+    n = len(ring)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if (yi > py) != (yj > py):
+            # Avoid div-by-zero with a tiny epsilon on horizontal edges
+            xint = (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi
+            if px < xint:
+                inside = not inside
+        j = i
+    return inside
+
+
+def _point_in_geom(px, py, geom):
+    """Test whether (px, py) falls inside a GeoJSON Polygon/MultiPolygon."""
+    if not geom:
+        return False
+    t = geom.get('type')
+    if t == 'Polygon':
+        rings = geom.get('coordinates') or []
+        if not rings:
+            return False
+        if not _point_in_ring(px, py, rings[0]):
+            return False
+        for hole in rings[1:]:
+            if _point_in_ring(px, py, hole):
+                return False
+        return True
+    if t == 'MultiPolygon':
+        for poly in (geom.get('coordinates') or []):
+            if not poly:
+                continue
+            if not _point_in_ring(px, py, poly[0]):
+                continue
+            hit = True
+            for hole in poly[1:]:
+                if _point_in_ring(px, py, hole):
+                    hit = False
+                    break
+            if hit:
+                return True
+    return False
+
+
+def _find_tract_for_point(lat, lon, tract_geo):
+    """Return the tract feature whose geometry contains (lon, lat), else None.
+
+    Built as a linear scan — fine for Bernalillo's 176 tracts × 600 nbhds
+    (~100k PIP checks, runs in <1s on commodity hardware).
+    """
+    if not tract_geo or not tract_geo.get('features'):
+        return None
+    for tract in tract_geo['features']:
+        if _point_in_geom(lon, lat, tract.get('geometry')):
+            return tract
+    return None
+
+
+def _ols_fit(pairs):
+    """Single-predictor OLS: returns {slope, intercept, n} or None if n<8."""
+    n = sx = sy = sxx = sxy = 0
+    for x, y in pairs:
+        if x is None or y is None:
+            continue
+        try:
+            xf, yf = float(x), float(y)
+        except (TypeError, ValueError):
+            continue
+        n += 1; sx += xf; sy += yf; sxx += xf * xf; sxy += xf * yf
+    if n < 8:
+        return None
+    mx, my = sx / n, sy / n
+    vx = sxx - n * mx * mx
+    if vx <= 0:
+        return {'slope': 0.0, 'intercept': my, 'n': n}
+    slope = (sxy - n * mx * my) / vx
+    return {'slope': slope, 'intercept': my - slope * mx, 'n': n}
+
+
+def _mean_of(field, nbhd_stats):
+    """Mean of a single field across all neighborhoods. None if no data."""
+    n = 0; s = 0.0
+    for p in nbhd_stats.values():
+        v = p.get(field)
+        if v is None:
+            continue
+        try:
+            s += float(v); n += 1
+        except (TypeError, ValueError):
+            continue
+    return s / n if n else None
+
+
+def _compute_exemption_gaps(nbhd_stats):
+    """Populate hoh_gap, vet_gap, vf_gap per neighborhood as residuals
+    against a simple demographic predictor (or county mean fallback).
+    Mirrors the client-side logic in index.html so the values are
+    available for CSV export and can feed the outreach_need score."""
+    # HOH and VF regress against ZIP poverty; Vet uses county-mean baseline
+    # (vet claims are driven by proximity to Kirtland / VA, not ZIP demog).
+    pairs_hoh = [(p.get('zip_poverty_rate'), p.get('pct_hoh')) for p in nbhd_stats.values()]
+    pairs_vf = [(p.get('zip_poverty_rate'), p.get('pct_val_freeze')) for p in nbhd_stats.values()]
+    hoh_fit = _ols_fit(pairs_hoh)
+    vf_fit = _ols_fit(pairs_vf)
+    hoh_mean = _mean_of('pct_hoh', nbhd_stats)
+    vet_mean = _mean_of('pct_vet', nbhd_stats)
+    vf_mean = _mean_of('pct_val_freeze', nbhd_stats)
+
+    def predict(fit, x, mean):
+        if fit and x is not None:
+            try:
+                return fit['intercept'] + fit['slope'] * float(x)
+            except (TypeError, ValueError):
+                pass
+        return mean
+
+    for p in nbhd_stats.values():
+        hoh_pred = predict(hoh_fit, p.get('zip_poverty_rate'), hoh_mean)
+        if hoh_pred is not None and p.get('pct_hoh') is not None:
+            p['hoh_gap'] = round(p['pct_hoh'] - hoh_pred, 4)
+        if vet_mean is not None and p.get('pct_vet') is not None:
+            p['vet_gap'] = round(p['pct_vet'] - vet_mean, 4)
+        vf_pred = predict(vf_fit, p.get('zip_poverty_rate'), vf_mean)
+        if vf_pred is not None and p.get('pct_val_freeze') is not None:
+            p['vf_gap'] = round(p['pct_val_freeze'] - vf_pred, 4)
+
+
+def _boost_outreach_with_gaps(nbhd_stats):
+    """After exemption gaps are computed, bump outreach_need for neighborhoods
+    that under-claim relative to their demographic prediction. The boost is
+    capped so it augments the existing score rather than overriding it."""
+    for p in nbhd_stats.values():
+        need = p.get('outreach_need')
+        if need is None:
+            continue
+        boost = 0.0
+        hg = p.get('hoh_gap')
+        if hg is not None and hg < -0.05:
+            # −5 pp below predicted = +0.05 boost, caps at 0.15 (−15 pp below)
+            boost += min(abs(hg) - 0.05, 0.10)
+        vfg = p.get('vf_gap')
+        if vfg is not None and vfg < -0.03:
+            # Smaller caps — value freeze is a much smaller base rate
+            boost += min(abs(vfg) - 0.03, 0.05)
+        if boost > 0:
+            p['outreach_need_gap_boost'] = round(boost, 4)
+            p['outreach_need'] = round(min(1.0, need + boost), 4)
+
+
+def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
     """
     Compute per-neighborhood aggregated stats from tax roll data.
     Merges with existing properties to preserve contact center data.
     census: optional dict with {'zips': {'87102': {'pop','income','poverty',...}}}
+    tract_geo: optional TIGER GeoJSON with tract-level ACS fields merged in.
+               Each nbhd centroid is tested against each tract polygon so
+               tract_poverty_rate / tract_median_age / tract_elderly_alone
+               flow into the vulnerability calculation below.
     """
     zip_data = (census or {}).get('zips', {}) if census else {}
     # Find the latest year and all years available
@@ -322,10 +482,51 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
 
     # Build lookup of existing properties by nbhd
     existing = {}
+    centroid_lookup = {}  # int(nbhd) -> (lat, lon)
     for feat in existing_props:
         n = feat['properties'].get('nbhd')
-        if n is not None:
-            existing[int(n)] = feat['properties']
+        if n is None:
+            continue
+        existing[int(n)] = feat['properties']
+        geom = feat.get('geometry')
+        if not geom:
+            continue
+        coords = []
+        if geom.get('type') == 'Polygon':
+            coords = (geom.get('coordinates') or [[]])[0]
+        elif geom.get('type') == 'MultiPolygon':
+            for poly in (geom.get('coordinates') or []):
+                if poly and poly[0]:
+                    coords.extend(poly[0])
+        if coords:
+            centroid_lookup[int(n)] = (
+                sum(c[1] for c in coords) / len(coords),
+                sum(c[0] for c in coords) / len(coords),
+            )
+
+    # Precompute tract-ACS lookup for each nbhd centroid so the vulnerability
+    # calc below can use tract-level poverty / elderly-alone — finer-grained
+    # than ZIP-level averages. Falls back silently if tract_geo has no ACS
+    # enrichment (poverty_rate etc. will just be missing).
+    tract_acs_by_nbhd = {}
+    TRACT_ACS_FIELDS = ('poverty_rate', 'median_age', 'spanish_at_home', 'elderly_alone')
+    if tract_geo and tract_geo.get('features'):
+        matched = 0
+        for n, (lat, lon) in centroid_lookup.items():
+            tract = _find_tract_for_point(lat, lon, tract_geo)
+            if not tract:
+                continue
+            tp = tract.get('properties', {})
+            acs = {}
+            for k in TRACT_ACS_FIELDS:
+                v = tp.get(k)
+                if v is not None:
+                    acs[f'tract_{k}'] = v
+            if acs:
+                tract_acs_by_nbhd[n] = acs
+                matched += 1
+        if matched:
+            print(f"  Tract→nbhd ACS join: {matched}/{len(centroid_lookup)} neighborhoods")
 
     updated = {}
     for nbhd, yr_data in by_nbhd_yr.items():
@@ -373,12 +574,38 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
                     ratio = max(YOY_MIN, min(YOY_MAX, ratio))
                     yoy_changes[f"chg_{y1%100}_{y2%100}"] = round(ratio, 4)
 
-        # Appraisal volatility (std dev of YoY changes)
-        chg_vals = list(yoy_changes.values())
-        appr_vol = round(statistics.stdev(chg_vals), 4) if len(chg_vals) >= 2 else None
-
-        # Cumulative volatility
-        volatility = round(sum(abs(c) for c in chg_vals), 4) if chg_vals else None
+        # Appraisal volatility — weight recent YoY changes 2× so a
+        # long-ago crisis (2008) doesn't dominate present-day outreach
+        # priority. Sort by second-year of each chg_YY1_YY2 key so the
+        # weighting is chronological regardless of dict insertion order.
+        def _chg_sort_key(k):
+            # k = 'chg_7_8' → (7, 8). Compare by the SECOND year (end of
+            # the interval) so the newest interval sorts last.
+            try:
+                a, b = k[4:].split('_')
+                return (int(b), int(a))
+            except Exception:
+                return (0, 0)
+        chg_items_sorted = sorted(yoy_changes.items(), key=lambda kv: _chg_sort_key(kv[0]))
+        chg_vals = [v for _, v in chg_items_sorted]
+        if chg_vals:
+            n_chg = len(chg_vals)
+            # Last 3 intervals get weight 2.0, earlier ones weight 1.0.
+            weights = [2.0 if i >= n_chg - 3 else 1.0 for i in range(n_chg)]
+            total_w = sum(weights)
+            wmean = sum(w * v for w, v in zip(weights, chg_vals)) / total_w
+            if n_chg >= 2:
+                wvar = sum(w * (v - wmean) ** 2 for w, v in zip(weights, chg_vals)) / total_w
+                appr_vol = round(math.sqrt(wvar), 4)
+            else:
+                appr_vol = None
+            # Cumulative volatility, weighted mean of |YoY|. Scaled by the
+            # full-weight count (n_chg) so the magnitude stays comparable to
+            # the prior unweighted sum.
+            volatility = round(sum(w * abs(v) for w, v in zip(weights, chg_vals)) / total_w * n_chg, 4)
+        else:
+            appr_vol = None
+            volatility = None
 
         # Owner turnover (parcels with different recent sale)
         owner_chg = sum(1 for r in recs if str(r.get('LSALEDATE', '') or '').strip())
@@ -515,25 +742,52 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             props['zip_poverty_rate'] = round(zip_poverty, 4)
             props['zip_income_factor'] = round(zip_low_income, 4)
 
-        # Severity: worst current problem
+        # ── Severity, vulnerability, service-gap aggregation ─────────────
+        # Switched from max() to a complement-product ("noisy-OR") so
+        # multiple moderate issues correctly rank ABOVE a single extreme
+        # issue. Each signal is still capped to [0,1] by _cap, then
+        # combined as: 1 - Π(1 - vᵢ). Bounded in [0,1] by construction.
+        def _noisy_or(*vals):
+            p = 1.0
+            for v in vals:
+                p *= (1.0 - max(0.0, min(1.0, v or 0.0)))
+            return 1.0 - p
+
+        # Severity: current problems. Capturing HOH churn, VF denial, and
+        # appraisal volatility. A nbhd with all three moderately elevated
+        # should rank higher than one with a single extreme issue.
         sev_vf_denied = _cap(props.get('pct_vf_denied'), 0.4)
         sev_hoh_churn = _cap(hoh_churn, 0.04)
         sev_volatility = _cap(volatility, 0.5)
-        severity = max(sev_vf_denied, sev_hoh_churn, sev_volatility)
+        severity = _noisy_or(sev_vf_denied, sev_hoh_churn, sev_volatility)
 
-        # Vulnerability: concentration of at-risk residents
-        # Include Census poverty/income as strong vulnerability amplifiers
+        # Vulnerability: concentration of at-risk residents. Prefer
+        # tract-level poverty/elderly-alone (ACS, finer-grained) when
+        # available and fall back to ZIP-level averages otherwise.
+        tract_acs = tract_acs_by_nbhd.get(nbhd, {})
+        for k, v in tract_acs.items():
+            props[k] = v  # store on feature so it's exportable / visible
+        # Tract poverty supersedes ZIP when available — a 176-tract grid
+        # is much finer than the ~30-ZIP geography around ABQ.
+        eff_poverty = tract_acs.get('tract_poverty_rate') if tract_acs.get('tract_poverty_rate') is not None else zip_poverty
+        # Elderly-alone (householder 65+ living alone) is a strong signal
+        # for HOH/VF outreach relevance that ZIP data doesn't capture.
+        vul_elderly_alone = _cap(tract_acs.get('tract_elderly_alone'), 0.15)
+
         vul_elderly = _cap(props.get('pct_val_freeze'), 0.15)
         vul_veterans = _cap(props.get('pct_vet'), 0.12)
         vul_new_owners = _cap(owner_turnover, 0.25)
-        vul_poverty = _cap(zip_poverty, 0.25)       # 25% poverty → max
-        vul_low_income = zip_low_income              # already 0-1 (<=$35k → max)
-        vulnerability = max(
+        vul_poverty = _cap(eff_poverty, 0.25)        # 25% poverty → max
+        vul_low_income = zip_low_income               # already 0-1 (<=$35k → max)
+        vulnerability = _noisy_or(
             vul_elderly, vul_veterans, vul_new_owners,
-            vul_poverty, vul_low_income,
+            vul_poverty, vul_low_income, vul_elderly_alone,
         )
 
-        # Service gap: low engagement is the strongest equity signal
+        # Service gap: low engagement is the strongest equity signal.
+        # Still uses max() — these two components (low contact rate and
+        # high failure rate) measure the SAME underlying deficiency from
+        # two angles, so compounding them would double-count.
         cpp = props.get('contacts_per_parcel', 0) or 0
         gap_low_contact = max(0, 1.0 - cpp / 0.5)    # <0.1 cpp → ~max
         gap_failure = _cap(props.get('failure_rate'), 0.15)
@@ -544,19 +798,28 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             gap_low_contact = min(1.0, gap_low_contact * (1 + demographic_disadvantage * 0.5))
         service_gap = max(gap_low_contact, gap_failure)
 
-        # Weighted formula: emphasize service gap (equity priority)
-        # Geometric mean style with service_gap weighted 2x
+        # Weighted geometric mean: sqrt(severity * vulnerability) *
+        # service_gap. Each dimension must be non-trivial for a high
+        # score. Noisy-OR aggregation above already inflates the
+        # per-dimension values, so dropped the arbitrary 1.6 multiplier
+        # that was previously needed to push max-aggregated scores up.
         sev_f = max(severity, 0.15)
         vul_f = max(vulnerability, 0.15)
         gap_f = max(service_gap, 0.15)
-        # score = sqrt(severity * vulnerability) * service_gap (heavier weight on gap)
         import math
         base = math.sqrt(sev_f * vul_f)
-        props['outreach_need'] = round(min(1.0, base * gap_f * 1.6), 4)
-        # Store component scores for transparency
+        props['outreach_need'] = round(min(1.0, base * gap_f), 4)
+        # Store component scores for transparency (both aggregates and
+        # the individual signals so users can debug rankings).
         props['outreach_severity'] = round(severity, 4)
         props['outreach_vulnerability'] = round(vulnerability, 4)
         props['outreach_service_gap'] = round(service_gap, 4)
+        props['sev_vf_denied'] = round(sev_vf_denied, 4)
+        props['sev_hoh_churn'] = round(sev_hoh_churn, 4)
+        props['sev_volatility'] = round(sev_volatility, 4)
+        props['vul_elderly'] = round(vul_elderly, 4)
+        props['vul_veterans'] = round(vul_veterans, 4)
+        props['vul_new_owners'] = round(vul_new_owners, 4)
 
         # Generate outreach recommendations with explicit reasoning
         # Format: "Title::Why::What" split by | for multiple recs
@@ -643,28 +906,19 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None):
             ('South Valley Senior', 35.069824, -106.6881653),
             ('Alamosa', 35.0714679, -106.7101371),
         ]
-        nbhd_center = None
-        for feat in existing_props:
-            if int(feat['properties'].get('nbhd', 0)) == nbhd:
-                geom = feat['geometry']
-                coords = []
-                if geom['type'] == 'Polygon':
-                    coords = geom['coordinates'][0]
-                elif geom['type'] == 'MultiPolygon':
-                    for poly in geom['coordinates']:
-                        coords.extend(poly[0])
-                if coords:
-                    nbhd_center = (
-                        sum(c[1] for c in coords) / len(coords),
-                        sum(c[0] for c in coords) / len(coords),
-                    )
-                break
+        nbhd_center = centroid_lookup.get(nbhd)
         if nbhd_center:
             best_cc = min(cc_locations, key=lambda c: (c[1]-nbhd_center[0])**2 + (c[2]-nbhd_center[1])**2)
             props['nearest_cc'] = best_cc[0]
 
         updated[nbhd] = props
 
+    # Post-process: compute exemption gaps against all-nbhd distribution,
+    # then bump outreach_need for neighborhoods that under-claim given
+    # their demographic prediction. Both passes need the full `updated`
+    # dict so they run after the per-nbhd loop.
+    _compute_exemption_gaps(updated)
+    _boost_outreach_with_gaps(updated)
     return updated
 
 
@@ -1268,7 +1522,12 @@ def main():
 
     # Compute neighborhood stats from roll (census is used to amplify outreach score)
     print("\nComputing neighborhood stats...")
-    nbhd_stats = compute_nbhd_stats(by_nbhd_yr, existing_core['DATA']['features'], census=census)
+    nbhd_stats = compute_nbhd_stats(
+        by_nbhd_yr,
+        existing_core['DATA']['features'],
+        census=census,
+        tract_geo=existing_core.get('TRACT_GEO'),
+    )
 
     # All possible layer keys
     all_layer_keys = [
