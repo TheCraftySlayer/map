@@ -730,10 +730,13 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         # wealthy residential areas that simply have high HOH rates.
         def _cap(v, ceil): return min((v or 0) / ceil, 1.0) if ceil else 0
 
-        # Attach ZIP(s) for this neighborhood: scan roll records for common ZIP fields
+        # Attach ZIP(s) for this neighborhood: scan roll records for common
+        # ZIP field names across Bernalillo CAMA schemas. SITUSZIP (property
+        # location) wins over OWNZIPCODE (owner mailing) because we want the
+        # neighborhood's actual ZIP, not where absentee landlords live.
         nbhd_zips = set()
         for r in recs:
-            for zf in ('OWNZIP', 'SITEZIP', 'PROPZIP', 'ZIP', 'ZIPCODE'):
+            for zf in ('SITUSZIP', 'SITEZIP', 'PROPZIP', 'OWNZIPCODE', 'OWNZIP', 'ZIPCODE', 'ZIP'):
                 z = str(r.get(zf, '') or '').strip()[:5]
                 if z.isdigit() and z.startswith('87'):
                     nbhd_zips.add(z)
