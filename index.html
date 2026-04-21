@@ -2080,55 +2080,189 @@ function pinByNbhd(n,{fit=true,fly=false}={}){
 // Select all neighborhoods whose stored zip_codes contains the given ZIP.
 // Builds up the _selSet and fits the map to cover the matches so the user
 // can Export CSV for just that ZIP or compare/inspect the cluster.
+// Parse the sidebar's rendered ZIP ACS table into a JS-accessible lookup.
+// build_data.py writes this table as HTML rows inside #censusData; parsing
+// it once lets the ZIP summary surface per-ZIP ACS demographics (pop,
+// income, home value, poverty, Hispanic) without a separate data fetch.
+let _zipAcsCache=null;
+function _zipAcs(zip){
+  if(_zipAcsCache===null){
+    _zipAcsCache={};
+    const tbl=document.querySelector('#censusData table tbody');
+    if(tbl){
+      tbl.querySelectorAll('tr').forEach(tr=>{
+        const cells=tr.querySelectorAll('td');
+        if(cells.length<6)return;
+        const z=(cells[0].textContent||'').trim();
+        const parseNum=s=>{const v=Number(String(s).replace(/[^0-9.\-]/g,''));return Number.isFinite(v)?v:null;};
+        const parsePct=s=>{const v=Number(String(s).replace(/[^0-9.\-]/g,''));return Number.isFinite(v)?v/100:null;};
+        _zipAcsCache[z]={
+          pop:parseNum(cells[1].textContent),
+          income:parseNum(cells[2].textContent),
+          home_val:parseNum(cells[3].textContent),
+          poverty:parsePct(cells[4].textContent),
+          hispanic:parsePct(cells[5].textContent),
+        };
+      });
+    }
+  }
+  return _zipAcsCache[zip]||null;
+}
+
 // Aggregate stats for a set of matching features — used by the ZIP
-// search to render a ZIP-level summary in the info tooltip so the user
-// sees how the whole ZIP behaves (not just one nbhd at a time).
+// search to render a rich ZIP-level brief in the info tooltip: ACS
+// demographics, aggregate assessor metrics with min/max ranges,
+// exemption-gap aggregates, cluster participation, cumulative value
+// change, and the top outreach recommendations across the ZIP.
 function buildZipSummary(zip,feats){
   const n=feats.length;
-  let totalParcels=0,totalContacts=0,totalCalls=0,totalFailures=0;
-  const sumOf=(field)=>{let s=0,c=0;for(const f of feats){const v=f.properties[field];if(v!=null&&Number.isFinite(v)){s+=v;c++;}}return c?s/c:null;};
-  for(const f of feats){
-    const p=f.properties;
-    totalParcels+=(p.parcels||0);
-    totalContacts+=(p.total_contacts||0);
-    totalCalls+=(p.total_calls||0);
-    totalFailures+=(p.total_failures||0);
-  }
-  const avgOutreach=sumOf('outreach_need');
-  const avgHoh=sumOf('pct_hoh');
-  const avgVet=sumOf('pct_vet');
-  const avgVf=sumOf('pct_val_freeze');
-  const avgFailure=sumOf('failure_rate');
-  const avgCpp=sumOf('contacts_per_parcel');
-  const avgDrive=sumOf('cc_time_min');
   const pct=v=>v==null?'—':(v*100).toFixed(1)+'%';
+  const ppct=v=>v==null?'—':(v>=0?'+':'')+(v*100).toFixed(1)+' pp';
   const num=v=>v==null?'—':v.toFixed(2);
-  const min=v=>v==null?'—':v.toFixed(1)+' min';
+  const mins=v=>v==null?'—':v.toFixed(1)+' min';
+  const dlr=v=>v==null||!v?'—':'$'+Math.round(v).toLocaleString();
+  const fint=v=>v==null?'—':Math.round(v).toLocaleString();
+
+  // Build a reusable stats helper: mean / min / max / count for a field.
+  const stats=field=>{
+    let s=0,c=0,lo=Infinity,hi=-Infinity;
+    for(const f of feats){
+      const v=f.properties[field];
+      if(v==null||!Number.isFinite(v))continue;
+      s+=v;c++;if(v<lo)lo=v;if(v>hi)hi=v;
+    }
+    return c?{mean:s/c,min:lo,max:hi,n:c}:null;
+  };
+  const totalOf=field=>{let s=0;for(const f of feats){s+=(f.properties[field]||0);}return s;};
+
+  const totalParcels=totalOf('parcels'),totalContacts=totalOf('total_contacts'),totalCalls=totalOf('total_calls'),totalFailures=totalOf('total_failures');
+  const outreach=stats('outreach_need');
+  const hoh=stats('pct_hoh'), vet=stats('pct_vet'), vf=stats('pct_val_freeze');
+  const vfDen=stats('pct_vf_denied'), turnover=stats('owner_turnover');
+  const failure=stats('failure_rate'), cpp=stats('contacts_per_parcel');
+  const drive=stats('cc_time_min');
+  const hohGap=stats('hoh_gap'), vetGap=stats('vet_gap'), vfGap=stats('vf_gap');
+  const volat=stats('appr_volatility'), drift=stats('exemp_drift');
+  const cumVal=stats('val_change_pct');
+  const yrBuilt=stats('median_yrbuilt'), medVal=stats('median_val_25');
+  const giOut=stats('gi_outreach_need');
+
+  // Count high-priority nbhds (outreach_need ≥ 0.6) so the reader sees
+  // concentration, not just average. Average can hide clusters when a
+  // ZIP has both very-high and very-low nbhds.
+  const highN=feats.filter(f=>(f.properties.outreach_need||0)>=0.6).length;
+  const hotN=feats.filter(f=>(f.properties.gi_outreach_need||0)>=1.5).length;
+  const underHoh=feats.filter(f=>(f.properties.hoh_gap||0)<-0.05).length;
+  const underVf=feats.filter(f=>(f.properties.vf_gap||0)<-0.03).length;
+
+  // Tally outreach-rec titles across all nbhds in the ZIP; surface the
+  // top-3 most common so staff see the dominant intervention theme
+  // before drilling into individual nbhd briefs.
+  const recCounts={};
+  for(const f of feats){
+    const recs=f.properties.outreach_recs;
+    if(!recs)continue;
+    for(const r of String(recs).split('|')){
+      const title=r.split('::')[0].trim();
+      if(!title)continue;
+      recCounts[title]=(recCounts[title]||0)+1;
+    }
+  }
+  const topRecs=Object.entries(recCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  const acs=_zipAcs(zip);
+  const demoBlock=acs?(
+    '<div style="margin-top:6px;padding:5px 6px;background:#eef4fb;border-radius:3px;font-size:11px">'+
+      '<div style="font-size:10px;color:#555;font-weight:600;margin-bottom:2px">Demographics (ACS 5-year)</div>'+
+      (acs.pop!=null?'<div class="s"><span>Population</span><span class="v">'+acs.pop.toLocaleString()+'</span></div>':'')+
+      (acs.income?'<div class="s"><span>Median income</span><span class="v">'+dlr(acs.income)+'</span></div>':'')+
+      (acs.home_val?'<div class="s"><span>Median home value</span><span class="v">'+dlr(acs.home_val)+'</span></div>':'')+
+      (acs.poverty!=null?'<div class="s"><span>Poverty rate</span><span class="v">'+pct(acs.poverty)+'</span></div>':'')+
+      (acs.hispanic!=null?'<div class="s"><span>Hispanic/Latino</span><span class="v">'+pct(acs.hispanic)+'</span></div>':'')+
+    '</div>'
+  ):'';
+
+  const row=(label,v,rng,fmt)=>{
+    if(!v)return '';
+    const rangeTxt=rng&&v.min!==v.max?' <span style="color:#888;font-size:10px">('+fmt(v.min)+' – '+fmt(v.max)+')</span>':'';
+    return '<div class="s"><span>'+label+'</span><span class="v">'+fmt(v.mean)+rangeTxt+'</span></div>';
+  };
+
   const top=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).slice(0,5);
   const topItems=top.map(f=>{
     const p=f.properties;
     const onScore=p.outreach_need!=null?(p.outreach_need*100).toFixed(0)+'%':'—';
     const color=p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040';
-    return '<li style="margin:2px 0"><button class="zip-goto" data-nbhd="'+esc(p.nbhd)+'" title="Zoom to this neighborhood" style="background:none;border:none;padding:0;color:#185FA5;cursor:pointer;text-decoration:underline;font:inherit">Nbhd '+esc(p.nbhd)+'</button> &mdash; <b style="color:'+color+'">'+onScore+'</b></li>';
+    const nearby=p.nearest_cc?' <span style="color:#888;font-size:10px">→ '+esc(p.nearest_cc)+'</span>':'';
+    return '<li style="margin:2px 0"><button class="zip-goto" data-nbhd="'+esc(p.nbhd)+'" title="Zoom to this neighborhood" style="background:none;border:none;padding:0;color:#185FA5;cursor:pointer;text-decoration:underline;font:inherit">Nbhd '+esc(p.nbhd)+'</button> &mdash; <b style="color:'+color+'">'+onScore+'</b>'+nearby+'</li>';
   }).join('');
+
+  const recsBlock=topRecs.length?(
+    '<div style="margin-top:6px;font-size:10px;color:#555;font-weight:600">Top intervention themes</div>'+
+    '<ol style="margin:2px 0 0;padding-left:20px;font-size:11px;color:#333">'+
+      topRecs.map(([title,count])=>'<li style="margin:2px 0"><span>'+esc(title)+'</span> <span style="color:#888;font-size:10px">(&times;'+count+')</span></li>').join('')+
+    '</ol>'
+  ):'';
+
+  // Flags — at-a-glance signals that the ZIP needs attention.
+  const flags=[];
+  if(highN>0)flags.push({label:highN+' high-need nbhds',color:'#c41a1a'});
+  if(hotN>0)flags.push({label:hotN+' in hot cluster',color:'#c41a1a'});
+  if(underHoh>0)flags.push({label:underHoh+' HOH under-claim',color:'#c47a00'});
+  if(underVf>0)flags.push({label:underVf+' VF under-claim',color:'#c47a00'});
+  const flagsBlock=flags.length?(
+    '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">'+
+    flags.map(f=>'<span style="display:inline-block;padding:1px 6px;background:#fff;border:1px solid '+f.color+';color:'+f.color+';border-radius:10px;font-size:10px;font-weight:600">'+esc(f.label)+'</span>').join('')+
+    '</div>'
+  ):'';
+
+  const outreachColor=outreach&&outreach.mean>=0.6?'#c41a1a':outreach&&outreach.mean>=0.4?'#c47a00':'#157040';
+
   return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
     '<h4 style="margin:0">ZIP '+esc(zip)+'</h4>'+
     '<button id="zipSumClose" title="Close summary" style="font-size:12px;padding:1px 6px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">&times;</button>'+
     '</div>'+
+    flagsBlock+
+    demoBlock+
+    '<div style="margin-top:6px;font-size:10px;color:#555;font-weight:600">Parcels &amp; service load</div>'+
     '<div class="s"><span>Neighborhoods</span><span class="v">'+n+'</span></div>'+
     '<div class="s"><span>Total parcels</span><span class="v">'+totalParcels.toLocaleString()+'</span></div>'+
     '<div class="s"><span>Total contacts</span><span class="v">'+totalContacts.toLocaleString()+'</span></div>'+
     '<div class="s"><span>Total calls</span><span class="v">'+totalCalls.toLocaleString()+'</span></div>'+
     '<div class="s"><span>Failures</span><span class="v">'+totalFailures.toLocaleString()+'</span></div>'+
-    '<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span>Avg outreach need</span><span class="v" style="color:'+(avgOutreach>=0.6?'#c41a1a':avgOutreach>=0.4?'#c47a00':'#157040')+'"><b>'+pct(avgOutreach)+'</b></span></div>'+
-    '<div class="s"><span>Avg HOH rate</span><span class="v">'+pct(avgHoh)+'</span></div>'+
-    '<div class="s"><span>Avg Vet rate</span><span class="v">'+pct(avgVet)+'</span></div>'+
-    '<div class="s"><span>Avg VF rate</span><span class="v">'+pct(avgVf)+'</span></div>'+
-    '<div class="s"><span>Avg failure rate</span><span class="v">'+pct(avgFailure)+'</span></div>'+
-    '<div class="s"><span>Avg contacts/parcel</span><span class="v">'+num(avgCpp)+'</span></div>'+
-    '<div class="s"><span>Avg drive to CC</span><span class="v">'+min(avgDrive)+'</span></div>'+
+
+    '<div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px;font-size:10px;color:#555;font-weight:600">Outreach priority</div>'+
+    (outreach?'<div class="s"><span>Avg outreach need</span><span class="v" style="color:'+outreachColor+'"><b>'+pct(outreach.mean)+'</b> <span style="color:#888;font-size:10px">('+pct(outreach.min)+' – '+pct(outreach.max)+')</span></span></div>':'')+
+    '<div class="s"><span>High-need nbhds (≥60%)</span><span class="v">'+highN+' of '+n+'</span></div>'+
+    (giOut?'<div class="s"><span>Hot-spot cluster (avg Gi*)</span><span class="v">'+(giOut.mean>=0?'+':'')+giOut.mean.toFixed(2)+'σ</span></div>':'')+
+
+    '<div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px;font-size:10px;color:#555;font-weight:600">Exemption rates (mean, range)</div>'+
+    row('HOH',hoh,true,pct)+
+    row('Veteran',vet,true,pct)+
+    row('Value freeze',vf,true,pct)+
+    row('VF denial',vfDen,true,pct)+
+    row('Owner turnover',turnover,true,pct)+
+
+    '<div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px;font-size:10px;color:#555;font-weight:600">Gap vs. demographic prediction</div>'+
+    row('HOH gap',hohGap,true,ppct)+
+    row('Vet gap',vetGap,true,ppct)+
+    row('VF gap',vfGap,true,ppct)+
+
+    '<div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px;font-size:10px;color:#555;font-weight:600">Value &amp; volatility</div>'+
+    row('Median value 2025',medVal,true,dlr)+
+    row('Median year built',yrBuilt,true,fint)+
+    row('Cumulative 2007→26',cumVal,true,pct)+
+    row('Appraisal volatility',volat,true,pct)+
+    row('Exemption drift',drift,true,pct)+
+
+    '<div style="margin-top:4px;border-top:1px solid #eee;padding-top:4px;font-size:10px;color:#555;font-weight:600">Contact center</div>'+
+    row('Contacts/parcel',cpp,true,num)+
+    row('Failure rate',failure,true,pct)+
+    row('Drive to CC',drive,true,mins)+
+
     (top.length?'<div style="margin-top:6px;font-size:10px;color:#555;font-weight:600">Top outreach priorities</div>'+
       '<ol style="margin:2px 0 0;padding-left:20px;font-size:11px;color:#333">'+topItems+'</ol>':'')+
+    recsBlock+
     '<div style="margin-top:6px;font-size:10px;color:#888">Click × to dismiss &middot; hover a neighborhood to see individual details.</div>';
 }
 
