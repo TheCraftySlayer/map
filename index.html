@@ -557,6 +557,16 @@ function _olsFit(pairs){
   return{slope:(sxy-n*mx*my)/vx, intercept:my-((sxy-n*mx*my)/vx)*mx, n};
 }
 (function(){
+  // build_data.py now computes hoh_gap / vet_gap / vf_gap server-side
+  // when census data is available. Skip the client-side recomputation
+  // if ANY feature already has the server-populated gap fields, since
+  // the server version is the authoritative one (includes gap-boost
+  // feedback into outreach_need).
+  const hasServerGaps=DATA.features.some(f=>{
+    const p=f.properties;
+    return p.hoh_gap!=null||p.vet_gap!=null||p.vf_gap!=null;
+  });
+  if(hasServerGaps)return;
   // HOH and VF use ZIP poverty as the predictor (higher poverty → more
   // eligible households). Vet claims are dominated by proximity to Kirtland
   // AFB / VA services, not ZIP demographics, so we use a county-mean
