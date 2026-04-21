@@ -721,6 +721,12 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
                 if z.isdigit() and z.startswith('87'):
                     nbhd_zips.add(z)
                     break
+        # Always store the roll-derived zip_codes list — the front-end
+        # needs this for ZIP-based neighborhood search regardless of
+        # whether ACS data is available. Demographic amplifiers below
+        # still require ACS, but the raw ZIP tag doesn't.
+        if nbhd_zips:
+            props['zip_codes'] = ','.join(sorted(nbhd_zips))
         zip_poverty = 0
         zip_low_income = 0
         if nbhd_zips and zip_data:
@@ -738,7 +744,6 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
                 med_inc = sum(incs) / len(incs)
                 # Low income = 1 when ≤ $35k, 0 when ≥ $100k
                 zip_low_income = max(0, min(1, (100000 - med_inc) / 65000))
-            props['zip_codes'] = ','.join(sorted(nbhd_zips))
             props['zip_poverty_rate'] = round(zip_poverty, 4)
             props['zip_income_factor'] = round(zip_low_income, 4)
 
