@@ -922,23 +922,38 @@ def fetch_tract_acs(tract_geo):
         by_geoid = {}
         for row in rows[1:]:
             geoid = f"{row[idx['state']]}{row[idx['county']]}{row[idx['tract']]}"
-            def _v(k):
+
+            def _vf(k):
+                """Parse an ACS cell as a float. ACS returns decimals for
+                values like median age, and uses large negative sentinels
+                (e.g. -666666666) for missing/suppressed data. Normalize
+                both to None so downstream math doesn't blow up."""
                 try:
                     raw = row[idx[k]]
-                    return int(raw) if raw not in (None, '', '-', '*') else None
-                except Exception:
+                    if raw in (None, '', '-', '*'):
+                        return None
+                    v = float(raw)
+                    if v < -1e6:  # ACS missing-data sentinels
+                        return None
+                    return v
+                except (ValueError, TypeError):
                     return None
-            pop = _v('B01003_001E') or 0
-            pov_univ = _v('B17001_001E') or 0
-            pov_below = _v('B17001_002E') or 0
-            lang_univ = _v('C16001_001E') or 0
-            spanish = _v('C16001_005E') or 0
-            hh_univ = _v('B11007_001E') or 0
-            elderly_alone = _v('B11007_003E') or 0
-            median_age = _v('B01002_001E')
+
+            def _vi(k):
+                v = _vf(k)
+                return int(v) if v is not None else None
+
+            pop = _vi('B01003_001E') or 0
+            pov_univ = _vi('B17001_001E') or 0
+            pov_below = _vi('B17001_002E') or 0
+            lang_univ = _vi('C16001_001E') or 0
+            spanish = _vi('C16001_005E') or 0
+            hh_univ = _vi('B11007_001E') or 0
+            elderly_alone = _vi('B11007_003E') or 0
+            median_age = _vf('B01002_001E')  # decimal — keep as float
             by_geoid[geoid] = {
                 'poverty_rate': round(pov_below / pov_univ, 4) if pov_univ else None,
-                'median_age': float(median_age) if median_age is not None else None,
+                'median_age': round(median_age, 1) if median_age is not None else None,
                 'spanish_at_home': round(spanish / lang_univ, 4) if lang_univ else None,
                 'elderly_alone': round(elderly_alone / hh_univ, 4) if hh_univ else None,
                 'acs_year': yr,
