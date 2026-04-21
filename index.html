@@ -701,10 +701,14 @@ const _changePoints={};  // nbhd -> { base -> {year, deltaPct, before, after} }
 })();
 
 // ── Drive-time catchment proxy ──────────────────────────────────────────────
-// Haversine distance from each nbhd centroid to each of the 9 community
-// centers, converted to minutes using a ~25 mph urban-speed proxy. True
-// isochrones require an OSRM/Mapbox endpoint — see the note in LAYER_HELP.
+// build_data.py populates cc_time_min via OSRM (real driving duration)
+// when --osrm is enabled. If the server-side value is absent — OSRM
+// skipped, unreachable, or the user hasn't rebuilt — fall back to a
+// Haversine-distance proxy with a 25 mph urban-speed assumption so the
+// layer still carries a usable signal.
 (function(){
+  const hasServerDriveTimes=DATA.features.some(f=>f.properties.cc_time_source==='osrm');
+  if(hasServerDriveTimes)return;  // server-side OSRM values are authoritative
   const CC_COORDS=[
     [35.1769943,-106.3409576],[35.0788198,-106.3923734],[35.1950907,-106.7129307],
     [35.193073,-106.6157715],[35.0537822,-106.672675],[34.9569792,-106.696385],
@@ -727,6 +731,7 @@ const _changePoints={};  // nbhd -> { base -> {year, deltaPct, before, after} }
       if(mi<best)best=mi;
     }
     p.cc_time_min=best===Infinity?null:(best/MPH)*60;
+    p.cc_time_source='haversine';
   }
 })();
 const map=L.map('map',{center:[35.09,-106.55],zoom:11,preferCanvas:true});
@@ -2799,7 +2804,7 @@ const LAYER_HELP={
   hoh_gap:'Residual of actual HOH rate minus the rate predicted from ZIP demographics. Negative = under-claiming given who lives there (outreach candidate).',
   vet_gap:'Residual of actual veteran exemption rate vs. demographic prediction. Negative = under-claiming.',
   vf_gap:'Residual of actual value-freeze rate vs. demographic prediction. Negative = under-claiming.',
-  cc_time_min:'Estimated drive-time (minutes) to the nearest community center, using Haversine distance and an urban-speed proxy. For true isochrones, wire an OSRM/Mapbox endpoint in build_data.py.'
+  cc_time_min:'Drive-time (minutes) to the nearest community center. Populated by OSRM (real driving duration over the street network) when build_data.py has OSRM enabled, else falls back to a Haversine-distance proxy at 25 mph.'
 };
 function metricDescFor(v){
   if(!v||v==='none')return '';
