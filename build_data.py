@@ -950,7 +950,6 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         sev_f = max(severity, 0.15)
         vul_f = max(vulnerability, 0.15)
         gap_f = max(service_gap, 0.15)
-        import math
         base = math.sqrt(sev_f * vul_f)
         props['outreach_need'] = round(min(1.0, base * gap_f), 4)
         # Store component scores for transparency (both aggregates and
