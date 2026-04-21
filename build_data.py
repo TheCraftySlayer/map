@@ -812,6 +812,36 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             props['earliest_yr'] = 2000 + _early
             props['latest_yr'] = 2000 + _late
 
+        # Fallback: hoh_churn ≈ |Δ pct_hoh| between the two most recent
+        # years present. Same motivation as exemp_drift above — this
+        # stays populated on single-roll rebuilds that can't derive
+        # hoh_churn from fresh roll records.
+        if props.get('hoh_churn') is None:
+            _hoh_yrs = sorted(_hoh_by_yr.keys())
+            if len(_hoh_yrs) >= 2:
+                _y1, _y2 = _hoh_yrs[-2], _hoh_yrs[-1]
+                props['hoh_churn'] = round(abs(_hoh_by_yr[_y2] - _hoh_by_yr[_y1]), 4)
+
+        # Fallback: appr_volatility (std dev of YoY changes) and
+        # volatility (sum of |YoY|) from preserved chg_* fields.
+        if props.get('appr_volatility') is None or props.get('volatility') is None:
+            _preserved_chgs = []
+            for _k, _v in props.items():
+                if _v is None or not isinstance(_v, (int, float)):
+                    continue
+                if _k.startswith('chg_') and '_' in _k[4:]:
+                    _rest = _k[4:]
+                    _a, _sep, _b = _rest.partition('_')
+                    if _a.isdigit() and _b.isdigit():
+                        _preserved_chgs.append(_v)
+            if _preserved_chgs:
+                if props.get('volatility') is None:
+                    props['volatility'] = round(sum(abs(v) for v in _preserved_chgs), 4)
+                if len(_preserved_chgs) >= 2 and props.get('appr_volatility') is None:
+                    _mean = sum(_preserved_chgs) / len(_preserved_chgs)
+                    _var = sum((v - _mean) ** 2 for v in _preserved_chgs) / len(_preserved_chgs)
+                    props['appr_volatility'] = round(math.sqrt(_var), 4)
+
         # Outreach need score (0-1): multi-signal weighted composite
         # Design: need = severity × vulnerability × service_gap
         # High score requires ALL three: a real problem, a vulnerable group,
