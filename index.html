@@ -533,20 +533,33 @@ function _olsFit(pairs){
   return{slope:(sxy-n*mx*my)/vx, intercept:my-((sxy-n*mx*my)/vx)*mx, n};
 }
 (function(){
-  // HOH ~ ZIP poverty (higher poverty → more HOH eligibility)
+  // HOH and VF use ZIP poverty as the predictor (higher poverty → more
+  // eligible households). Vet claims are dominated by proximity to Kirtland
+  // AFB / VA services, not ZIP demographics, so we use a county-mean
+  // baseline instead of fitting a weak regression that would just fit noise.
   const hohFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_hoh]));
-  // Vet ~ ZIP income (higher income → fewer vet claimants, weak relationship)
-  const vetFit=_olsFit(DATA.features.map(f=>[f.properties.zip_income_factor,f.properties.pct_vet]));
-  // VF (value freeze) ~ ZIP poverty (elderly poor more likely eligible)
   const vfFit=_olsFit(DATA.features.map(f=>[f.properties.zip_poverty_rate,f.properties.pct_val_freeze]));
+  // If the ZIP ACS fetch failed at build time, zip_poverty_rate is missing
+  // for every feature so _olsFit returns null. Fall back to county mean so
+  // the gap layers still carry a useful "above/below county" signal.
+  const _meanOf=field=>{
+    let n=0,s=0;
+    for(const f of DATA.features){const v=f.properties[field];if(v!=null&&Number.isFinite(v)){n++;s+=v;}}
+    return n?s/n:null;
+  };
+  const hohMean=hohFit?null:_meanOf('pct_hoh');
+  const vetMean=_meanOf('pct_vet');  // always used — vet baseline is the county mean
+  const vfMean=vfFit?null:_meanOf('pct_val_freeze');
   for(const f of DATA.features){
     const p=f.properties;
-    const predict=(fit,x)=>(fit&&x!=null&&Number.isFinite(x))?(fit.intercept+fit.slope*x):null;
-    const hohPred=predict(hohFit,p.zip_poverty_rate);
+    const predict=(fit,x,mean)=>{
+      if(fit&&x!=null&&Number.isFinite(x))return fit.intercept+fit.slope*x;
+      return mean;  // falls back to county mean when fit is unavailable
+    };
+    const hohPred=predict(hohFit,p.zip_poverty_rate,hohMean);
     if(hohPred!=null&&p.pct_hoh!=null)p.hoh_gap=p.pct_hoh-hohPred;
-    const vetPred=predict(vetFit,p.zip_income_factor);
-    if(vetPred!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetPred;
-    const vfPred=predict(vfFit,p.zip_poverty_rate);
+    if(vetMean!=null&&p.pct_vet!=null)p.vet_gap=p.pct_vet-vetMean;
+    const vfPred=predict(vfFit,p.zip_poverty_rate,vfMean);
     if(vfPred!=null&&p.pct_val_freeze!=null)p.vf_gap=p.pct_val_freeze-vfPred;
   }
 })();
@@ -588,7 +601,9 @@ function _olsFit(pairs){
     const mean=sum/cnt;
     let sq=0;
     for(const v of vals)if(v!=null&&Number.isFinite(v))sq+=(v-mean)*(v-mean);
-    const stdev=Math.sqrt(sq/cnt);
+    // Sample stdev (N-1 denominator) to match the (N-1) scaling in the
+    // Gi* z-score normalization below.
+    const stdev=cnt>1?Math.sqrt(sq/(cnt-1)):0;
     if(stdev<=0)continue;
     const scale=stdev*Math.sqrt((K*(N-K))/(N-1));
     for(let i=0;i<N;i++){
@@ -638,7 +653,12 @@ const _changePoints={};  // nbhd -> { base -> {year, deltaPct, before, after} }
       }
       if(bestT<0)continue;
       const shift=Math.abs(bestAfter-bestBefore);
-      if(shift<1.5*sd)continue;
+      // A smoothly monotonic trend also produces a large mid-point "shift",
+      // so a 1.5σ threshold generates false positives. Require a stronger
+      // 2σ shift AND a minimum absolute gap (1 pp for rates, $25k for
+      // dollar series) to keep only structural breaks.
+      const absFloor=(base==='avg_appraised')?25000:0.01;
+      if(shift<2.0*sd||shift<absFloor)continue;
       perNbhd[base]={year:series[bestT].y, delta:bestAfter-bestBefore, before:bestBefore, after:bestAfter};
     }
     if(Object.keys(perNbhd).length)_changePoints[p.nbhd]=perNbhd;
@@ -1639,7 +1659,7 @@ function computeInsights(feats){
     const under=hohGapArr[0];
     if((under.properties.hoh_gap||0)<-0.1){
       out.push({id:'hoh-underclaim',severity:'med',
-        text:'Biggest HOH under-claim: Nbhd '+under.properties.nbhd+' is '+(under.properties.hoh_gap*100).toFixed(1)+' pp below the rate predicted for its demographics.',
+        text:'Biggest HOH under-claim: Nbhd '+under.properties.nbhd+' is '+Math.abs(under.properties.hoh_gap*100).toFixed(1)+' pp below the rate predicted for its demographics.',
         nbhd:under.properties.nbhd,hint:'Target for HOH clinic outreach.'});
     }
   }

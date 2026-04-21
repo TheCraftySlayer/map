@@ -1011,7 +1011,10 @@ def fetch_census_acs():
             '87194','87196','87197','87198','87199',
         }
         zip_vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B03003_003E,B25001_001E,B25077_001E'
-        zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*&in=state:35'
+        # Census deprecated the `in=state:` filter for ZCTA queries a few
+        # years ago; the endpoint now returns HTTP 400 if you include it.
+        # Query nationwide and filter by the Bernalillo-area ZCTA set below.
+        zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*'
         try:
             with urlopen(zip_url, timeout=10) as resp:
                 zdata = json.loads(resp.read())
