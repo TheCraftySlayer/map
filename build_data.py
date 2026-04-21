@@ -966,12 +966,12 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
 
         updated[nbhd] = props
 
-    # Post-process: compute exemption gaps against all-nbhd distribution,
-    # then bump outreach_need for neighborhoods that under-claim given
-    # their demographic prediction. Both passes need the full `updated`
-    # dict so they run after the per-nbhd loop.
-    _compute_exemption_gaps(updated)
-    _boost_outreach_with_gaps(updated)
+    # Exemption gap computation deferred to AFTER the MDF merge in main() —
+    # Bernalillo's plain tax roll has no Value Freeze indicator, so
+    # pct_val_freeze is 0 everywhere here and vf_gap would degenerate
+    # to 0 for every neighborhood. MDF's agg_nbhd_summary fills in the
+    # real pct_val_freeze a few steps later, and only then can gaps
+    # carry meaningful signal.
     # Return centroid_lookup alongside so callers (main) can reuse it for
     # downstream spatial queries like OSRM drive-time catchments without
     # rebuilding the per-nbhd centroid map.
@@ -1859,7 +1859,11 @@ def main():
             else:
                 return read_xlsx(mdf_source, sheet_name)
 
-        # agg_nbhd_summary: merge contact center stats into neighborhood data
+        # agg_nbhd_summary: merge contact center stats + anything the roll
+        # can't derive directly. Value Freeze in particular isn't encoded
+        # anywhere in the plain tax-roll DBF (EXEMCODE only has HOHX/VET*
+        # codes for Bernalillo), so we trust the MDF's pct_val_freeze and
+        # vf_count as the authoritative VF source for this neighborhood.
         try:
             nbhd_rows = read_mdf('agg_nbhd_summary')
             merged = 0
@@ -1868,8 +1872,9 @@ def main():
                 if n and n in nbhd_stats:
                     for k in ['total_contacts','total_calls','total_failures',
                               'contacts_per_parcel','calls_per_parcel','failure_rate',
-                              'sale_contact_rate','post_sale_contacts']:
-                        if r.get(k) is not None:
+                              'sale_contact_rate','post_sale_contacts',
+                              'pct_val_freeze','vf_count']:
+                        if r.get(k) is not None and r.get(k) != '':
                             nbhd_stats[n][k] = safe_float(r[k])
                     merged += 1
             print(f"  agg_nbhd_summary: merged {merged} neighborhoods")
@@ -2014,6 +2019,17 @@ def main():
             print(f"  Demographics: county={len(county_rows)} rows, zcta={len(zcta_rows)} rows")
         except Exception as e:
             print(f"  Demographics: {e}")
+
+    # ── Post-MDF: now that pct_val_freeze etc. carry real MDF values,
+    # compute the exemption gaps and boost outreach_need for nbhds
+    # under-claiming relative to demographic prediction. Doing this here
+    # rather than inside compute_nbhd_stats is important — the roll
+    # doesn't carry VF data, so running gaps before MDF merge produced
+    # vf_gap=0 for every neighborhood.
+    print("\nRecomputing exemption gaps (post-MDF)...")
+    _compute_exemption_gaps(nbhd_stats)
+    _boost_outreach_with_gaps(nbhd_stats)
+    print(f"  Gaps computed for {sum(1 for p in nbhd_stats.values() if p.get('vf_gap') is not None)} neighborhoods")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
