@@ -2080,6 +2080,58 @@ function pinByNbhd(n,{fit=true,fly=false}={}){
 // Select all neighborhoods whose stored zip_codes contains the given ZIP.
 // Builds up the _selSet and fits the map to cover the matches so the user
 // can Export CSV for just that ZIP or compare/inspect the cluster.
+// Aggregate stats for a set of matching features — used by the ZIP
+// search to render a ZIP-level summary in the info tooltip so the user
+// sees how the whole ZIP behaves (not just one nbhd at a time).
+function buildZipSummary(zip,feats){
+  const n=feats.length;
+  let totalParcels=0,totalContacts=0,totalCalls=0,totalFailures=0;
+  const sumOf=(field)=>{let s=0,c=0;for(const f of feats){const v=f.properties[field];if(v!=null&&Number.isFinite(v)){s+=v;c++;}}return c?s/c:null;};
+  for(const f of feats){
+    const p=f.properties;
+    totalParcels+=(p.parcels||0);
+    totalContacts+=(p.total_contacts||0);
+    totalCalls+=(p.total_calls||0);
+    totalFailures+=(p.total_failures||0);
+  }
+  const avgOutreach=sumOf('outreach_need');
+  const avgHoh=sumOf('pct_hoh');
+  const avgVet=sumOf('pct_vet');
+  const avgVf=sumOf('pct_val_freeze');
+  const avgFailure=sumOf('failure_rate');
+  const avgCpp=sumOf('contacts_per_parcel');
+  const avgDrive=sumOf('cc_time_min');
+  const pct=v=>v==null?'—':(v*100).toFixed(1)+'%';
+  const num=v=>v==null?'—':v.toFixed(2);
+  const min=v=>v==null?'—':v.toFixed(1)+' min';
+  const top=feats.slice().sort((a,b)=>(b.properties.outreach_need||0)-(a.properties.outreach_need||0)).slice(0,5);
+  const topItems=top.map(f=>{
+    const p=f.properties;
+    const onScore=p.outreach_need!=null?(p.outreach_need*100).toFixed(0)+'%':'—';
+    const color=p.outreach_need>=0.6?'#c41a1a':p.outreach_need>=0.4?'#c47a00':'#157040';
+    return '<li style="margin:2px 0"><button class="zip-goto" data-nbhd="'+esc(p.nbhd)+'" title="Zoom to this neighborhood" style="background:none;border:none;padding:0;color:#185FA5;cursor:pointer;text-decoration:underline;font:inherit">Nbhd '+esc(p.nbhd)+'</button> &mdash; <b style="color:'+color+'">'+onScore+'</b></li>';
+  }).join('');
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+    '<h4 style="margin:0">ZIP '+esc(zip)+'</h4>'+
+    '<button id="zipSumClose" title="Close summary" style="font-size:12px;padding:1px 6px;background:#eee;border:1px solid #aaa;border-radius:3px;cursor:pointer">&times;</button>'+
+    '</div>'+
+    '<div class="s"><span>Neighborhoods</span><span class="v">'+n+'</span></div>'+
+    '<div class="s"><span>Total parcels</span><span class="v">'+totalParcels.toLocaleString()+'</span></div>'+
+    '<div class="s"><span>Total contacts</span><span class="v">'+totalContacts.toLocaleString()+'</span></div>'+
+    '<div class="s"><span>Total calls</span><span class="v">'+totalCalls.toLocaleString()+'</span></div>'+
+    '<div class="s"><span>Failures</span><span class="v">'+totalFailures.toLocaleString()+'</span></div>'+
+    '<div class="s" style="margin-top:4px;border-top:1px solid #eee;padding-top:4px"><span>Avg outreach need</span><span class="v" style="color:'+(avgOutreach>=0.6?'#c41a1a':avgOutreach>=0.4?'#c47a00':'#157040')+'"><b>'+pct(avgOutreach)+'</b></span></div>'+
+    '<div class="s"><span>Avg HOH rate</span><span class="v">'+pct(avgHoh)+'</span></div>'+
+    '<div class="s"><span>Avg Vet rate</span><span class="v">'+pct(avgVet)+'</span></div>'+
+    '<div class="s"><span>Avg VF rate</span><span class="v">'+pct(avgVf)+'</span></div>'+
+    '<div class="s"><span>Avg failure rate</span><span class="v">'+pct(avgFailure)+'</span></div>'+
+    '<div class="s"><span>Avg contacts/parcel</span><span class="v">'+num(avgCpp)+'</span></div>'+
+    '<div class="s"><span>Avg drive to CC</span><span class="v">'+min(avgDrive)+'</span></div>'+
+    (top.length?'<div style="margin-top:6px;font-size:10px;color:#555;font-weight:600">Top outreach priorities</div>'+
+      '<ol style="margin:2px 0 0;padding-left:20px;font-size:11px;color:#333">'+topItems+'</ol>':'')+
+    '<div style="margin-top:6px;font-size:10px;color:#888">Click × to dismiss &middot; hover a neighborhood to see individual details.</div>';
+}
+
 function selectNbhdsByZip(zip){
   const matching=[];
   for(const f of DATA.features){
@@ -2104,6 +2156,26 @@ function selectNbhdsByZip(zip){
     const tmp=L.geoJSON(fc);
     map.fitBounds(tmp.getBounds(),{maxZoom:13,padding:[40,40]});
   }catch(e){}
+  // Replace the info tooltip content with a ZIP-level aggregate summary
+  // and freeze it so hovering neighborhoods doesn't blow it away. Close
+  // button restores normal hover behavior.
+  info._div.innerHTML=buildZipSummary(zip,matching);
+  _infoFrozen=true;
+  const closeBtn=document.getElementById('zipSumClose');
+  if(closeBtn)closeBtn.addEventListener('click',()=>{
+    _infoFrozen=false;
+    if(pinnedNbhd&&pinnedNbhd.feature)info.update(pinnedNbhd.feature.properties);
+    else info.update();
+  });
+  // Wire the "Nbhd N" links so clicking jumps straight to that neighborhood.
+  info._div.querySelectorAll('.zip-goto').forEach(btn=>{
+    btn.addEventListener('click',ev=>{
+      ev.stopPropagation();
+      const n=parseFloat(btn.dataset.nbhd);
+      _infoFrozen=false;
+      pinByNbhd(n,{fit:true});
+    });
+  });
   return matching.length;
 }
 document.getElementById('searchBox').addEventListener('keydown',e=>{
