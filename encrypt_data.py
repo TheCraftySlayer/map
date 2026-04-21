@@ -98,8 +98,10 @@ async function deriveKey(pw,salt,iter){
 }
 
 async function decryptFile(path,key){
-  const buf=await(await fetch(path)).arrayBuffer();
-  if(buf.byteLength<28)throw new Error('File too small: '+path);
+  const r=await fetch(path);
+  if(!r.ok)throw new Error('HTTP '+r.status+' for '+path);
+  const buf=await r.arrayBuffer();
+  if(buf.byteLength<28)throw new Error('File too small for AES-GCM: '+path+' ('+buf.byteLength+' bytes)');
   const iv=buf.slice(0,12),ct=buf.slice(12);
   return crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
 }
@@ -112,16 +114,22 @@ $('gateForm').addEventListener('submit',async e=>{
   $('gateBtn').disabled=true;
   try{
     setPg('Fetching manifest...');
-    const man=await(await fetch('data/enc_manifest.json')).json();
+    const manRes=await fetch('data/enc_manifest.json');
+    if(!manRes.ok)throw new Error('Manifest fetch failed: HTTP '+manRes.status+'. Check that data/enc_manifest.json was uploaded to the deploy branch.');
+    const manText=await manRes.text();
+    let man;
+    try{man=JSON.parse(manText);}
+    catch(_){throw new Error('Manifest is not JSON (server returned '+(manText.slice(0,40))+'...). Likely the .enc files were uploaded to the wrong path.');}
+    if(!man.salt||!man.iterations)throw new Error('Manifest is missing salt or iterations.');
     const salt=b64ToBytes(man.salt);
     setPg('Deriving key...');
-    const key=await deriveKey(pw,salt,man.iterations||200000);
+    const key=await deriveKey(pw,salt,man.iterations);
 
     setPg('Fetching encrypted assets...');
     const [coreBuf,layersBuf,htmlBuf]=await Promise.all([
-      decryptFile('data/core.json.enc',key).catch(e=>{throw new Error('decrypt_core');}),
-      decryptFile('data/layers.json.enc',key).catch(e=>{throw new Error('decrypt_layers');}),
-      decryptFile('index_body.html.enc',key).catch(e=>{throw new Error('decrypt_html');}),
+      decryptFile('data/core.json.enc',key).catch(e=>{throw new Error('decrypt_core:'+(e&&e.message||e));}),
+      decryptFile('data/layers.json.enc',key).catch(e=>{throw new Error('decrypt_layers:'+(e&&e.message||e));}),
+      decryptFile('index_body.html.enc',key).catch(e=>{throw new Error('decrypt_html:'+(e&&e.message||e));}),
     ]);
 
     setPg('Rendering...');
@@ -150,8 +158,14 @@ $('gateForm').addEventListener('submit',async e=>{
     document.close();
   }catch(err){
     const msg=String(err&&err.message||err);
-    if(msg.startsWith('decrypt_'))setErr('Wrong password (or corrupted data).');
-    else setErr(msg);
+    // decrypt_* prefix means the file fetched but GCM tag verification
+    // failed (wrong password) OR the file was fetched but is HTML (a 404
+    // served as index.html), which also fails the auth tag. Surface the
+    // underlying HTTP status when present so deploy misconfig is visible.
+    if(msg.startsWith('decrypt_')){
+      if(msg.indexOf('HTTP ')>=0)setErr('Encrypted asset missing on server: '+msg);
+      else setErr('Wrong password (or corrupted data).');
+    }else setErr(msg);
     setPg('');
     $('gateBtn').disabled=false;
   }
