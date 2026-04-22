@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-patch_body.py — apply the three map-body fixes to a local plaintext HTML
+patch_body.py — apply the four map-body fixes to a local plaintext HTML
 copy so it can be re-encrypted into index_body.html.enc.
 
 Why this script exists
@@ -27,6 +27,12 @@ What it fixes
      subtracting K*mean and dividing by a K-based scale inflates the z-score
      in direct proportion to how much data is missing. Use localCnt in both
      the centering term and the denominator.
+
+  4. propYrFields omits hoh_churn, outreach_need, and the two Gi* cluster
+     layers. build_data.py now writes hoh_churn_YY / outreach_need_YY /
+     gi_outreach_need_YY / gi_pct_vf_denied_YY so the year selector can
+     flip those layers too — but the HTML only honors the selector for
+     the fields listed in propYrFields. Extend the map.
 
 Usage
   python patch_body.py path/to/index_body.html
@@ -113,10 +119,30 @@ P3_NEW = (
 )
 
 
+#  Patch 4: extend propYrFields so the year selector flips the new per-year
+#  fields written by build_data.py. Without this the dropdown silently has
+#  no effect on hoh_churn / outreach_need / the two Gi* cluster layers.
+P4_OLD = (
+    "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
+    "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
+    "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
+    "vet_gap:'vet_gap',vf_gap:'vf_gap'};"
+)
+P4_NEW = (
+    "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
+    "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
+    "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
+    "vet_gap:'vet_gap',vf_gap:'vf_gap',hoh_churn:'hoh_churn',"
+    "outreach_need:'outreach_need',gi_outreach_need:'gi_outreach_need',"
+    "gi_pct_vf_denied:'gi_pct_vf_denied'};"
+)
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
     ("Gi*: partial-neighbor scale", P3_OLD, P3_NEW),
+    ("propYrFields: new per-year layers", P4_OLD, P4_NEW),
 ]
 
 
