@@ -141,11 +141,22 @@ $('gateForm').addEventListener('submit',async e=>{
     // Intercept the real page's fetch calls for data/core.json &
     // data/layers.json and hand back the decrypted payload instead.
     const origFetch=window.fetch.bind(window);
+    function matchPath(u,name){
+      // Strip query + hash so data/core.json?v=123 still matches.
+      const base=u.split('#')[0].split('?')[0];
+      return base===name||base.endsWith('/'+name);
+    }
     window.fetch=function(url,init){
-      const u=(typeof url==='string')?url:(url&&url.url)||'';
-      if(u==='data/core.json'||u.endsWith('/data/core.json'))
+      // Normalize string / URL / Request to a plain URL string. The prior
+      // `url.url` guard only handled Request and silently fell through for
+      // `fetch(new URL(...))`, which then hit the network and 404'd.
+      let u='';
+      if(typeof url==='string')u=url;
+      else if(url&&typeof url.url==='string')u=url.url;           // Request
+      else if(url)u=String(url);                                  // URL / other
+      if(matchPath(u,'data/core.json'))
         return Promise.resolve(new Response(coreText,{status:200,headers:{'Content-Type':'application/json'}}));
-      if(u==='data/layers.json'||u.endsWith('/data/layers.json'))
+      if(matchPath(u,'data/layers.json'))
         return Promise.resolve(new Response(layersText,{status:200,headers:{'Content-Type':'application/json'}}));
       return origFetch(url,init);
     };
