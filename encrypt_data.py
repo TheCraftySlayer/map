@@ -190,6 +190,10 @@ def main():
     ap = argparse.ArgumentParser(description="Encrypt index.html + data/*.json for password-gated deployment.")
     ap.add_argument("--password", required=True, help="Shared password (users enter this to unlock the site).")
     ap.add_argument("--src", default=".", help="Source directory (contains index.html and data/). Default: current dir.")
+    ap.add_argument("--body", default=None,
+                    help="Path to the plaintext body HTML to encrypt. Defaults to <src>/index.html. "
+                         "Use this when your repo stores the loader as index.html and keeps the "
+                         "plaintext body elsewhere (e.g. index_body.html, gitignored).")
     ap.add_argument("--out", default="public", help="Output directory. Default: public/")
     args = ap.parse_args()
 
@@ -197,7 +201,8 @@ def main():
     out = Path(args.out)
     (out / "data").mkdir(parents=True, exist_ok=True)
 
-    for p in [src / "index.html", src / "data" / "core.json", src / "data" / "layers.json"]:
+    body_path = Path(args.body) if args.body else (src / "index.html")
+    for p in [body_path, src / "data" / "core.json", src / "data" / "layers.json"]:
         if not p.exists():
             sys.exit(f"Missing input: {p}")
 
@@ -211,7 +216,7 @@ def main():
         return len(data), len(enc)
 
     sizes = {}
-    sizes["index_body.html.enc"] = _write_enc(src / "index.html", out / "index_body.html.enc")
+    sizes["index_body.html.enc"] = _write_enc(body_path, out / "index_body.html.enc")
     sizes["data/core.json.enc"] = _write_enc(src / "data" / "core.json", out / "data" / "core.json.enc")
     sizes["data/layers.json.enc"] = _write_enc(src / "data" / "layers.json", out / "data" / "layers.json.enc")
 

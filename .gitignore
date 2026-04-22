@@ -1,1 +1,3 @@
 __pycache__/
+# Plaintext map body — never commit; re-encrypted into index_body.html.enc
+index_body.html
