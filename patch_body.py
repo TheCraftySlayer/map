@@ -121,14 +121,18 @@ P3_NEW = (
 
 #  Patch 4: extend propYrFields so the year selector flips the new per-year
 #  fields written by build_data.py. Without this the dropdown silently has
-#  no effect on hoh_churn / outreach_need / the two Gi* cluster layers.
-P4_OLD = (
+#  no effect on hoh_churn / outreach_need / the Gi* cluster layers / drift.
+#
+#  Two "old" shapes are accepted so a body that already received the earlier
+#  form of this patch still upgrades cleanly to the final one that includes
+#  exemp_drift:
+P4_OLD_ORIG = (
     "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
     "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
     "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
     "vet_gap:'vet_gap',vf_gap:'vf_gap'};"
 )
-P4_NEW = (
+P4_OLD_PARTIAL = (
     "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
     "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
     "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
@@ -136,13 +140,26 @@ P4_NEW = (
     "outreach_need:'outreach_need',gi_outreach_need:'gi_outreach_need',"
     "gi_pct_vf_denied:'gi_pct_vf_denied'};"
 )
+P4_NEW = (
+    "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
+    "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
+    "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
+    "vet_gap:'vet_gap',vf_gap:'vf_gap',hoh_churn:'hoh_churn',"
+    "outreach_need:'outreach_need',gi_outreach_need:'gi_outreach_need',"
+    "gi_pct_vf_denied:'gi_pct_vf_denied',exemp_drift:'exemp_drift'};"
+)
 
 
+#  Each entry is (name, old_or_list, new). If old is a list, any of the
+#  strings in the list is an acceptable pre-patch shape — lets one patch
+#  step upgrade multiple historical intermediate forms to the same final
+#  shape (e.g. both the original propYrFields AND the partially-extended
+#  one both upgrade to the final map that includes exemp_drift).
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
     ("Gi*: partial-neighbor scale", P3_OLD, P3_NEW),
-    ("propYrFields: new per-year layers", P4_OLD, P4_NEW),
+    ("propYrFields: full per-year layer set", [P4_OLD_ORIG, P4_OLD_PARTIAL], P4_NEW),
 ]
 
 
@@ -162,16 +179,21 @@ def main():
     applied, already, missing = [], [], []
 
     for name, old, new in PATCHES:
-        if new in text and old not in text:
+        # Normalize single-string olds to a one-element list so the
+        # match/replace logic handles both the common case and the rare
+        # "multiple acceptable pre-patch shapes" case uniformly.
+        olds = old if isinstance(old, list) else [old]
+        if new in text:
             already.append(name)
             continue
-        if old not in text:
+        matched = next((candidate for candidate in olds if candidate in text), None)
+        if matched is None:
             missing.append(name)
             continue
-        if text.count(old) > 1:
+        if text.count(matched) > 1:
             sys.exit(f"Patch '{name}' matches >1 location; aborting. "
                      "Inspect the file manually.")
-        text = text.replace(old, new, 1)
+        text = text.replace(matched, new, 1)
         applied.append(name)
 
     if not applied and not missing:

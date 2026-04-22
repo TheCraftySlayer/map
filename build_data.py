@@ -1137,6 +1137,28 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
                     abs(_hoh_series[_y] - _hoh_series[_prev]), 4,
                 )
 
+        # Per-year exemp_drift_YY: cumulative |Δ HOH| + |Δ VET| measured
+        # from the earliest year in the preserved pct_hoh_YY / pct_vet_YY
+        # series up to year YY. 0 at the baseline year, matching the
+        # scalar exemp_drift at the latest year. Lets the year selector
+        # show a trajectory of combined exemption-claim drift instead of
+        # just the endpoint summary the scalar captures.
+        _vet_series = {}
+        for _k, _v in props.items():
+            if _v is None or not isinstance(_v, (int, float)):
+                continue
+            if _k.startswith('pct_vet_') and _k[8:].isdigit():
+                _vet_series[int(_k[8:])] = _v
+        _drift_years = sorted(set(_hoh_series) & set(_vet_series))
+        if _drift_years:
+            _y0 = _drift_years[0]
+            _h0 = _hoh_series[_y0]
+            _v0 = _vet_series[_y0]
+            for _y in _drift_years:
+                props[f'exemp_drift_{_y}'] = round(
+                    abs(_hoh_series[_y] - _h0) + abs(_vet_series[_y] - _v0), 4,
+                )
+
         # Per-year outreach_need_YY: same composite as the scalar above
         # but swapping in per-year severity/vulnerability inputs. Service
         # gap (contact-center volume, failure rate) has no per-year
