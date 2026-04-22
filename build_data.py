@@ -554,6 +554,90 @@ def _boost_outreach_with_gaps(nbhd_stats):
             p['outreach_need'] = round(min(1.0, need + boost), 4)
 
 
+def _compute_gi_star_per_year(nbhd_stats, centroid_lookup, k=8):
+    """Getis-Ord Gi* z-scores for the per-year outreach_need_YY and
+    pct_vf_denied_YY series so the frontend's year selector can flip the
+    hot/cold-spot cluster layers. Mirrors the client-side Gi* in the map
+    HTML, including the fix that scales the denominator by the actual
+    neighbor count when some neighbors have missing data.
+
+    Writes gi_outreach_need_YY and gi_pct_vf_denied_YY onto each nbhd.
+    Skips a (field, year) pair entirely if <20 nbhds have finite values
+    or the overall stdev collapses.
+    """
+    nbhds = sorted(nbhd_stats.keys())
+    n_total = len(nbhds)
+    if n_total <= k:
+        return
+    centers = [centroid_lookup.get(n) for n in nbhds]
+    knn = {}
+    for i, name in enumerate(nbhds):
+        c = centers[i]
+        if not c:
+            knn[name] = None
+            continue
+        dists = []
+        for j, other in enumerate(nbhds):
+            oc = centers[j]
+            if not oc:
+                continue
+            dy = c[0] - oc[0]
+            dx = c[1] - oc[1]
+            dists.append((nbhds[j], dx * dx + dy * dy))
+        dists.sort(key=lambda d: d[1])
+        knn[name] = [pair[0] for pair in dists[:k]]
+
+    year_suffixes = set()
+    for p in nbhd_stats.values():
+        for key in p.keys():
+            m = re.match(r'^pct_vf_denied_(\d+)$', key)
+            if m:
+                year_suffixes.add(m.group(1))
+
+    for base in ('outreach_need', 'pct_vf_denied'):
+        for ys in sorted(year_suffixes):
+            field = f'{base}_{ys}'
+            values = {}
+            flat = []
+            for name in nbhds:
+                v = nbhd_stats[name].get(field)
+                if v is None:
+                    continue
+                if not isinstance(v, (int, float)) or v != v:  # NaN check
+                    continue
+                values[name] = v
+                flat.append(v)
+            if len(flat) < 20:
+                continue
+            mean = sum(flat) / len(flat)
+            sq = sum((v - mean) ** 2 for v in flat)
+            stdev = (sq / (len(flat) - 1)) ** 0.5 if len(flat) > 1 else 0
+            if stdev <= 0:
+                continue
+            for name in nbhds:
+                neighbors = knn.get(name)
+                if not neighbors:
+                    nbhd_stats[name][f'gi_{field}'] = None
+                    continue
+                local_sum = 0.0
+                local_cnt = 0
+                for m in neighbors:
+                    v = values.get(m)
+                    if v is not None:
+                        local_sum += v
+                        local_cnt += 1
+                if local_cnt < k / 2:
+                    nbhd_stats[name][f'gi_{field}'] = None
+                    continue
+                scale = stdev * ((local_cnt * (n_total - local_cnt)) / (n_total - 1)) ** 0.5
+                if scale <= 0:
+                    nbhd_stats[name][f'gi_{field}'] = None
+                    continue
+                nbhd_stats[name][f'gi_{field}'] = round(
+                    (local_sum - local_cnt * mean) / scale, 4,
+                )
+
+
 def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
     """
     Compute per-neighborhood aggregated stats from tax roll data.
@@ -1025,6 +1109,72 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         props['vul_elderly'] = round(vul_elderly, 4)
         props['vul_veterans'] = round(vul_veterans, 4)
         props['vul_new_owners'] = round(vul_new_owners, 4)
+
+        # ── Per-year hoh_churn and outreach_need ────────────────────────
+        # hoh_churn_YY = |pct_hoh_YY - pct_hoh_{YY-1}|. Iterates the
+        # preserved pct_hoh_YY history so old historical years get churn
+        # values too, not just the ones in the current roll. The earliest
+        # year in the series has no prior to compare against — use the
+        # forward-looking difference there so the user doesn't see a gray
+        # hole when the year selector is set to 2007.
+        _hoh_series = {}
+        for _k, _v in props.items():
+            if _v is None or not isinstance(_v, (int, float)):
+                continue
+            if _k.startswith('pct_hoh_') and _k[8:].isdigit():
+                _hoh_series[int(_k[8:])] = _v
+        _hoh_years = sorted(_hoh_series.keys())
+        for _i, _y in enumerate(_hoh_years):
+            if _i == 0:
+                if len(_hoh_years) >= 2:
+                    _nxt = _hoh_years[1]
+                    props[f'hoh_churn_{_y}'] = round(
+                        abs(_hoh_series[_nxt] - _hoh_series[_y]), 4,
+                    )
+            else:
+                _prev = _hoh_years[_i - 1]
+                props[f'hoh_churn_{_y}'] = round(
+                    abs(_hoh_series[_y] - _hoh_series[_prev]), 4,
+                )
+
+        # Per-year outreach_need_YY: same composite as the scalar above
+        # but swapping in per-year severity/vulnerability inputs. Service
+        # gap (contact-center volume, failure rate) has no per-year
+        # history so we reuse the current-year value for every year — the
+        # year selector reshapes WHICH risks are elevated, not capacity.
+        # Volatility is also a multi-year aggregate; static is intended.
+        for _k in list(props.keys()):
+            _m = re.match(r'^pct_vf_denied_(\d+)$', _k)
+            if not _m:
+                continue
+            _ys = _m.group(1)
+
+            def _py(base, fallback=None):
+                v = props.get(f'{base}_{_ys}')
+                return v if (v is not None and isinstance(v, (int, float))) else fallback
+
+            _y_sev_vf = _cap(_py('pct_vf_denied'), 0.4)
+            _y_sev_ch = _cap(_py('hoh_churn'), 0.04)
+            _y_sev_vl = _cap(volatility, 0.5)  # multi-year aggregate — static
+            _y_severity = _noisy_or(_y_sev_vf, _y_sev_ch, _y_sev_vl)
+
+            _y_vul_elderly = _cap(_py('pct_val_freeze'), 0.15)
+            _y_vul_vet = _cap(_py('pct_vet'), 0.12)
+            _y_vul_turn = _cap(_py('owner_turnover'), 0.25)
+            _y_vulnerability = _noisy_or(
+                _y_vul_elderly, _y_vul_vet, _y_vul_turn,
+                vul_poverty, vul_low_income, vul_elderly_alone,
+            )
+
+            # service_gap is contact-center-driven and has no per-year
+            # history — reuse the scalar service_gap computed above.
+            _y_sev_f = max(_y_severity, 0.15)
+            _y_vul_f = max(_y_vulnerability, 0.15)
+            _y_gap_f = max(service_gap, 0.15)
+            _y_base = math.sqrt(_y_sev_f * _y_vul_f)
+            props[f'outreach_need_{_ys}'] = round(min(1.0, _y_base * _y_gap_f), 4)
+            props[f'outreach_severity_{_ys}'] = round(_y_severity, 4)
+            props[f'outreach_vulnerability_{_ys}'] = round(_y_vulnerability, 4)
 
         # Generate outreach recommendations with explicit reasoning.
         # Format: "Title::Why::What" split by | for multiple entries. Named
@@ -2191,6 +2341,17 @@ def main():
     _compute_exemption_gaps(nbhd_stats)
     _boost_outreach_with_gaps(nbhd_stats)
     print(f"  Gaps computed for {sum(1 for p in nbhd_stats.values() if p.get('vf_gap') is not None)} neighborhoods")
+
+    # Per-year Gi* for hot/cold-spot cluster layers. Runs AFTER the gap
+    # boost so the current-year outreach_need_YY already carries the
+    # gap-feedback signal (only the scalar outreach_need is boosted
+    # today, so the per-year Gi* is unboosted for historical years —
+    # documented on the layer help text).
+    print("\nComputing per-year Gi* cluster z-scores...")
+    _compute_gi_star_per_year(nbhd_stats, centroid_lookup)
+    _gi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
+                   for k in p.keys() if k.startswith('gi_outreach_need_')})
+    print(f"  Per-year Gi*: {_gi_yrs} years")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
