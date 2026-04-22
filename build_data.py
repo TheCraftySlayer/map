@@ -124,6 +124,41 @@ def safe_int(v, default=0):
         return default
 
 
+def extract_year(v):
+    """Pull a 4-digit year out of a date-ish value, or None if nothing plausible.
+
+    Handles datetime.date/datetime, YYYY-MM-DD / MM-DD-YYYY / MM/DD/YYYY /
+    YYYYMMDD strings, bare YYYY ints, and similar tax-roll shapes. Only
+    returns years in [1900, 2100] so garbage doesn't slip through.
+    """
+    if v is None:
+        return None
+    y = getattr(v, 'year', None)
+    if y is not None:
+        return y if 1900 <= y <= 2100 else None
+    if isinstance(v, (int, float)):
+        iv = int(v)
+        if 1900 <= iv <= 2100:
+            return iv
+        # Packed YYYYMMDD as an integer
+        if 19000101 <= iv <= 21001231:
+            return iv // 10000
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    for tok in re.split(r'[^0-9]', s):
+        if len(tok) == 4 and tok.isdigit():
+            iv = int(tok)
+            if 1900 <= iv <= 2100:
+                return iv
+    if len(s) >= 8 and s[:8].isdigit():
+        iv = int(s[:4])
+        if 1900 <= iv <= 2100:
+            return iv
+    return None
+
+
 def median_safe(vals):
     """Median of a list, or 0 if empty."""
     return statistics.median(vals) if vals else 0
@@ -666,8 +701,18 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             appr_vol = None
             volatility = None
 
-        # Owner turnover (parcels with different recent sale)
-        owner_chg = sum(1 for r in recs if str(r.get('LSALEDATE', '') or '').strip())
+        # Owner turnover: share of parcels sold within the last 3 tax years.
+        # LSALEDATE is the last-sale-date on the roll — in Bernalillo most
+        # parcels carry a value (any prior sale leaves it populated), so a
+        # bare "is LSALEDATE non-empty?" check would tag nearly every parcel
+        # as turnover and flood the outreach "new homeowner" recommendation.
+        TURNOVER_WINDOW = 3
+        turnover_cutoff = latest_yr - TURNOVER_WINDOW + 1
+        owner_chg = 0
+        for r in recs:
+            sale_yr = extract_year(r.get('LSALEDATE'))
+            if sale_yr is not None and sale_yr >= turnover_cutoff:
+                owner_chg += 1
         owner_turnover = round(owner_chg / parcels, 4) if parcels else 0
 
         # HOH churn - need multi-year data
@@ -765,7 +810,11 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             yvet = sum(1 for r in yr_recs if safe_float(r.get('VETEXEMP')) > 0)
             yvf = sum(1 for r in yr_recs if str(r.get('EXEMCODE', '')).strip().upper() in ('VF', 'F', 'FREEZE'))
             yyb = [safe_int(r.get('YRBUILT')) for r in yr_recs if safe_int(r.get('YRBUILT')) > 0]
-            yot = sum(1 for r in yr_recs if str(r.get('LSALEDATE', '') or '').strip())
+            # Match the recent-window semantics used for owner_turnover above
+            # so per-year owner_turnover_YY lines up with the scalar field.
+            yr_cutoff = yr - TURNOVER_WINDOW + 1
+            yot = sum(1 for r in yr_recs
+                      if (extract_year(r.get('LSALEDATE')) or 0) >= yr_cutoff)
             props[f'avg_appraised_{ys}'] = int(statistics.mean(yv)) if yv else 0
             props[f'median_val_{ys}'] = int(median_safe(yv)) if yv else 0
             props[f'median_yrbuilt_{ys}'] = int(median_safe(yyb)) if yyb else 0
@@ -792,9 +841,17 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             elif _k.startswith('pct_vet_') and _k[8:].isdigit():
                 _vet_by_yr[int(_k[8:])] = _v
         _common = sorted(set(_hoh_by_yr) & set(_vet_by_yr))
-        # Ignore zeros — build_data stores 0 as a sentinel when a year has
-        # no parcels at all. Keep only years with a plausible rate.
-        _common = [y for y in _common if _hoh_by_yr[y] or _vet_by_yr[y]]
+        # Defensive against legacy sentinels: historically build_data may
+        # have written pct_hoh_YY=0 / pct_vet_YY=0 when a year had no
+        # parcels in a nbhd. Drop a zero-pair ONLY when the year has no
+        # parcels_YY on record — a legitimate 0% rate is paired with
+        # parcels_YY > 0 and should stay in the tooltip range.
+        def _year_has_parcels(y):
+            return safe_float(props.get(f'parcels_{y}')) > 0
+        _common = [
+            y for y in _common
+            if _hoh_by_yr[y] or _vet_by_yr[y] or _year_has_parcels(y)
+        ]
         if len(_common) >= 2:
             _early, _late = _common[0], _common[-1]
             _drift = round(
@@ -969,9 +1026,11 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         props['vul_veterans'] = round(vul_veterans, 4)
         props['vul_new_owners'] = round(vul_new_owners, 4)
 
-        # Generate outreach recommendations with explicit reasoning
-        # Format: "Title::Why::What" split by | for multiple recs
-        recs = []
+        # Generate outreach recommendations with explicit reasoning.
+        # Format: "Title::Why::What" split by | for multiple entries. Named
+        # outreach_recs (not recs) so it doesn't shadow the year-records
+        # list that's still in scope from earlier in this loop iteration.
+        outreach_recs = []
         pct_hoh = props.get('pct_hoh', 0) or 0
         pct_vf_denied = props.get('pct_vf_denied', 0) or 0
         pct_vet = props.get('pct_vet', 0) or 0
@@ -979,42 +1038,42 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         ot_val = owner_turnover or 0
 
         if pct_hoh > 0.25:
-            recs.append(
+            outreach_recs.append(
                 f'HOH exemption clinic::'
                 f'{pct_hoh*100:.0f}% of parcels claim HOH — well above the county norm (~18%). '
                 f'High claim rates mean many residents rely on this exemption and need help keeping it active.::'
                 f'Walk-in clinic with application help, eligibility review, and renewal tips.'
             )
         if pct_vf_denied > 0.3:
-            recs.append(
+            outreach_recs.append(
                 f'Value freeze workshop::'
                 f'{pct_vf_denied*100:.0f}% of VF applications denied — seniors/disabled residents '
                 f'are filing but failing. Common reasons: missing income docs, over the limit, wrong form.::'
                 f'Workshop covering income limits, required documents, and how to re-apply successfully.'
             )
         if volatility is not None and volatility > 0.3:
-            recs.append(
+            outreach_recs.append(
                 f'Property value town hall::'
                 f'Appraised values swung {volatility*100:.0f}% cumulatively over recent years — '
                 f'residents likely confused or frustrated by sudden increases.::'
                 f'Town hall explaining the reappraisal cycle, protest rights, and what drives value changes.'
             )
         if ot_val > 0.15:
-            recs.append(
+            outreach_recs.append(
                 f'New homeowner orientation::'
                 f'{ot_val*100:.0f}% owner turnover — a large share of residents are new to the area '
                 f'and may not know about exemptions, deadlines, or how to read an assessment notice.::'
                 f'Welcome session on HOH/VF/vet exemptions, deadlines, and how to read the annual notice.'
             )
         if hoh_churn is not None and hoh_churn > 0.02:
-            recs.append(
+            outreach_recs.append(
                 f'Exemption renewal drive::'
                 f'{hoh_churn*100:.1f}% HOH churn — residents are losing their exemption year over year. '
                 f'This usually means they moved, forgot to renew, or the property changed hands.::'
                 f'Door-to-door or mailer campaign reminding residents to re-apply for HOH.'
             )
         if cpp < 0.3:
-            recs.append(
+            outreach_recs.append(
                 f'Pop-up office day::'
                 f'Only {cpp:.2f} contacts/parcel — residents here rarely call or visit. '
                 f'Low engagement usually signals lack of awareness, language barriers, or access issues, '
@@ -1022,13 +1081,13 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
                 f'Bring assessor staff on-site for a full day: Q&A, account lookups, general info.'
             )
         if pct_vet > 0.08:
-            recs.append(
+            outreach_recs.append(
                 f'Veteran exemption outreach::'
                 f'{pct_vet*100:.0f}% veteran exemption rate — significantly above county average. '
                 f'Many eligible veterans may also qualify for the disabled veteran waiver but not know it.::'
                 f'Partner with VFW/American Legion for a benefits session covering both programs.'
             )
-        props['outreach_recs'] = '|'.join(recs) if recs else ''
+        props['outreach_recs'] = '|'.join(outreach_recs) if outreach_recs else ''
 
         # Top drivers summary: which signals pushed the score highest
         drivers = []
@@ -1489,45 +1548,52 @@ def fetch_tract_acs(tract_geo):
 
 
 def fetch_census_acs():
-    """Fetch ACS 5-year data for Bernalillo County from Census API."""
+    """Fetch ACS 5-year data for Bernalillo County from Census API.
+
+    County and ZIP queries fall through independently: if the 2023 county
+    query succeeds but the 2023 ZIP query fails, we still try 2022 / 2021
+    ZIPs instead of shipping a ZIP-less build.
+    """
     vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
     result = {}
     for yr in [2023, 2022, 2021]:
-        # County-level
-        url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
-        try:
-            with urlopen(url, timeout=5) as resp:
-                data = json.loads(resp.read())
-                h, v = data[0], data[1]
+        if 'county' in result and 'zips' in result:
+            break
+        # County-level (only if we haven't already captured a good one)
+        if 'county' not in result:
+            url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
+            try:
+                with urlopen(url, timeout=5) as resp:
+                    data = json.loads(resp.read())
+                    h, v = data[0], data[1]
 
-                # Parse a single ACS cell as int, treating missing-data
-                # sentinels (large negative values like -666666666) as 0
-                # so they don't render as literal -$666,666,666 in the UI.
-                def _cv(k):
-                    raw = v[h.index(k)]
-                    try:
-                        x = int(raw) if raw not in (None, '', '-', '*') else 0
-                    except (ValueError, TypeError):
-                        return 0
-                    return x if x >= 0 else 0
+                    # Parse a single ACS cell as int, treating missing-data
+                    # sentinels (large negative values like -666666666) as 0
+                    # so they don't render as literal -$666,666,666 in the UI.
+                    def _cv(k):
+                        raw = v[h.index(k)]
+                        try:
+                            x = int(raw) if raw not in (None, '', '-', '*') else 0
+                        except (ValueError, TypeError):
+                            return 0
+                        return x if x >= 0 else 0
 
-                pop = _cv('B01001_001E')
-                result['county'] = {
-                    'year': yr, 'name': v[h.index('NAME')], 'population': pop,
-                    'median_income': _cv('B19013_001E'),
-                    'poverty': _cv('B17001_002E'),
-                    'hispanic': _cv('B03003_003E'),
-                    'white': _cv('B02001_002E'),
-                    'black': _cv('B02001_003E'),
-                    'native_american': _cv('B02001_004E'),
-                    'asian': _cv('B02001_005E'),
-                    'housing_units': _cv('B25001_001E'),
-                    'median_home_value': _cv('B25077_001E'),
-                }
-                print(f"  County ACS {yr}: pop {pop:,}")
-        except (URLError, Exception) as e:
-            print(f"  County ACS {yr} failed: {e}")
-            continue
+                    pop = _cv('B01001_001E')
+                    result['county'] = {
+                        'year': yr, 'name': v[h.index('NAME')], 'population': pop,
+                        'median_income': _cv('B19013_001E'),
+                        'poverty': _cv('B17001_002E'),
+                        'hispanic': _cv('B03003_003E'),
+                        'white': _cv('B02001_002E'),
+                        'black': _cv('B02001_003E'),
+                        'native_american': _cv('B02001_004E'),
+                        'asian': _cv('B02001_005E'),
+                        'housing_units': _cv('B25001_001E'),
+                        'median_home_value': _cv('B25077_001E'),
+                    }
+                    print(f"  County ACS {yr}: pop {pop:,}")
+            except (URLError, Exception) as e:
+                print(f"  County ACS {yr} failed: {e}")
 
         # ZIP-level (ZCTAs in NM, filter to Bernalillo area)
         bern_zips = {
@@ -1539,48 +1605,48 @@ def fetch_census_acs():
             '87181','87184','87185','87187','87190','87191','87192','87193',
             '87194','87196','87197','87198','87199',
         }
-        zip_vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B03003_003E,B25001_001E,B25077_001E'
-        # Census deprecated the `in=state:` filter for ZCTA queries a few
-        # years ago; the endpoint now returns HTTP 400 if you include it.
-        # Query nationwide and filter by the Bernalillo-area ZCTA set below.
-        zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*'
-        try:
-            with urlopen(zip_url, timeout=10) as resp:
-                zdata = json.loads(resp.read())
-                zh = zdata[0]
-                zips = {}
-                # ACS missing-data sentinels — large negative integers
-                # (-666666666 etc.) mean "suppressed for privacy" on
-                # low-population ZCTAs. Normalize those to 0 so they
-                # don't flow into the UI as literal -$666,666,666.
-                def _zv(row, col):
-                    raw = row[zh.index(col)]
-                    try:
-                        v = int(raw) if raw not in (None, '', '-', '*') else 0
-                    except (ValueError, TypeError):
-                        return 0
-                    return v if v >= 0 else 0
-                for row in zdata[1:]:
-                    zcta = row[zh.index('zip code tabulation area')]
-                    if zcta not in bern_zips:
-                        continue
-                    zpop = _zv(row, 'B01001_001E')
-                    if zpop == 0:
-                        continue
-                    zips[zcta] = {
-                        'name': row[zh.index('NAME')],
-                        'pop': zpop,
-                        'income': _zv(row, 'B19013_001E'),
-                        'poverty': _zv(row, 'B17001_002E'),
-                        'hispanic': _zv(row, 'B03003_003E'),
-                        'units': _zv(row, 'B25001_001E'),
-                        'home_val': _zv(row, 'B25077_001E'),
-                    }
-                result['zips'] = zips
-                print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
-        except (URLError, Exception) as e:
-            print(f"  ZIP ACS {yr} failed: {e}")
-        break
+        if 'zips' not in result:
+            zip_vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B03003_003E,B25001_001E,B25077_001E'
+            # Census deprecated the `in=state:` filter for ZCTA queries a few
+            # years ago; the endpoint now returns HTTP 400 if you include it.
+            # Query nationwide and filter by the Bernalillo-area ZCTA set below.
+            zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*'
+            try:
+                with urlopen(zip_url, timeout=10) as resp:
+                    zdata = json.loads(resp.read())
+                    zh = zdata[0]
+                    zips = {}
+                    # ACS missing-data sentinels — large negative integers
+                    # (-666666666 etc.) mean "suppressed for privacy" on
+                    # low-population ZCTAs. Normalize those to 0 so they
+                    # don't flow into the UI as literal -$666,666,666.
+                    def _zv(row, col):
+                        raw = row[zh.index(col)]
+                        try:
+                            v = int(raw) if raw not in (None, '', '-', '*') else 0
+                        except (ValueError, TypeError):
+                            return 0
+                        return v if v >= 0 else 0
+                    for row in zdata[1:]:
+                        zcta = row[zh.index('zip code tabulation area')]
+                        if zcta not in bern_zips:
+                            continue
+                        zpop = _zv(row, 'B01001_001E')
+                        if zpop == 0:
+                            continue
+                        zips[zcta] = {
+                            'name': row[zh.index('NAME')],
+                            'pop': zpop,
+                            'income': _zv(row, 'B19013_001E'),
+                            'poverty': _zv(row, 'B17001_002E'),
+                            'hispanic': _zv(row, 'B03003_003E'),
+                            'units': _zv(row, 'B25001_001E'),
+                            'home_val': _zv(row, 'B25077_001E'),
+                        }
+                    result['zips'] = zips
+                    print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
+            except (URLError, Exception) as e:
+                print(f"  ZIP ACS {yr} failed: {e}")
     return result if result else None
 
 
@@ -1599,7 +1665,6 @@ def update_html_sidebar(final_layers, html_path, stats=None):
     raw = html_file.read_bytes()
     crlf = b'\r\n' in raw
     html = raw.decode('utf-8').replace('\r\n', '\n')
-    counts = {k: len(v) for k, v in final_layers.items()}
 
     # ── 1. Year filter checkboxes for tax roll point layers ──
     yr_set = set()
@@ -1767,6 +1832,9 @@ def main():
     args = parser.parse_args()
 
     # Determine mode
+    if args.enriched and args.coords:
+        print("Warning: --enriched and --coords are mutually exclusive; using --enriched.",
+              file=sys.stderr)
     if args.enriched:
         mode = 'enriched'
     elif args.coords:
@@ -1936,7 +2004,6 @@ def main():
         preserved_keys = all_layer_keys
 
     # ── MDF integration ──────────────────────────────────────────────────────────
-    mdf_census = None
     mdf_source = args.mdf_dir or args.mdf
     if mdf_source:
         is_dir = args.mdf_dir is not None
@@ -2104,11 +2171,12 @@ def main():
         except Exception as e:
             print(f"  fact_sale_contact_lag: {e}")
 
-        # ref_county_demographics + ref_zcta_demographics: embed in sidebar
+        # ref_county_demographics + ref_zcta_demographics: log row counts.
+        # We already populate the sidebar from fetch_census_acs (live ACS),
+        # so these rows are just read to verify the MDF has them.
         try:
             county_rows = read_mdf('ref_county_demographics')
             zcta_rows = read_mdf('ref_zcta_demographics')
-            mdf_census = {'county_raw': county_rows, 'zcta_raw': zcta_rows}
             print(f"  Demographics: county={len(county_rows)} rows, zcta={len(zcta_rows)} rows")
         except Exception as e:
             print(f"  Demographics: {e}")
