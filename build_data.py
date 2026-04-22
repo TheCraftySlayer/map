@@ -1113,7 +1113,10 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
         # ── Per-year hoh_churn and outreach_need ────────────────────────
         # hoh_churn_YY = |pct_hoh_YY - pct_hoh_{YY-1}|. Iterates the
         # preserved pct_hoh_YY history so old historical years get churn
-        # values too, not just the ones in the current roll.
+        # values too, not just the ones in the current roll. The earliest
+        # year in the series has no prior to compare against — use the
+        # forward-looking difference there so the user doesn't see a gray
+        # hole when the year selector is set to 2007.
         _hoh_series = {}
         for _k, _v in props.items():
             if _v is None or not isinstance(_v, (int, float)):
@@ -1121,12 +1124,18 @@ def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
             if _k.startswith('pct_hoh_') and _k[8:].isdigit():
                 _hoh_series[int(_k[8:])] = _v
         _hoh_years = sorted(_hoh_series.keys())
-        for _i in range(1, len(_hoh_years)):
-            _y = _hoh_years[_i]
-            _prev = _hoh_years[_i - 1]
-            props[f'hoh_churn_{_y}'] = round(
-                abs(_hoh_series[_y] - _hoh_series[_prev]), 4,
-            )
+        for _i, _y in enumerate(_hoh_years):
+            if _i == 0:
+                if len(_hoh_years) >= 2:
+                    _nxt = _hoh_years[1]
+                    props[f'hoh_churn_{_y}'] = round(
+                        abs(_hoh_series[_nxt] - _hoh_series[_y]), 4,
+                    )
+            else:
+                _prev = _hoh_years[_i - 1]
+                props[f'hoh_churn_{_y}'] = round(
+                    abs(_hoh_series[_y] - _hoh_series[_prev]), 4,
+                )
 
         # Per-year outreach_need_YY: same composite as the scalar above
         # but swapping in per-year severity/vulnerability inputs. Service
