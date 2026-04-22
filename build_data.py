@@ -220,6 +220,11 @@ def build_point_layers_from_roll(joined_by_yr):
     # Use all available years for point layers.
     all_years = sorted(joined_by_yr.keys())
     recent_years = all_years
+    if not recent_years:
+        # No tax roll records matched the coord lookup — bail out cleanly
+        # instead of crashing on recent_years[0] / [-1].
+        print("  No matched years — skipping point-layer build (empty joined_by_yr)")
+        return layers
     print(f"  Using years {recent_years[0]}-{recent_years[-1]} for point layers ({len(recent_years)} years)")
 
     recent_recs = []
@@ -1227,8 +1232,15 @@ def update_nbhd_stats_from_enriched(nbhd_stats, enriched_by_yr):
             continue
         props = nbhd_stats[nbhd]
         sorted_yrs = sorted(yr_data.keys())
-        props['earliest_yr'] = sorted_yrs[0]
-        props['latest_yr'] = sorted_yrs[-1]
+        # Widen earliest_yr / latest_yr rather than overwrite. The HOH/VET
+        # fallback in compute_nbhd_stats already set these from the full
+        # pct_hoh_YY history (e.g. 2007→2025); enriched files typically
+        # only cover the last 1-2 years, so a blind overwrite would shrink
+        # the tooltip range to "HOH 2024→2025".
+        e_new, l_new = sorted_yrs[0], sorted_yrs[-1]
+        e_old, l_old = props.get('earliest_yr'), props.get('latest_yr')
+        props['earliest_yr'] = min(e_new, e_old) if isinstance(e_old, (int, float)) else e_new
+        props['latest_yr'] = max(l_new, l_old) if isinstance(l_old, (int, float)) else l_new
         for yr in sorted_yrs:
             recs = yr_data[yr]
             ys = str(yr % 100)
@@ -2115,8 +2127,11 @@ def main():
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
     for feat in existing_core['DATA']['features']:
-        nbhd = int(feat['properties'].get('nbhd', 0))
-        if nbhd in nbhd_stats:
+        # .get('nbhd', 0) can still return None when nbhd is present but null
+        # in core.json — int(None) would crash here. Use safe_int so missing
+        # / null / non-numeric nbhds just fall through the lookup.
+        nbhd = safe_int(feat['properties'].get('nbhd'))
+        if nbhd and nbhd in nbhd_stats:
             feat['properties'] = nbhd_stats[nbhd]
 
     existing_core['NBHD_CENTERS'] = build_nbhd_centers(existing_core['DATA'])
