@@ -312,3 +312,121 @@ def _compute_trend_slopes(nbhd_stats):
             s = _slope(pairs)
             if s is not None:
                 p[f'{base}_slope'] = round(s, 6)
+
+
+def _compute_persistence(nbhd_stats, base='outreach_need', decile=0.9,
+                         min_streak=3):
+    """Persistence score — "who has been chronically bad."
+
+    For the given base (default outreach_need), finds the top-decile
+    threshold in each year across all neighborhoods, then for each
+    neighborhood computes:
+
+      {base}_persistence_total     — count of years the nbhd was in the
+                                      top decile (any years)
+      {base}_persistence_streak    — longest consecutive-year streak in
+                                      the top decile
+      {base}_persistence_recent    — number of consecutive recent years
+                                      (ending at the latest available
+                                      year) in the top decile; 0 if the
+                                      nbhd isn't currently top-decile
+
+    The thresholds are computed PER YEAR so the score measures how often
+    a nbhd is among the worst-served relative to peers, not against an
+    absolute cutoff that would favor years with globally worse numbers.
+
+    "Top decile" uses the 90th percentile (configurable via `decile`).
+    Sparse / missing years are skipped rather than counted as "not in
+    top decile" — otherwise the score would punish nbhds for existing
+    across more years.
+    """
+    year_pat = re.compile(rf'^{base}_(\d+)$')
+    # Collect per-year series.
+    years = set()
+    for p in nbhd_stats.values():
+        for k in p.keys():
+            m = year_pat.match(k)
+            if m:
+                years.add(int(m.group(1)))
+    if not years:
+        return
+    years = sorted(years)
+
+    # Per-year threshold = `decile`th quantile of finite non-zero values.
+    # Zero typically means "no data" for this base (see outreach_need_5 /
+    # avg_appraised_5 which are 0 on every nbhd), so including them would
+    # drag the threshold down artificially.
+    thresholds = {}
+    for yr in years:
+        field = f'{base}_{yr}'
+        vals = []
+        for p in nbhd_stats.values():
+            v = p.get(field)
+            if v is None or not isinstance(v, (int, float)):
+                continue
+            if v != v:  # NaN
+                continue
+            if v == 0:
+                continue
+            vals.append(v)
+        if len(vals) < 20:
+            continue
+        vals.sort()
+        idx = max(0, min(len(vals) - 1, int(round(decile * (len(vals) - 1)))))
+        thresholds[yr] = vals[idx]
+    if not thresholds:
+        return
+
+    usable_years = sorted(thresholds.keys())
+    latest = usable_years[-1]
+
+    for p in nbhd_stats.values():
+        in_top = {}  # year -> bool (only for years with a threshold)
+        for yr in usable_years:
+            v = p.get(f'{base}_{yr}')
+            if v is None or not isinstance(v, (int, float)) or v != v or v == 0:
+                continue
+            in_top[yr] = v >= thresholds[yr]
+        if not in_top:
+            continue
+
+        # Total years top-decile.
+        total = sum(1 for v in in_top.values() if v)
+
+        # Longest consecutive streak — iterate usable_years in order,
+        # but only count runs where CONSECUTIVE YEARS (by calendar) are
+        # all top-decile. Gaps in the data break the streak.
+        longest = cur = 0
+        prev_yr = None
+        for yr in usable_years:
+            if yr not in in_top:
+                prev_yr = None
+                cur = 0
+                continue
+            if in_top[yr]:
+                if prev_yr is not None and yr == prev_yr + 1:
+                    cur += 1
+                else:
+                    cur = 1
+                longest = max(longest, cur)
+            else:
+                cur = 0
+            prev_yr = yr
+
+        # Recent streak — ending at the latest year. 0 if the nbhd isn't
+        # currently top-decile.
+        recent = 0
+        expected = latest
+        for yr in reversed(usable_years):
+            if yr != expected:
+                break
+            if in_top.get(yr):
+                recent += 1
+                expected -= 1
+            else:
+                break
+
+        p[f'{base}_persistence_total'] = total
+        p[f'{base}_persistence_streak'] = longest
+        p[f'{base}_persistence_recent'] = recent
+        p[f'{base}_persistence_chronic'] = bool(longest >= min_streak)

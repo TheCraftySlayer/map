@@ -56,6 +56,7 @@ from buildlib.scoring import (
     _compute_exemption_gaps, _boost_outreach_with_gaps,
     _compute_gi_star_per_year, _compute_dpi_per_year,
     _compute_uptake_ratios, _compute_trend_slopes,
+    _compute_persistence,
 )
 from buildlib.census import (
     ACS_CACHE_DIR, ACS_CACHE_TTL_DAYS,
@@ -1682,11 +1683,16 @@ def main():
     _compute_dpi_per_year(nbhd_stats)
     _compute_uptake_ratios(nbhd_stats)
     _compute_trend_slopes(nbhd_stats)
+    _compute_persistence(nbhd_stats, base='outreach_need')
+    _compute_persistence(nbhd_stats, base='dpi')
     _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                     for k in p.keys() if k.startswith('dpi_')})
     _slope_nbhds = sum(1 for p in nbhd_stats.values()
                        if p.get('outreach_need_slope') is not None)
+    _chronic = sum(1 for p in nbhd_stats.values()
+                   if p.get('outreach_need_persistence_chronic'))
     print(f"  DPI: {_dpi_yrs} years; outreach_need_slope: {_slope_nbhds} nbhds")
+    print(f"  Chronic (≥3-yr top-decile): {_chronic} nbhds")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")

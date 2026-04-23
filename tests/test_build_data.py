@@ -397,7 +397,80 @@ class TestBuildlibSplit(unittest.TestCase):
         self.assertIs(build_data.extract_year, io_utils.extract_year)
         self.assertIs(build_data._point_in_ring, spatial._point_in_ring)
         self.assertIs(build_data._compute_dpi_per_year, scoring._compute_dpi_per_year)
+        self.assertIs(build_data._compute_persistence, scoring._compute_persistence)
         self.assertIs(build_data.fetch_tract_acs, census.fetch_tract_acs)
+
+
+class TestPersistence(unittest.TestCase):
+    """Persistence / chronic score over per-year data."""
+
+    def test_consecutive_top_decile_streak(self):
+        # 30 nbhds, values spread uniformly 0.1..0.9 so the 90th percentile
+        # lands around 0.82. Inject three tracked nbhds above that:
+        #   nbhd 100 (always top) — should have 6-year streak
+        #   nbhd 101 (top only in 2025) — 1-year recent, never chronic
+        #   nbhd 102 (never top) — no streak
+        stats = {}
+        for i in range(30):
+            p = {}
+            for yr in range(20, 26):
+                p[f'outreach_need_{yr}'] = 0.1 + (i / 29) * 0.7  # 0.1..0.8
+            stats[i] = p
+        stats[100] = {f'outreach_need_{yr}': 0.95 for yr in range(20, 26)}
+        stats[101] = {f'outreach_need_{yr}': 0.2 for yr in range(20, 25)}
+        stats[101]['outreach_need_25'] = 0.95
+        stats[102] = {f'outreach_need_{yr}': 0.2 for yr in range(20, 26)}
+
+        build_data._compute_persistence(stats, base='outreach_need',
+                                        decile=0.9, min_streak=3)
+        self.assertEqual(stats[100]['outreach_need_persistence_streak'], 6)
+        self.assertEqual(stats[100]['outreach_need_persistence_recent'], 6)
+        self.assertTrue(stats[100]['outreach_need_persistence_chronic'])
+        self.assertEqual(stats[101]['outreach_need_persistence_streak'], 1)
+        self.assertEqual(stats[101]['outreach_need_persistence_recent'], 1)
+        self.assertFalse(stats[101]['outreach_need_persistence_chronic'])
+        self.assertEqual(stats[102]['outreach_need_persistence_streak'], 0)
+        self.assertFalse(stats[102]['outreach_need_persistence_chronic'])
+
+    def test_gap_year_breaks_streak(self):
+        stats = {}
+        for i in range(30):
+            p = {}
+            # nbhd 0: 2020,2021 top-decile, 2022 is zero (no data), 2023
+            # onwards top-decile. Streak should reset at the gap.
+            if i == 0:
+                p['outreach_need_20'] = 0.95
+                p['outreach_need_21'] = 0.95
+                p['outreach_need_22'] = 0  # gap — excluded
+                p['outreach_need_23'] = 0.95
+                p['outreach_need_24'] = 0.95
+                p['outreach_need_25'] = 0.95
+            else:
+                for yr in range(20, 26):
+                    p[f'outreach_need_{yr}'] = 0.1
+            stats[i] = p
+        build_data._compute_persistence(stats, base='outreach_need', decile=0.9)
+        # Longest consecutive streak for nbhd 0 is max(2, 3) = 3 (2023-25).
+        # The 2020-21 streak is 2 years. The gap breaks consecutive counting.
+        self.assertEqual(stats[0]['outreach_need_persistence_streak'], 3)
+        # Recent streak ends at 2025; the gap at 2022 doesn't interrupt
+        # the walk BACKWARDS from 25 because 23,24,25 are consecutive.
+        self.assertEqual(stats[0]['outreach_need_persistence_recent'], 3)
+        # Total top-decile years = 5 (2020, 2021, 2023, 2024, 2025).
+        self.assertEqual(stats[0]['outreach_need_persistence_total'], 5)
+
+    def test_sparse_layer_skips(self):
+        """Too few nbhds → threshold can't be computed, nothing emitted."""
+        stats = {i: {'outreach_need_25': 0.5} for i in range(5)}
+        build_data._compute_persistence(stats, base='outreach_need')
+        for p in stats.values():
+            self.assertNotIn('outreach_need_persistence_streak', p)
+
+    def test_ignores_non_existent_base(self):
+        stats = {i: {'outreach_need_25': 0.5} for i in range(30)}
+        build_data._compute_persistence(stats, base='nonexistent_base')
+        for p in stats.values():
+            self.assertNotIn('nonexistent_base_persistence_streak', p)
 
 
 class TestAcsCache(unittest.TestCase):

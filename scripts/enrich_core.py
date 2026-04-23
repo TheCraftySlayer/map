@@ -16,6 +16,7 @@ from buildlib.scoring import (
     _compute_dpi_per_year,
     _compute_uptake_ratios,
     _compute_trend_slopes,
+    _compute_persistence,
 )
 
 
@@ -41,14 +42,22 @@ def main():
     _compute_dpi_per_year(nbhd_stats)
     _compute_uptake_ratios(nbhd_stats)
     _compute_trend_slopes(nbhd_stats)
+    _compute_persistence(nbhd_stats, base="outreach_need")
+    _compute_persistence(nbhd_stats, base="dpi")
     after = sum(1 for p in nbhd_stats.values() if any(k.startswith("dpi_") for k in p))
     uptake = sum(1 for p in nbhd_stats.values() if p.get("hoh_uptake") is not None)
     slope = sum(1 for p in nbhd_stats.values() if p.get("outreach_need_slope") is not None)
+    chronic_on = sum(1 for p in nbhd_stats.values()
+                     if p.get("outreach_need_persistence_chronic"))
+    persistence_pop = sum(1 for p in nbhd_stats.values()
+                          if p.get("outreach_need_persistence_streak") is not None)
 
     out_path.write_text(json.dumps(core, separators=(",", ":")))
     print(f"DPI populated: {after}/{len(nbhd_stats)} nbhds (was {before})")
     print(f"HOH uptake:    {uptake}/{len(nbhd_stats)} nbhds")
     print(f"Slope fields:  {slope}/{len(nbhd_stats)} nbhds")
+    print(f"Persistence:   {persistence_pop}/{len(nbhd_stats)} nbhds")
+    print(f"Chronic (outreach_need, ≥3y top-decile): {chronic_on}/{len(nbhd_stats)}")
     print(f"Wrote {out_path} ({out_path.stat().st_size:,} bytes)")
 
 
