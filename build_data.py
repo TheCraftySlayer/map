@@ -2263,35 +2263,78 @@ def main():
         except Exception as e:
             print(f"  dim_property: {e}")
 
-        # fact_visitors: rebuild visitor layers from service types
+        # bridge_property pre-read: phone_hash → (lat, lon). Shared by
+        # both the fact_visitors block (as a coord fallback when the
+        # visitor row's prop_xcoord is blank) and the phone-channel
+        # block below. Reading it once avoids a duplicate 80k-row scan.
+        phone_coord_lookup = {}
+        try:
+            prop_rows2 = read_mdf('bridge_property')
+            for r in prop_rows2:
+                ph = str(r.get('phone_hash', '') or '').strip()
+                x = safe_float(r.get('xcoord'))
+                y = safe_float(r.get('ycoord'))
+                if ph and x and y:
+                    phone_coord_lookup[ph] = (round(y, 6), round(x, 6))
+            print(f"  bridge_property: {len(phone_coord_lookup):,} phone→coord mappings")
+        except Exception as e:
+            print(f"  bridge_property (preread): {e}")
+
+        # fact_visitors: rebuild visitor layers from service types.
+        # Three quiet failure modes previously zeroed this out:
+        #  - prop_xcoord / prop_ycoord blank for visitors that never had
+        #    a property match. Fall back to bridge_property phone_hash.
+        #  - date_key in a non-YYYYMMDD shape (e.g. ISO "YYYY-MM-DD" or
+        #    "M/D/YYYY"). Use extract_year, which handles both, and fall
+        #    through to signin_local.
+        #  - SP_GEO only triggered on is_spanish_speaker flag; MDF often
+        #    records Spanish-language visits via Spanish service-type
+        #    name instead. Match those service types too.
+        SPANISH_SVC_PATTERNS = ('prefabricadas', 'representante', 'protesta')
         try:
             vis_rows = read_mdf('fact_visitors')
             svc_types = read_mdf('dim_service_type')
             svc_map = {safe_int(s.get('service_type_id')): s.get('service_type_name','')
                       for s in svc_types}
             vet_v, vf_v, hoh_v, pro_v, sp_geo = [], [], [], [], []
+            skipped_no_coord = skipped_no_year = 0
             for r in vis_rows:
+                la = ln = None
                 x = safe_float(r.get('prop_xcoord') or r.get('xcoord'))
                 y = safe_float(r.get('prop_ycoord') or r.get('ycoord'))
-                if not x or not y:
+                if x and y:
+                    la, ln = round(y, 6), round(x, 6)
+                else:
+                    ph = str(r.get('phone_hash', '') or '').strip()
+                    coord = phone_coord_lookup.get(ph)
+                    if coord:
+                        la, ln = coord
+                if la is None:
+                    skipped_no_coord += 1
                     continue
-                la, ln = round(y, 6), round(x, 6)
-                dk = str(r.get('date_key', '') or '')
-                yr = safe_int(dk[:4]) if len(dk) >= 4 else 0
-                if not yr:
+                yr = extract_year(r.get('date_key'))
+                if yr is None:
+                    yr = extract_year(r.get('signin_local'))
+                if yr is None:
+                    skipped_no_year += 1
                     continue
                 dur = safe_float(r.get('visit_duration_min'))
                 svc = svc_map.get(safe_int(r.get('service_type_id')), '').lower()
                 pt = {'la': la, 'ln': ln, 'y': yr, 'd': round(dur, 1)}
                 if 'veteran' in svc or 'vet' in svc:
                     vet_v.append(pt)
-                elif 'freeze' in svc or 'value freeze' in svc:
+                elif 'freeze' in svc:
                     vf_v.append(pt)
                 elif 'head of household' in svc or 'hoh' in svc:
                     hoh_v.append(pt)
-                elif 'protest' in svc:
+                elif 'protest' in svc:  # matches 'protest' and 'protesta'
                     pro_v.append(pt)
-                if str(r.get('is_spanish_speaker', '') or '').strip().upper() in ('Y','YES','1','TRUE'):
+                is_spanish = (
+                    str(r.get('is_spanish_speaker', '') or '').strip().upper()
+                        in ('Y', 'YES', '1', 'TRUE')
+                    or any(pat in svc for pat in SPANISH_SVC_PATTERNS)
+                )
+                if is_spanish:
                     sp_geo.append(pt)
             new_layers['VET_V'] = vet_v
             new_layers['VF_V'] = vf_v
@@ -2300,21 +2343,21 @@ def main():
             new_layers['SP_GEO'] = sp_geo
             if 'VET_V' not in rebuilt_keys:
                 rebuilt_keys.extend(['VET_V','VF_V','HOH_V','PRO_V','SP_GEO'])
-            print(f"  fact_visitors: VET={len(vet_v)}, VF={len(vf_v)}, HOH={len(hoh_v)}, PRO={len(pro_v)}, SP={len(sp_geo)}")
+            skip_note = ''
+            if skipped_no_coord or skipped_no_year:
+                skip_note = (f"  (skipped: {skipped_no_coord:,} no-coord, "
+                             f"{skipped_no_year:,} no-year)")
+            print(f"  fact_visitors: VET={len(vet_v)}, VF={len(vf_v)}, "
+                  f"HOH={len(hoh_v)}, PRO={len(pro_v)}, SP={len(sp_geo)}"
+                  f"{skip_note}")
         except Exception as e:
             print(f"  fact_visitors: {e}")
 
-        # fact_calls + bridge_phone + bridge_property: phone channel layers
+        # fact_calls + bridge_phone: phone channel layers. bridge_property
+        # was already read above; reuse phone_coord_lookup as prop_map.
         try:
             phone_rows = read_mdf('bridge_phone')
-            prop_rows2 = read_mdf('bridge_property')
-            prop_map = {}
-            for r in prop_rows2:
-                ph = str(r.get('phone_hash', '') or '').strip()
-                x = safe_float(r.get('xcoord'))
-                y = safe_float(r.get('ycoord'))
-                if ph and x and y:
-                    prop_map[ph] = (round(y, 6), round(x, 6))
+            prop_map = phone_coord_lookup
             rpt, co, vo, mc = [], [], [], []
             for r in phone_rows:
                 ph = str(r.get('phone_hash', '') or '').strip()
