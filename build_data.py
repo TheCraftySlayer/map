@@ -2226,15 +2226,31 @@ def main():
         except Exception as e:
             print(f"  agg_tract_summary: {e}")
 
-        # dim_property: use for VF status, exemptions, property class
+        # dim_property: use for VF status, exemptions, property class.
+        # The `class` column may be a single-letter code (R/C/V) OR a full
+        # word (Residential/Commercial/Vacant) depending on the MDF export
+        # shape — Bernalillo's current exports use full words, which is
+        # why the old single-letter check produced zero matches. Fall
+        # through to class_desc if the primary column is blank.
         try:
             prop_rows = read_mdf('dim_property')
-            # Group by nbhd for class breakdown
-            class_by_nbhd = defaultdict(lambda: {'R':0,'C':0,'V':0})
+
+            def _prop_class(row):
+                for col in ('class', 'class_desc'):
+                    v = str(row.get(col, '') or '').strip().upper()
+                    if not v:
+                        continue
+                    if v in ('R', 'C', 'V'):
+                        return v
+                    if v[0] in ('R', 'C', 'V'):
+                        return v[0]
+                return None
+
+            class_by_nbhd = defaultdict(lambda: {'R': 0, 'C': 0, 'V': 0})
             for r in prop_rows:
                 n = safe_int(r.get('nbhd'))
-                cls = str(r.get('class', '') or '').strip().upper()
-                if n and cls in ('R','C','V'):
+                cls = _prop_class(r)
+                if n and cls:
                     class_by_nbhd[n][cls] += 1
             for n, counts in class_by_nbhd.items():
                 if n in nbhd_stats:
