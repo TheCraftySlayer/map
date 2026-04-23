@@ -385,6 +385,21 @@ class TestDpiUptakeSlopes(unittest.TestCase):
         self.assertNotIn("outreach_need_slope", p)
 
 
+class TestBuildlibSplit(unittest.TestCase):
+    """Phase 4: the buildlib/ package must be importable on its own,
+    and build_data.* must remain a compatible façade over it."""
+
+    def test_buildlib_modules_importable(self):
+        from buildlib import io_utils, spatial, scoring, census  # noqa: F401
+
+    def test_build_data_reexports_match_buildlib(self):
+        from buildlib import io_utils, spatial, scoring, census
+        self.assertIs(build_data.extract_year, io_utils.extract_year)
+        self.assertIs(build_data._point_in_ring, spatial._point_in_ring)
+        self.assertIs(build_data._compute_dpi_per_year, scoring._compute_dpi_per_year)
+        self.assertIs(build_data.fetch_tract_acs, census.fetch_tract_acs)
+
+
 class TestAcsCache(unittest.TestCase):
     """Phase 2: disk-cache wrappers around the Census API."""
 
@@ -436,6 +451,7 @@ class TestAcsCache(unittest.TestCase):
 
     def test_fetch_tract_acs_uses_cache_without_network(self):
         """When a fresh cache exists, fetch_tract_acs must not touch the network."""
+        from buildlib import census as _census
         payload = {
             "acs_year": 2023,
             "by_geoid": {"35001000100": {"poverty_rate": 0.3, "acs_year": 2023}},
@@ -444,15 +460,17 @@ class TestAcsCache(unittest.TestCase):
         feats = [{"properties": {"GEOID": "35001000100"}}]
         tract_geo = {"features": feats}
 
-        # Sabotage urlopen so an accidental fetch would raise loudly.
-        orig = build_data.urlopen
-        build_data.urlopen = lambda *a, **kw: (_ for _ in ()).throw(
+        # Sabotage urlopen so an accidental fetch would raise loudly. Patch
+        # at buildlib.census (where the real binding lives) — the re-export
+        # on build_data is a reference, not a redirect.
+        orig = _census.urlopen
+        _census.urlopen = lambda *a, **kw: (_ for _ in ()).throw(
             AssertionError("network was called despite fresh cache")
         )
         try:
             build_data.fetch_tract_acs(tract_geo, outdir=self.outdir, use_cache=True)
         finally:
-            build_data.urlopen = orig
+            _census.urlopen = orig
         self.assertEqual(feats[0]["properties"]["poverty_rate"], 0.3)
 
 
