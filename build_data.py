@@ -31,7 +31,6 @@ Requirements:
 
 import json
 import argparse
-import csv
 import re
 import sys
 import math
@@ -39,129 +38,32 @@ import statistics
 import time
 from collections import defaultdict
 from pathlib import Path
-from urllib.request import urlopen, Request
-from urllib.error import URLError
 
-try:
-    from dbfread import DBF
-except ImportError:
-    sys.exit("Install dbfread: pip install dbfread")
-
-try:
-    from pyproj import Transformer
-except ImportError:
-    sys.exit("Install pyproj: pip install pyproj")
-
-try:
-    import openpyxl
-    HAS_OPENPYXL = True
-except ImportError:
-    HAS_OPENPYXL = False
-
-# NM State Plane Central (feet) → WGS84
-TRANSFORMER = Transformer.from_crs("EPSG:2903", "EPSG:4326", always_xy=True)
-
-def to_latlon(x, y):
-    """Convert State Plane NM Central coords to lat/lon."""
-    lon, lat = TRANSFORMER.transform(x, y)
-    return round(lat, 6), round(lon, 6)
-
-
-def read_dbf(path):
-    """Read a .dbf file and return list of dicts."""
-    print(f"  Reading {path}...")
-    records = list(DBF(path, encoding='latin-1'))
-    print(f"  → {len(records):,} records")
-    return records
-
-
-def read_xlsx(path, sheet_name=None):
-    """Read an .xlsx file and return list of dicts. Optionally specify sheet."""
-    if not HAS_OPENPYXL:
-        sys.exit("Install openpyxl: pip install openpyxl")
-    print(f"  Reading {path}" + (f" [{sheet_name}]" if sheet_name else "") + "...")
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[sheet_name] if sheet_name else wb.active
-    rows = ws.iter_rows(values_only=True)
-    headers = [str(h).strip() if h else '' for h in next(rows)]
-    records = []
-    for row in rows:
-        records.append(dict(zip(headers, row)))
-    wb.close()
-    print(f"  → {len(records):,} records")
-    return records
-
-
-def read_csv(path):
-    """Read a .csv file and return list of dicts."""
-    print(f"  Reading {path}...")
-    records = []
-    with open(path, newline='', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            records.append(row)
-    print(f"  → {len(records):,} records")
-    return records
-
-
-def safe_float(v, default=0):
-    """Safely convert to float."""
-    try:
-        if v is None:
-            return default
-        return float(v)
-    except (ValueError, TypeError):
-        return default
-
-
-def safe_int(v, default=0):
-    """Safely convert to int."""
-    try:
-        if v is None:
-            return default
-        return int(v)
-    except (ValueError, TypeError):
-        return default
-
-
-def extract_year(v):
-    """Pull a 4-digit year out of a date-ish value, or None if nothing plausible.
-
-    Handles datetime.date/datetime, YYYY-MM-DD / MM-DD-YYYY / MM/DD/YYYY /
-    YYYYMMDD strings, bare YYYY ints, and similar tax-roll shapes. Only
-    returns years in [1900, 2100] so garbage doesn't slip through.
-    """
-    if v is None:
-        return None
-    y = getattr(v, 'year', None)
-    if y is not None:
-        return y if 1900 <= y <= 2100 else None
-    if isinstance(v, (int, float)):
-        iv = int(v)
-        if 1900 <= iv <= 2100:
-            return iv
-        # Packed YYYYMMDD as an integer
-        if 19000101 <= iv <= 21001231:
-            return iv // 10000
-        return None
-    s = str(v).strip()
-    if not s:
-        return None
-    for tok in re.split(r'[^0-9]', s):
-        if len(tok) == 4 and tok.isdigit():
-            iv = int(tok)
-            if 1900 <= iv <= 2100:
-                return iv
-    if len(s) >= 8 and s[:8].isdigit():
-        iv = int(s[:4])
-        if 1900 <= iv <= 2100:
-            return iv
-    return None
-
-
-def median_safe(vals):
-    """Median of a list, or 0 if empty."""
-    return statistics.median(vals) if vals else 0
+# Re-exports: helpers extracted into buildlib/ so other scripts can
+# import them directly. All pre-existing callers (and tests) that used
+# `build_data.safe_float`, `build_data.extract_year`, etc. still work.
+from buildlib.io_utils import (
+    TRANSFORMER, CC_LOCATIONS,
+    to_latlon, read_dbf, read_xlsx, read_csv,
+    safe_float, safe_int, extract_year, median_safe,
+)
+from buildlib.spatial import (
+    _point_in_ring, _point_in_geom, _find_tract_for_point,
+    _ols_fit, _mean_of,
+)
+from buildlib.scoring import (
+    _cap, _noisy_or,
+    _compute_exemption_gaps, _boost_outreach_with_gaps,
+    _compute_gi_star_per_year, _compute_dpi_per_year,
+    _compute_uptake_ratios, _compute_trend_slopes,
+)
+from buildlib.census import (
+    ACS_CACHE_DIR, ACS_CACHE_TTL_DAYS,
+    _acs_cache_path, _acs_cache_read, _acs_cache_write,
+    _merge_tract_acs, fetch_tract_acs, fetch_census_acs,
+    fetch_drive_times_osrm,
+    urlopen, Request, URLError,  # re-exported so existing refs / tests don't break
+)
 
 
 def process_roll(records):
@@ -345,297 +247,6 @@ def build_point_layers_from_roll(joined_by_yr):
 
     return layers
 
-
-# Community center coordinates used for nearest-CC tagging and drive-time
-# queries. Kept at module level so compute_nbhd_stats and the OSRM query
-# in main() reference the same source of truth.
-CC_LOCATIONS = [
-    ('Vista Grande', 35.1769943, -106.3409576),
-    ('Los Vecinos', 35.0788198, -106.3923734),
-    ('Paradise Hills', 35.1950907, -106.7129307),
-    ('Raymond G. Sanchez', 35.193073, -106.6157715),
-    ('Westside', 35.0537822, -106.672675),
-    ('Los Padillas', 34.9569792, -106.696385),
-    ('Kiki Saavedra', 35.0158333, -106.6577778),
-    ('South Valley Senior', 35.069824, -106.6881653),
-    ('Alamosa', 35.0714679, -106.7101371),
-]
-
-
-def _point_in_ring(px, py, ring):
-    """Ray-casting point-in-polygon test for a single ring (pure Python)."""
-    inside = False
-    n = len(ring)
-    if n < 3:
-        return False
-    j = n - 1
-    for i in range(n):
-        xi, yi = ring[i][0], ring[i][1]
-        xj, yj = ring[j][0], ring[j][1]
-        if (yi > py) != (yj > py):
-            # Avoid div-by-zero with a tiny epsilon on horizontal edges
-            xint = (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi
-            if px < xint:
-                inside = not inside
-        j = i
-    return inside
-
-
-def _point_in_geom(px, py, geom):
-    """Test whether (px, py) falls inside a GeoJSON Polygon/MultiPolygon."""
-    if not geom:
-        return False
-    t = geom.get('type')
-    if t == 'Polygon':
-        rings = geom.get('coordinates') or []
-        if not rings:
-            return False
-        if not _point_in_ring(px, py, rings[0]):
-            return False
-        for hole in rings[1:]:
-            if _point_in_ring(px, py, hole):
-                return False
-        return True
-    if t == 'MultiPolygon':
-        for poly in (geom.get('coordinates') or []):
-            if not poly:
-                continue
-            if not _point_in_ring(px, py, poly[0]):
-                continue
-            hit = True
-            for hole in poly[1:]:
-                if _point_in_ring(px, py, hole):
-                    hit = False
-                    break
-            if hit:
-                return True
-    return False
-
-
-def _find_tract_for_point(lat, lon, tract_geo):
-    """Return the tract feature whose geometry contains (lon, lat), else None.
-
-    Built as a linear scan — fine for Bernalillo's 176 tracts × 600 nbhds
-    (~100k PIP checks, runs in <1s on commodity hardware).
-    """
-    if not tract_geo or not tract_geo.get('features'):
-        return None
-    for tract in tract_geo['features']:
-        if _point_in_geom(lon, lat, tract.get('geometry')):
-            return tract
-    return None
-
-
-def _ols_fit(pairs):
-    """Single-predictor OLS: returns {slope, intercept, n} or None if n<8."""
-    n = sx = sy = sxx = sxy = 0
-    for x, y in pairs:
-        if x is None or y is None:
-            continue
-        try:
-            xf, yf = float(x), float(y)
-        except (TypeError, ValueError):
-            continue
-        n += 1; sx += xf; sy += yf; sxx += xf * xf; sxy += xf * yf
-    if n < 8:
-        return None
-    mx, my = sx / n, sy / n
-    vx = sxx - n * mx * mx
-    if vx <= 0:
-        return {'slope': 0.0, 'intercept': my, 'n': n}
-    slope = (sxy - n * mx * my) / vx
-    return {'slope': slope, 'intercept': my - slope * mx, 'n': n}
-
-
-def _mean_of(field, nbhd_stats):
-    """Mean of a single field across all neighborhoods. None if no data."""
-    n = 0; s = 0.0
-    for p in nbhd_stats.values():
-        v = p.get(field)
-        if v is None:
-            continue
-        try:
-            s += float(v); n += 1
-        except (TypeError, ValueError):
-            continue
-    return s / n if n else None
-
-
-def _compute_exemption_gaps(nbhd_stats):
-    """Populate hoh_gap / vet_gap / vf_gap per neighborhood — both for the
-    latest year (bare field, e.g. 'hoh_gap') AND for every per-year field
-    the roll produced (e.g. 'hoh_gap_13' .. 'hoh_gap_25') so the UI's
-    tax-year selector can switch these layers just like the base rates.
-
-    Each field: residual = actual − predicted, where predicted is either
-    a single-predictor OLS against zip_poverty_rate or the county mean
-    as a fallback when the regression has no data.
-    """
-    # Discover which per-year suffixes are available on at least one
-    # neighborhood — we'll loop over those plus a "" (bare/latest) pass.
-    year_suffixes = set()
-    import re as _re
-    year_pat = _re.compile(r'^pct_hoh_(\d+)$')
-    for p in nbhd_stats.values():
-        for k in p.keys():
-            m = year_pat.match(k)
-            if m:
-                year_suffixes.add(m.group(1))
-
-    # Process one base+suffix at a time. Empty suffix means the
-    # "current/latest" field the rest of the code already expects.
-    def _run_pair(base, predictor_field, gap_base, suffix):
-        suf = f'_{suffix}' if suffix else ''
-        field = f'{base}{suf}'
-        predictor = predictor_field  # zip_poverty_rate is year-invariant
-        pairs = [(p.get(predictor), p.get(field)) for p in nbhd_stats.values()]
-        fit = _ols_fit(pairs)
-        mean = _mean_of(field, nbhd_stats)
-        for p in nbhd_stats.values():
-            v = p.get(field)
-            if v is None:
-                continue
-            if fit and p.get(predictor) is not None:
-                try:
-                    pred = fit['intercept'] + fit['slope'] * float(p[predictor])
-                except (TypeError, ValueError):
-                    pred = mean
-            else:
-                pred = mean
-            if pred is None:
-                continue
-            p[f'{gap_base}{suf}'] = round(v - pred, 4)
-
-    def _run_mean_baseline(base, gap_base, suffix):
-        """Vet gaps use a plain county-mean baseline (no ZIP predictor) —
-        vet claims track Kirtland / VA proximity more than ZIP income."""
-        suf = f'_{suffix}' if suffix else ''
-        field = f'{base}{suf}'
-        mean = _mean_of(field, nbhd_stats)
-        if mean is None:
-            return
-        for p in nbhd_stats.values():
-            v = p.get(field)
-            if v is None:
-                continue
-            p[f'{gap_base}{suf}'] = round(v - mean, 4)
-
-    # Latest-year (bare) pass
-    _run_pair('pct_hoh', 'zip_poverty_rate', 'hoh_gap', '')
-    _run_pair('pct_val_freeze', 'zip_poverty_rate', 'vf_gap', '')
-    _run_mean_baseline('pct_vet', 'vet_gap', '')
-
-    # Per-year passes
-    for ys in sorted(year_suffixes):
-        _run_pair('pct_hoh', 'zip_poverty_rate', 'hoh_gap', ys)
-        _run_pair('pct_val_freeze', 'zip_poverty_rate', 'vf_gap', ys)
-        _run_mean_baseline('pct_vet', 'vet_gap', ys)
-
-
-def _boost_outreach_with_gaps(nbhd_stats):
-    """After exemption gaps are computed, bump outreach_need for neighborhoods
-    that under-claim relative to their demographic prediction. The boost is
-    capped so it augments the existing score rather than overriding it."""
-    for p in nbhd_stats.values():
-        need = p.get('outreach_need')
-        if need is None:
-            continue
-        boost = 0.0
-        hg = p.get('hoh_gap')
-        if hg is not None and hg < -0.05:
-            # −5 pp below predicted = +0.05 boost, caps at 0.15 (−15 pp below)
-            boost += min(abs(hg) - 0.05, 0.10)
-        vfg = p.get('vf_gap')
-        if vfg is not None and vfg < -0.03:
-            # Smaller caps — value freeze is a much smaller base rate
-            boost += min(abs(vfg) - 0.03, 0.05)
-        if boost > 0:
-            p['outreach_need_gap_boost'] = round(boost, 4)
-            p['outreach_need'] = round(min(1.0, need + boost), 4)
-
-
-def _compute_gi_star_per_year(nbhd_stats, centroid_lookup, k=8):
-    """Getis-Ord Gi* z-scores for the per-year outreach_need_YY and
-    pct_vf_denied_YY series so the frontend's year selector can flip the
-    hot/cold-spot cluster layers. Mirrors the client-side Gi* in the map
-    HTML, including the fix that scales the denominator by the actual
-    neighbor count when some neighbors have missing data.
-
-    Writes gi_outreach_need_YY and gi_pct_vf_denied_YY onto each nbhd.
-    Skips a (field, year) pair entirely if <20 nbhds have finite values
-    or the overall stdev collapses.
-    """
-    nbhds = sorted(nbhd_stats.keys())
-    n_total = len(nbhds)
-    if n_total <= k:
-        return
-    centers = [centroid_lookup.get(n) for n in nbhds]
-    knn = {}
-    for i, name in enumerate(nbhds):
-        c = centers[i]
-        if not c:
-            knn[name] = None
-            continue
-        dists = []
-        for j, other in enumerate(nbhds):
-            oc = centers[j]
-            if not oc:
-                continue
-            dy = c[0] - oc[0]
-            dx = c[1] - oc[1]
-            dists.append((nbhds[j], dx * dx + dy * dy))
-        dists.sort(key=lambda d: d[1])
-        knn[name] = [pair[0] for pair in dists[:k]]
-
-    year_suffixes = set()
-    for p in nbhd_stats.values():
-        for key in p.keys():
-            m = re.match(r'^pct_vf_denied_(\d+)$', key)
-            if m:
-                year_suffixes.add(m.group(1))
-
-    for base in ('outreach_need', 'pct_vf_denied'):
-        for ys in sorted(year_suffixes):
-            field = f'{base}_{ys}'
-            values = {}
-            flat = []
-            for name in nbhds:
-                v = nbhd_stats[name].get(field)
-                if v is None:
-                    continue
-                if not isinstance(v, (int, float)) or v != v:  # NaN check
-                    continue
-                values[name] = v
-                flat.append(v)
-            if len(flat) < 20:
-                continue
-            mean = sum(flat) / len(flat)
-            sq = sum((v - mean) ** 2 for v in flat)
-            stdev = (sq / (len(flat) - 1)) ** 0.5 if len(flat) > 1 else 0
-            if stdev <= 0:
-                continue
-            for name in nbhds:
-                neighbors = knn.get(name)
-                if not neighbors:
-                    nbhd_stats[name][f'gi_{field}'] = None
-                    continue
-                local_sum = 0.0
-                local_cnt = 0
-                for m in neighbors:
-                    v = values.get(m)
-                    if v is not None:
-                        local_sum += v
-                        local_cnt += 1
-                if local_cnt < k / 2:
-                    nbhd_stats[name][f'gi_{field}'] = None
-                    continue
-                scale = stdev * ((local_cnt * (n_total - local_cnt)) / (n_total - 1)) ** 0.5
-                if scale <= 0:
-                    nbhd_stats[name][f'gi_{field}'] = None
-                    continue
-                nbhd_stats[name][f'gi_{field}'] = round(
-                    (local_sum - local_cnt * mean) / scale, 4,
-                )
 
 
 def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
@@ -1498,307 +1109,6 @@ YRC = {
 }
 
 
-def fetch_drive_times_osrm(centroid_lookup, cc_coords, outdir,
-                           osrm_url='https://router.project-osrm.org',
-                           timeout=60, batch_size=90):
-    """Query OSRM's Table service for driving duration from each community
-    center to every neighborhood centroid. Returns {nbhd_id: minutes} using
-    the minimum duration across all community centers.
-
-    Results are cached in data/osrm_drive_times.json so only the first build
-    after a change to centroid_lookup or cc_coords hits the network. If the
-    OSRM request fails (timeout, rate limit, service down), the fallback
-    Haversine proxy in index.html still produces a usable cc_time_min on
-    the client side — this function just returns {}.
-
-    The public OSRM demo (router.project-osrm.org) is rate-limited and may
-    truncate very long URLs. We batch at ~90 destinations per request so
-    each call stays well under 4 KB of query string.
-    """
-    cache_path = Path(outdir) / 'osrm_drive_times.json'
-    # Cache key: fingerprint of the inputs. Change either the centroids
-    # (new nbhds added) or the CC list and the cache is invalidated.
-    nbhd_ids = sorted(centroid_lookup.keys())
-    fingerprint_parts = [
-        ';'.join(f'{n}:{centroid_lookup[n][0]:.4f},{centroid_lookup[n][1]:.4f}'
-                 for n in nbhd_ids),
-        ';'.join(f'{cc[0]}:{cc[1]:.4f},{cc[2]:.4f}' for cc in cc_coords),
-    ]
-    import hashlib
-    fingerprint = hashlib.sha1('\n'.join(fingerprint_parts).encode()).hexdigest()[:12]
-
-    if cache_path.exists():
-        try:
-            with open(cache_path) as f:
-                cached = json.load(f)
-            if cached.get('fingerprint') == fingerprint:
-                print(f"  OSRM drive times: cache hit ({len(cached.get('times', {}))} nbhds)")
-                return {int(k): v for k, v in cached.get('times', {}).items()}
-        except Exception as e:
-            print(f"  OSRM drive-time cache read failed: {e}")
-
-    print(f"  OSRM drive times: querying {osrm_url} for {len(nbhd_ids)} nbhds × {len(cc_coords)} CCs...")
-
-    # Source coords = community centers. Destination coords = nbhd centroids.
-    # A single Table request carries len(ccs) sources and up to batch_size
-    # destinations. OSRM format: "lon1,lat1;lon2,lat2;...?sources=0;1;...&destinations=N;N+1;..."
-    cc_lonlat = [(cc[2], cc[1]) for cc in cc_coords]  # CC_DATA is (name,lat,lon)
-    num_ccs = len(cc_lonlat)
-    times = {}
-    batches = [nbhd_ids[i:i + batch_size] for i in range(0, len(nbhd_ids), batch_size)]
-
-    for batch_idx, batch in enumerate(batches):
-        batch_lonlat = [(centroid_lookup[n][1], centroid_lookup[n][0]) for n in batch]
-        all_coords = cc_lonlat + batch_lonlat
-        coord_str = ';'.join(f'{lon:.5f},{lat:.5f}' for lon, lat in all_coords)
-        sources = ';'.join(str(i) for i in range(num_ccs))
-        destinations = ';'.join(str(num_ccs + i) for i in range(len(batch)))
-        url = (
-            f'{osrm_url.rstrip("/")}/table/v1/driving/{coord_str}'
-            f'?sources={sources}&destinations={destinations}&annotations=duration'
-        )
-        # Per OSRM public-demo etiquette: explicit User-Agent so requests
-        # aren't blocked as anonymous, and a short pause between batches
-        # so we don't trip the rate limiter. Public demo's max-table-size
-        # defaults to 100 coords total, which is why batch_size=90 +
-        # 9 CCs = 99 fits under the limit.
-        if batch_idx > 0:
-            time.sleep(0.3)
-        req = Request(url, headers={
-            'User-Agent': 'map-bernalillo-outreach/1.0 (+build_data.py)',
-            'Accept': 'application/json',
-        })
-        try:
-            with urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read())
-        except (URLError, Exception) as e:
-            print(f"  OSRM batch {batch_idx + 1}/{len(batches)} failed: {e}")
-            # Return whatever we've collected so far rather than discarding
-            # partial results — a batch failure shouldn't lose the earlier
-            # successful ones.
-            return times
-        code = data.get('code')
-        if code == 'TooBig':
-            # Retry this batch at half the size. A permanent failure at
-            # minimum batch size falls through to the generic error path.
-            if batch_size > 20:
-                print(f"  OSRM TooBig at batch_size={batch_size}; retrying whole run at {batch_size // 2}")
-                return fetch_drive_times_osrm(
-                    centroid_lookup, cc_coords, outdir,
-                    osrm_url=osrm_url, timeout=timeout, batch_size=batch_size // 2,
-                )
-        if code != 'Ok':
-            print(f"  OSRM returned: {data.get('message', code or 'unknown')}")
-            return times
-        durations = data.get('durations') or []  # [num_sources][num_destinations]
-        for j, nbhd_id in enumerate(batch):
-            col = [durations[i][j] for i in range(num_ccs)
-                   if i < len(durations) and j < len(durations[i]) and durations[i][j] is not None]
-            if col:
-                times[nbhd_id] = round(min(col) / 60.0, 1)
-
-    # Save to cache
-    try:
-        cache_path.parent.mkdir(exist_ok=True)
-        with open(cache_path, 'w') as f:
-            json.dump({
-                'fingerprint': fingerprint,
-                'source': osrm_url,
-                'times': {str(k): v for k, v in times.items()},
-            }, f)
-        print(f"  OSRM drive times: cached {len(times)} nbhds to {cache_path}")
-    except Exception as e:
-        print(f"  OSRM drive-time cache write failed: {e}")
-
-    return times
-
-
-def fetch_tract_acs(tract_geo):
-    """Merge tract-level ACS 5-year variables into TRACT_GEO.features.
-
-    Adds: poverty_rate, median_age, spanish_at_home, elderly_alone.
-    Silently no-ops on network failure so the frontend degrades gracefully
-    (tract layers other than addr_density will just render as missing).
-    """
-    if not tract_geo or not tract_geo.get('features'):
-        return
-    feats = tract_geo['features']
-    # Variables:
-    #   B01003_001E total population
-    #   B01002_001E median age
-    #   B17001_001E poverty-status universe; B17001_002E below poverty
-    #   C16001_001E language universe (pop 5+); C16001_005E Spanish speakers
-    #   B11007_001E total households; B11007_003E householder 65+ living alone
-    vars_ = ','.join([
-        'B01003_001E','B01002_001E','B17001_001E','B17001_002E',
-        'C16001_001E','C16001_005E','B11007_001E','B11007_003E',
-    ])
-    for yr in [2023, 2022, 2021]:
-        url = (
-            f'https://api.census.gov/data/{yr}/acs/acs5?get={vars_}'
-            f'&for=tract:*&in=state:35+county:001'
-        )
-        try:
-            with urlopen(url, timeout=10) as resp:
-                rows = json.loads(resp.read())
-        except (URLError, Exception) as e:
-            print(f"  Tract ACS {yr} failed: {e}")
-            continue
-        header = rows[0]
-        idx = {k: header.index(k) for k in header}
-        by_geoid = {}
-        for row in rows[1:]:
-            geoid = f"{row[idx['state']]}{row[idx['county']]}{row[idx['tract']]}"
-
-            def _vf(k):
-                """Parse an ACS cell as a float. ACS returns decimals for
-                values like median age, and uses large negative sentinels
-                (e.g. -666666666) for missing/suppressed data. Normalize
-                both to None so downstream math doesn't blow up."""
-                try:
-                    raw = row[idx[k]]
-                    if raw in (None, '', '-', '*'):
-                        return None
-                    v = float(raw)
-                    if v < -1e6:  # ACS missing-data sentinels
-                        return None
-                    return v
-                except (ValueError, TypeError):
-                    return None
-
-            def _vi(k):
-                v = _vf(k)
-                return int(v) if v is not None else None
-
-            pop = _vi('B01003_001E') or 0
-            pov_univ = _vi('B17001_001E') or 0
-            pov_below = _vi('B17001_002E') or 0
-            lang_univ = _vi('C16001_001E') or 0
-            spanish = _vi('C16001_005E') or 0
-            hh_univ = _vi('B11007_001E') or 0
-            elderly_alone = _vi('B11007_003E') or 0
-            median_age = _vf('B01002_001E')  # decimal — keep as float
-            by_geoid[geoid] = {
-                'poverty_rate': round(pov_below / pov_univ, 4) if pov_univ else None,
-                'median_age': round(median_age, 1) if median_age is not None else None,
-                'spanish_at_home': round(spanish / lang_univ, 4) if lang_univ else None,
-                'elderly_alone': round(elderly_alone / hh_univ, 4) if hh_univ else None,
-                'acs_year': yr,
-                'tract_pop': pop,
-            }
-        merged = 0
-        for feat in feats:
-            geoid = feat.get('properties', {}).get('GEOID', '')
-            if geoid in by_geoid:
-                for k, v in by_geoid[geoid].items():
-                    feat['properties'][k] = v
-                merged += 1
-        print(f"  Tract ACS {yr}: merged {merged}/{len(feats)} tracts")
-        return  # stop after first successful year
-
-
-def fetch_census_acs():
-    """Fetch ACS 5-year data for Bernalillo County from Census API.
-
-    County and ZIP queries fall through independently: if the 2023 county
-    query succeeds but the 2023 ZIP query fails, we still try 2022 / 2021
-    ZIPs instead of shipping a ZIP-less build.
-    """
-    vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
-    result = {}
-    for yr in [2023, 2022, 2021]:
-        if 'county' in result and 'zips' in result:
-            break
-        # County-level (only if we haven't already captured a good one)
-        if 'county' not in result:
-            url = f'https://api.census.gov/data/{yr}/acs/acs5?get={vars}&for=county:001&in=state:35'
-            try:
-                with urlopen(url, timeout=5) as resp:
-                    data = json.loads(resp.read())
-                    h, v = data[0], data[1]
-
-                    # Parse a single ACS cell as int, treating missing-data
-                    # sentinels (large negative values like -666666666) as 0
-                    # so they don't render as literal -$666,666,666 in the UI.
-                    def _cv(k):
-                        raw = v[h.index(k)]
-                        try:
-                            x = int(raw) if raw not in (None, '', '-', '*') else 0
-                        except (ValueError, TypeError):
-                            return 0
-                        return x if x >= 0 else 0
-
-                    pop = _cv('B01001_001E')
-                    result['county'] = {
-                        'year': yr, 'name': v[h.index('NAME')], 'population': pop,
-                        'median_income': _cv('B19013_001E'),
-                        'poverty': _cv('B17001_002E'),
-                        'hispanic': _cv('B03003_003E'),
-                        'white': _cv('B02001_002E'),
-                        'black': _cv('B02001_003E'),
-                        'native_american': _cv('B02001_004E'),
-                        'asian': _cv('B02001_005E'),
-                        'housing_units': _cv('B25001_001E'),
-                        'median_home_value': _cv('B25077_001E'),
-                    }
-                    print(f"  County ACS {yr}: pop {pop:,}")
-            except (URLError, Exception) as e:
-                print(f"  County ACS {yr} failed: {e}")
-
-        # ZIP-level (ZCTAs in NM, filter to Bernalillo area)
-        bern_zips = {
-            '87002','87004','87008','87015','87031','87035','87042','87043',
-            '87047','87048','87059','87068','87101','87102','87103','87104',
-            '87105','87106','87107','87108','87109','87110','87111','87112',
-            '87113','87114','87116','87117','87119','87120','87121','87122',
-            '87123','87124','87131','87144','87153','87154','87158','87176',
-            '87181','87184','87185','87187','87190','87191','87192','87193',
-            '87194','87196','87197','87198','87199',
-        }
-        if 'zips' not in result:
-            zip_vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B03003_003E,B25001_001E,B25077_001E'
-            # Census deprecated the `in=state:` filter for ZCTA queries a few
-            # years ago; the endpoint now returns HTTP 400 if you include it.
-            # Query nationwide and filter by the Bernalillo-area ZCTA set below.
-            zip_url = f'https://api.census.gov/data/{yr}/acs/acs5?get={zip_vars}&for=zip%20code%20tabulation%20area:*'
-            try:
-                with urlopen(zip_url, timeout=10) as resp:
-                    zdata = json.loads(resp.read())
-                    zh = zdata[0]
-                    zips = {}
-                    # ACS missing-data sentinels — large negative integers
-                    # (-666666666 etc.) mean "suppressed for privacy" on
-                    # low-population ZCTAs. Normalize those to 0 so they
-                    # don't flow into the UI as literal -$666,666,666.
-                    def _zv(row, col):
-                        raw = row[zh.index(col)]
-                        try:
-                            v = int(raw) if raw not in (None, '', '-', '*') else 0
-                        except (ValueError, TypeError):
-                            return 0
-                        return v if v >= 0 else 0
-                    for row in zdata[1:]:
-                        zcta = row[zh.index('zip code tabulation area')]
-                        if zcta not in bern_zips:
-                            continue
-                        zpop = _zv(row, 'B01001_001E')
-                        if zpop == 0:
-                            continue
-                        zips[zcta] = {
-                            'name': row[zh.index('NAME')],
-                            'pop': zpop,
-                            'income': _zv(row, 'B19013_001E'),
-                            'poverty': _zv(row, 'B17001_002E'),
-                            'hispanic': _zv(row, 'B03003_003E'),
-                            'units': _zv(row, 'B25001_001E'),
-                            'home_val': _zv(row, 'B25077_001E'),
-                        }
-                    result['zips'] = zips
-                    print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
-            except (URLError, Exception) as e:
-                print(f"  ZIP ACS {yr} failed: {e}")
-    return result if result else None
-
 
 def update_html_sidebar(final_layers, html_path, stats=None):
     """Update index.html sidebar counts and year filter checkboxes
@@ -1970,6 +1280,12 @@ def main():
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
+    parser.add_argument('--refresh-acs', action='store_true',
+                        help='Force a live ACS fetch even if the disk cache is fresh.')
+    parser.add_argument('--no-acs-cache', action='store_true',
+                        help='Skip reading/writing the ACS disk cache (always live).')
+    parser.add_argument('--acs-cache-ttl', type=int, default=ACS_CACHE_TTL_DAYS,
+                        help=f'ACS cache TTL in days (default: {ACS_CACHE_TTL_DAYS}).')
     parser.add_argument('--osrm-url', default='https://router.project-osrm.org',
                         help='OSRM Table-service endpoint for drive-time catchments '
                              '(default: public demo; rate-limited). Set to your own instance '
@@ -2028,10 +1344,16 @@ def main():
     census = None
     if not args.no_census:
         print("\nFetching Census ACS data...")
-        census = fetch_census_acs()
+        acs_kwargs = dict(
+            outdir=outdir,
+            use_cache=not args.no_acs_cache,
+            refresh=args.refresh_acs,
+            ttl_days=args.acs_cache_ttl,
+        )
+        census = fetch_census_acs(**acs_kwargs)
         # Enrich TRACT_GEO with tract-level ACS so the tract choropleth can
         # color poverty/median-age/language/elderly-alone signals.
-        fetch_tract_acs(existing_core.get('TRACT_GEO'))
+        fetch_tract_acs(existing_core.get('TRACT_GEO'), **acs_kwargs)
     else:
         print("\nSkipping Census ACS fetch (--no-census)")
 
@@ -2352,6 +1674,19 @@ def main():
     _gi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                    for k in p.keys() if k.startswith('gi_outreach_need_')})
     print(f"  Per-year Gi*: {_gi_yrs} years")
+
+    # Phase 3 analytical layers: DPI (displacement pressure), exemption
+    # uptake ratios, and per-year trend slopes. Runs after gaps/Gi* so the
+    # full per-year scaffold is in place.
+    print("\nComputing DPI, uptake ratios, and trend slopes...")
+    _compute_dpi_per_year(nbhd_stats)
+    _compute_uptake_ratios(nbhd_stats)
+    _compute_trend_slopes(nbhd_stats)
+    _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
+                    for k in p.keys() if k.startswith('dpi_')})
+    _slope_nbhds = sum(1 for p in nbhd_stats.values()
+                       if p.get('outreach_need_slope') is not None)
+    print(f"  DPI: {_dpi_yrs} years; outreach_need_slope: {_slope_nbhds} nbhds")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
