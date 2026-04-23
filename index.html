@@ -14,6 +14,7 @@ body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;align-
 .gate button:disabled{opacity:.55;cursor:not-allowed}
 .err{color:#c41a1a;font-size:11px;margin-top:6px;min-height:15px}
 .pg{margin-top:8px;font-size:11px;color:#888;min-height:14px}
+.tier{margin-top:8px;font-size:10px;color:#5a7a99;min-height:12px}
 </style>
 </head><body>
 <div class="gate">
@@ -24,103 +25,168 @@ body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;align-
     <button id="gateBtn" type="submit">Unlock</button>
     <div class="err" id="err"></div>
     <div class="pg" id="pg"></div>
+    <div class="tier" id="tier"></div>
   </form>
 </div>
 <script>
 const $=id=>document.getElementById(id);
 const setErr=s=>$('err').textContent=s||'';
 const setPg=s=>$('pg').textContent=s||'';
+const setTier=s=>$('tier').textContent=s||'';
 
 function b64ToBytes(b64){const s=atob(b64);const b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}
 
-async function deriveKey(pw,salt,iter){
+async function deriveKey(pw,salt,kdf){
+  // PBKDF2 variants — Argon2id is reserved for a future v3 loader that
+  // carries a WASM implementation. Unknown KDFs fail loudly rather than
+  // silently falling back.
+  let iter;
+  if(kdf==='pbkdf2-sha256-600k')iter=600000;
+  else if(kdf==='pbkdf2-sha256-200k')iter=200000;
+  else throw new Error('Unsupported KDF: '+kdf);
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
   return crypto.subtle.deriveKey(
     {name:'PBKDF2',salt,iterations:iter,hash:'SHA-256'},
     km,{name:'AES-GCM',length:256},false,['decrypt']);
 }
 
-async function decryptFile(path,key){
-  const r=await fetch(path);
-  if(!r.ok)throw new Error('HTTP '+r.status+' for '+path);
-  const buf=await r.arrayBuffer();
-  if(buf.byteLength<28)throw new Error('File too small for AES-GCM: '+path+' ('+buf.byteLength+' bytes)');
+async function decryptBytes(buf,key){
+  if(buf.byteLength<28)throw new Error('ciphertext too small');
   const iv=buf.slice(0,12),ct=buf.slice(12);
   return crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
 }
 
+async function fetchBytes(path){
+  const r=await fetch(path);
+  if(!r.ok)throw new Error('HTTP '+r.status+' for '+path);
+  return r.arrayBuffer();
+}
+
+async function decryptFile(path,key){
+  const buf=await fetchBytes(path);
+  return decryptBytes(buf,key);
+}
+
+// v1 flow: one password, one salt, all files.
+async function unlockV1(man,pw){
+  const salt=b64ToBytes(man.salt);
+  const kdf=man.iterations===600000?'pbkdf2-sha256-600k':'pbkdf2-sha256-200k';
+  const key=await deriveKey(pw,salt,kdf);
+  const [coreBuf,layersBuf,htmlBuf]=await Promise.all([
+    decryptFile('data/core.json.enc',key).catch(e=>{throw new Error('decrypt_core:'+(e&&e.message||e));}),
+    decryptFile('data/layers.json.enc',key).catch(e=>{throw new Error('decrypt_layers:'+(e&&e.message||e));}),
+    decryptFile('index_body.html.enc',key).catch(e=>{throw new Error('decrypt_html:'+(e&&e.message||e));}),
+  ]);
+  return {tier:'full',coreBuf,layersBuf,htmlBuf};
+}
+
+// v2 flow: try each tier's salt in order. The verify blob identifies
+// which tier the password unlocks. A tier's files are the ONLY files
+// that key can decrypt.
+async function unlockV2(man,pw){
+  const kdf=man.kdf||'pbkdf2-sha256-600k';
+  const tiers=man.tiers||{};
+  const files=man.files||{};
+  let unlockedTier=null,unlockedKey=null;
+  // Deterministic order: staff first so a password valid at both tiers
+  // (legacy deploy, shouldn't happen) defaults to full access.
+  for(const tierName of ['staff','public']){
+    const t=tiers[tierName];
+    if(!t||!t.salt||!t.verify)continue;
+    try{
+      const k=await deriveKey(pw,b64ToBytes(t.salt),kdf);
+      const vb=b64ToBytes(t.verify);
+      await decryptBytes(vb.buffer,k);
+      unlockedTier=tierName;unlockedKey=k;break;
+    }catch(_){/* try next tier */}
+  }
+  if(!unlockedTier)throw new Error('Wrong password (no tier matched).');
+  setTier('Access tier: '+unlockedTier);
+  // Fetch + decrypt each file in the tier's list.
+  const accessible={};
+  for(const [path,tierOfFile] of Object.entries(files)){
+    if(tierOfFile!==unlockedTier&&unlockedTier!=='staff')continue;
+    // staff tier unlocks public files too — encrypt_data.py shares
+    // nothing between tiers, so we derive the public key too when needed.
+    if(tierOfFile===unlockedTier){
+      try{accessible[path]=await decryptFile(path,unlockedKey);}
+      catch(e){throw new Error('decrypt_'+path+':'+(e&&e.message||e));}
+    }
+  }
+  // If the user is staff, additionally derive the public key so we can
+  // pick up core.json (which is encrypted under the public key).
+  if(unlockedTier==='staff'&&tiers.public){
+    const pk=await deriveKey(pw,b64ToBytes(tiers.public.salt),kdf).catch(()=>null);
+    if(pk){
+      for(const [path,tierOfFile] of Object.entries(files)){
+        if(tierOfFile==='public'&&!accessible[path]){
+          try{accessible[path]=await decryptFile(path,pk);}catch(_){/* pw only valid at staff */}
+        }
+      }
+    }
+  }
+  return {tier:unlockedTier,
+          coreBuf:accessible['data/core.json.enc'],
+          layersBuf:accessible['data/layers.json.enc'],
+          htmlBuf:accessible['index_body.html.enc']};
+}
+
 $('gateForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  setErr('');
+  setErr('');setTier('');
   const pw=$('pw').value;
   if(!pw){setErr('Enter a password.');return;}
   $('gateBtn').disabled=true;
   try{
     setPg('Fetching manifest...');
     const manRes=await fetch('data/enc_manifest.json');
-    if(!manRes.ok)throw new Error('Manifest fetch failed: HTTP '+manRes.status+'. Check that data/enc_manifest.json was uploaded to the deploy branch.');
+    if(!manRes.ok)throw new Error('Manifest fetch failed: HTTP '+manRes.status+'.');
     const manText=await manRes.text();
     let man;
     try{man=JSON.parse(manText);}
-    catch(_){throw new Error('Manifest is not JSON (server returned '+(manText.slice(0,40))+'...). Likely the .enc files were uploaded to the wrong path.');}
-    if(!man.salt||!man.iterations)throw new Error('Manifest is missing salt or iterations.');
-    const salt=b64ToBytes(man.salt);
+    catch(_){throw new Error('Manifest is not JSON (server returned '+(manText.slice(0,40))+'...).');}
     setPg('Deriving key...');
-    const key=await deriveKey(pw,salt,man.iterations);
-
-    setPg('Fetching encrypted assets...');
-    const [coreBuf,layersBuf,htmlBuf]=await Promise.all([
-      decryptFile('data/core.json.enc',key).catch(e=>{throw new Error('decrypt_core:'+(e&&e.message||e));}),
-      decryptFile('data/layers.json.enc',key).catch(e=>{throw new Error('decrypt_layers:'+(e&&e.message||e));}),
-      decryptFile('index_body.html.enc',key).catch(e=>{throw new Error('decrypt_html:'+(e&&e.message||e));}),
-    ]);
-
+    let result;
+    if((man.v||1)>=2){
+      result=await unlockV2(man,pw);
+    }else{
+      if(!man.salt||!man.iterations)throw new Error('v1 manifest missing salt or iterations.');
+      result=await unlockV1(man,pw);
+    }
+    if(!result.htmlBuf)throw new Error('This password does not grant access to the map body.');
     setPg('Rendering...');
     const dec=new TextDecoder();
-    const coreText=dec.decode(coreBuf);
-    const layersText=dec.decode(layersBuf);
-    const htmlText=dec.decode(htmlBuf);
+    const coreText=result.coreBuf?dec.decode(result.coreBuf):null;
+    const layersText=result.layersBuf?dec.decode(result.layersBuf):null;
+    const htmlText=dec.decode(result.htmlBuf);
 
-    // Intercept the real page's fetch calls for data/core.json &
-    // data/layers.json and hand back the decrypted payload instead.
     const origFetch=window.fetch.bind(window);
     function matchPath(u,name){
-      // Strip query + hash so data/core.json?v=123 still matches.
       const base=u.split('#')[0].split('?')[0];
       return base===name||base.endsWith('/'+name);
     }
     window.fetch=function(url,init){
-      // Normalize string / URL / Request to a plain URL string. The prior
-      // `url.url` guard only handled Request and silently fell through for
-      // `fetch(new URL(...))`, which then hit the network and 404'd.
       let u='';
       if(typeof url==='string')u=url;
-      else if(url&&typeof url.url==='string')u=url.url;           // Request
-      else if(url)u=String(url);                                  // URL / other
-      if(matchPath(u,'data/core.json'))
+      else if(url&&typeof url.url==='string')u=url.url;
+      else if(url)u=String(url);
+      if(matchPath(u,'data/core.json')&&coreText!==null)
         return Promise.resolve(new Response(coreText,{status:200,headers:{'Content-Type':'application/json'}}));
-      if(matchPath(u,'data/layers.json'))
+      if(matchPath(u,'data/layers.json')&&layersText!==null)
         return Promise.resolve(new Response(layersText,{status:200,headers:{'Content-Type':'application/json'}}));
       return origFetch(url,init);
     };
 
-    // Replace the document with the decrypted HTML. document.open() keeps
-    // the same window, so our fetch override and all other globals persist
-    // into the newly written page.
     document.open();
     document.write(htmlText);
     document.close();
   }catch(err){
     const msg=String(err&&err.message||err);
-    // decrypt_* prefix means the file fetched but GCM tag verification
-    // failed (wrong password) OR the file was fetched but is HTML (a 404
-    // served as index.html), which also fails the auth tag. Surface the
-    // underlying HTTP status when present so deploy misconfig is visible.
     if(msg.startsWith('decrypt_')){
       if(msg.indexOf('HTTP ')>=0)setErr('Encrypted asset missing on server: '+msg);
       else setErr('Wrong password (or corrupted data).');
     }else setErr(msg);
-    setPg('');
+    setPg('');setTier('');
     $('gateBtn').disabled=false;
   }
 });
