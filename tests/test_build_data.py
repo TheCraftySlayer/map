@@ -306,6 +306,85 @@ class TestNoisyOrSemantics(unittest.TestCase):
             self.assertLessEqual(r, 1.0)
 
 
+class TestDpiUptakeSlopes(unittest.TestCase):
+    """Phase 3 analytical layers: DPI_YY, *_uptake_YY, *_slope."""
+
+    def test_dpi_requires_both_displacement_and_pressure(self):
+        """A nbhd with high turnover but zero pressure should score low;
+        one with both moderate signals should score meaningfully higher."""
+        stats = {
+            1: {  # high turnover, no pressure
+                "owner_turnover_23": 0.3, "hoh_churn_23": 0.05,
+                "val_change_pct": 0.0, "zip_poverty_rate": 0.0,
+            },
+            2: {  # moderate on both sides
+                "owner_turnover_23": 0.15, "hoh_churn_23": 0.03,
+                "val_change_pct": 0.3, "zip_poverty_rate": 0.15,
+            },
+            3: {  # high pressure, no turnover
+                "owner_turnover_23": 0.0, "hoh_churn_23": 0.0,
+                "val_change_pct": 0.5, "zip_poverty_rate": 0.25,
+            },
+        }
+        build_data._compute_dpi_per_year(stats)
+        # Per-year key emitted only where owner_turnover_YY exists.
+        self.assertIn("dpi_23", stats[1])
+        self.assertIn("dpi_23", stats[2])
+        self.assertIn("dpi_23", stats[3])
+        # Both-signal nbhd beats single-signal extremes (the design goal).
+        self.assertGreater(stats[2]["dpi_23"], stats[1]["dpi_23"])
+        self.assertGreater(stats[2]["dpi_23"], stats[3]["dpi_23"])
+
+    def test_dpi_prefers_tract_poverty_over_zip(self):
+        stats = {
+            1: {
+                "owner_turnover_23": 0.2,
+                "hoh_churn_23": 0.0,
+                "val_change_pct": 0.0,
+                "zip_poverty_rate": 0.0,
+                "tract_poverty_rate": 0.25,  # should dominate
+            }
+        }
+        build_data._compute_dpi_per_year(stats)
+        self.assertGreater(stats[1]["dpi_23"], 0.0)
+
+    def test_dpi_skips_nbhds_without_per_year_data(self):
+        stats = {1: {"parcels": 200, "outreach_need": 0.5}}
+        build_data._compute_dpi_per_year(stats)
+        self.assertFalse(any(k.startswith("dpi_") for k in stats[1]))
+
+    def test_uptake_ratio_centered_around_one(self):
+        """With a flat dataset, actual≈predicted so uptake≈1."""
+        stats = {i: {"pct_hoh_23": 0.2, "zip_poverty_rate": 0.15,
+                     "pct_val_freeze_23": 0.05, "pct_vet_23": 0.08}
+                 for i in range(10)}
+        build_data._compute_uptake_ratios(stats)
+        for p in stats.values():
+            self.assertAlmostEqual(p["hoh_uptake_23"], 1.0, places=2)
+            self.assertAlmostEqual(p["vet_uptake_23"], 1.0, places=2)
+
+    def test_uptake_ratio_capped_at_three(self):
+        """A neighborhood far above the mean must not produce a huge ratio."""
+        stats = {i: {"pct_vet_23": 0.001} for i in range(10)}
+        stats[11] = {"pct_vet_23": 1.0}  # wildly above mean
+        build_data._compute_uptake_ratios(stats)
+        self.assertLessEqual(stats[11]["vet_uptake_23"], 3.0)
+
+    def test_trend_slopes_fit_linear_series(self):
+        """A linearly-rising outreach_need_YY series should yield the true slope."""
+        p = {f"outreach_need_{yy}": 0.2 + 0.05 * (yy - 20)
+             for yy in range(20, 26)}  # 2020..2025
+        stats = {1: p}
+        build_data._compute_trend_slopes(stats)
+        self.assertAlmostEqual(p["outreach_need_slope"], 0.05, places=4)
+
+    def test_trend_slope_skipped_when_too_few_years(self):
+        p = {"outreach_need_24": 0.4, "outreach_need_25": 0.5}
+        stats = {1: p}
+        build_data._compute_trend_slopes(stats)
+        self.assertNotIn("outreach_need_slope", p)
+
+
 class TestAcsCache(unittest.TestCase):
     """Phase 2: disk-cache wrappers around the Census API."""
 

@@ -638,6 +638,166 @@ def _compute_gi_star_per_year(nbhd_stats, centroid_lookup, k=8):
                 )
 
 
+def _cap(v, ceil):
+    """Clamp v/ceil to [0,1]. Shared by severity/vulnerability aggregators
+    and the per-year DPI / uptake ratio computations below."""
+    if not ceil:
+        return 0
+    if v is None:
+        return 0
+    try:
+        return min(max(float(v) / ceil, 0.0), 1.0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _noisy_or(*vals):
+    """1 - Π(1 - vᵢ), clamped per-input to [0,1]. Bounded in [0,1]."""
+    p = 1.0
+    for v in vals:
+        try:
+            x = max(0.0, min(1.0, float(v) if v is not None else 0.0))
+        except (TypeError, ValueError):
+            x = 0.0
+        p *= 1.0 - x
+    return 1.0 - p
+
+
+def _compute_dpi_per_year(nbhd_stats):
+    """Displacement Pressure Index per year.
+
+    DPI_YY combines *who is cycling through* (owner_turnover_YY, hoh_churn_YY)
+    with *affordability pressure* (val_change_pct, tract_poverty_rate or
+    zip_poverty_rate). Both a displacement and a pressure signal must be
+    non-trivial for a high score — so bedroom communities with steady value
+    growth don't light up the map just because they're expensive.
+
+    Writes dpi_YY for every year that has a usable owner_turnover_YY or
+    hoh_churn_YY on the feature. Skips neighborhoods with no per-year data.
+    """
+    year_pat = re.compile(r'^owner_turnover_(\d+)$')
+    for p in nbhd_stats.values():
+        years = set()
+        for k in p.keys():
+            m = year_pat.match(k)
+            if m:
+                years.add(m.group(1))
+        if not years:
+            continue
+        # Pressure side is static across years (val_change_pct is cumulative
+        # and poverty is an ACS aggregate) — precompute once per nbhd.
+        poverty = (p.get('tract_poverty_rate')
+                   if p.get('tract_poverty_rate') is not None
+                   else p.get('zip_poverty_rate'))
+        pressure = _noisy_or(_cap(p.get('val_change_pct'), 0.5),
+                             _cap(poverty, 0.25))
+        for ys in sorted(years):
+            turn = _cap(p.get(f'owner_turnover_{ys}'), 0.25)
+            churn = _cap(p.get(f'hoh_churn_{ys}'), 0.05)
+            displacement = _noisy_or(turn, churn)
+            p[f'dpi_{ys}'] = round(displacement * pressure, 4)
+
+
+def _compute_uptake_ratios(nbhd_stats):
+    """Exemption uptake as a RATIO of actual/predicted (complement to the
+    residual gaps in _compute_exemption_gaps). Intuitive scale: 1.0 = as
+    predicted, 0.5 = claiming only half what peers do, 1.5 = over-claim.
+
+    HOH/VF use the OLS fit against zip_poverty_rate (same predictor as the
+    gaps); vet uses a plain county mean (vet claims track Kirtland/VA
+    proximity, not ZIP income). Ratios are capped at 3.0 so a neighborhood
+    where the mean is tiny doesn't produce a 50× ratio in the tooltip.
+    """
+    # Scan across all three bases so a dataset with only vet history
+    # (no pct_hoh_YY) still gets vet_uptake_YY emitted.
+    year_pat = re.compile(r'^pct_(?:hoh|vet|val_freeze)_(\d+)$')
+    year_suffixes = set()
+    for p in nbhd_stats.values():
+        for k in p.keys():
+            m = year_pat.match(k)
+            if m:
+                year_suffixes.add(m.group(1))
+    RATIO_CEIL = 3.0
+
+    def _run_ratio(base, predictor, out_base, suffix, use_predictor=True):
+        suf = f'_{suffix}' if suffix else ''
+        field = f'{base}{suf}'
+        pairs = [(p.get(predictor), p.get(field)) for p in nbhd_stats.values()]
+        fit = _ols_fit(pairs) if use_predictor else None
+        mean = _mean_of(field, nbhd_stats)
+        if mean is None:
+            return
+        for p in nbhd_stats.values():
+            v = p.get(field)
+            if v is None:
+                continue
+            if fit and use_predictor and p.get(predictor) is not None:
+                try:
+                    pred = fit['intercept'] + fit['slope'] * float(p[predictor])
+                except (TypeError, ValueError):
+                    pred = mean
+            else:
+                pred = mean
+            if not pred or pred <= 0:
+                continue
+            p[f'{out_base}{suf}'] = round(min(v / pred, RATIO_CEIL), 4)
+
+    _run_ratio('pct_hoh', 'zip_poverty_rate', 'hoh_uptake', '')
+    _run_ratio('pct_val_freeze', 'zip_poverty_rate', 'vf_uptake', '')
+    _run_ratio('pct_vet', None, 'vet_uptake', '', use_predictor=False)
+    for ys in sorted(year_suffixes):
+        _run_ratio('pct_hoh', 'zip_poverty_rate', 'hoh_uptake', ys)
+        _run_ratio('pct_val_freeze', 'zip_poverty_rate', 'vf_uptake', ys)
+        _run_ratio('pct_vet', None, 'vet_uptake', ys, use_predictor=False)
+
+
+def _compute_trend_slopes(nbhd_stats):
+    """OLS slope of each per-year series — sign and magnitude of the
+    multi-year trend. The UI can show "rising/falling/flat" arrows next
+    to the scalar field without pulling every _YY value.
+
+    Bases: outreach_need, pct_hoh, pct_vet, pct_val_freeze, hoh_churn.
+    Slope is in units-per-year (YY is the tax year modulo 100).
+    Written as {base}_slope. Skipped when fewer than 4 years exist.
+    """
+    BASES = ('outreach_need', 'pct_hoh', 'pct_vet',
+             'pct_val_freeze', 'hoh_churn')
+
+    def _slope(pairs):
+        """OLS slope for a small (n>=4) series. Returns None if zero variance."""
+        n = len(pairs)
+        if n < 4:
+            return None
+        sx = sum(x for x, _ in pairs)
+        sy = sum(y for _, y in pairs)
+        sxx = sum(x * x for x, _ in pairs)
+        sxy = sum(x * y for x, y in pairs)
+        mx = sx / n
+        vx = sxx - n * mx * mx
+        if vx <= 0:
+            return None
+        return (sxy - n * mx * (sy / n)) / vx
+
+    for p in nbhd_stats.values():
+        for base in BASES:
+            pat = re.compile(rf'^{base}_(\d+)$')
+            pairs = []
+            for k, v in p.items():
+                m = pat.match(k)
+                if not m or v is None or not isinstance(v, (int, float)):
+                    continue
+                yr = int(m.group(1))
+                # Normalize packed 2-digit year back to calendar year so
+                # slope units are "units per year" not "units per YY step"
+                # (avoids the 99→00 wraparound making the slope explode).
+                yr_full = 2000 + yr if yr < 80 else 1900 + yr
+                pairs.append((yr_full, float(v)))
+            pairs.sort()
+            s = _slope(pairs)
+            if s is not None:
+                p[f'{base}_slope'] = round(s, 6)
+
+
 def compute_nbhd_stats(by_nbhd_yr, existing_props, census=None, tract_geo=None):
     """
     Compute per-neighborhood aggregated stats from tax roll data.
@@ -2445,6 +2605,19 @@ def main():
     _gi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                    for k in p.keys() if k.startswith('gi_outreach_need_')})
     print(f"  Per-year Gi*: {_gi_yrs} years")
+
+    # Phase 3 analytical layers: DPI (displacement pressure), exemption
+    # uptake ratios, and per-year trend slopes. Runs after gaps/Gi* so the
+    # full per-year scaffold is in place.
+    print("\nComputing DPI, uptake ratios, and trend slopes...")
+    _compute_dpi_per_year(nbhd_stats)
+    _compute_uptake_ratios(nbhd_stats)
+    _compute_trend_slopes(nbhd_stats)
+    _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
+                    for k in p.keys() if k.startswith('dpi_')})
+    _slope_nbhds = sum(1 for p in nbhd_stats.values()
+                       if p.get('outreach_need_slope') is not None)
+    print(f"  DPI: {_dpi_yrs} years; outreach_need_slope: {_slope_nbhds} nbhds")
 
     # ── Assemble core.json ──
     print("\nAssembling core.json...")
