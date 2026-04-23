@@ -33,6 +33,36 @@ const setPg=s=>$('pg').textContent=s||'';
 
 function b64ToBytes(b64){const s=atob(b64);const b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}
 
+// Client-side brute-force throttle. Tracks failed attempts in sessionStorage
+// (cleared on browser/tab close). Not a security boundary — the AES-GCM
+// auth tag is — but it blunts scripted guessing against the static host.
+const THROTTLE_KEY='se_gate_fails';
+const THROTTLE_MAX=8;                // hard cap per session
+const THROTTLE_WINDOW_MS=60*1000;    // attempts inside this window count
+function throttleState(){
+  try{return JSON.parse(sessionStorage.getItem(THROTTLE_KEY))||{fails:[],lockUntil:0};}
+  catch(_){return{fails:[],lockUntil:0};}
+}
+function throttleSave(st){try{sessionStorage.setItem(THROTTLE_KEY,JSON.stringify(st));}catch(_){}}
+function throttleCheck(){
+  const st=throttleState();const now=Date.now();
+  st.fails=st.fails.filter(t=>now-t<THROTTLE_WINDOW_MS);
+  if(st.lockUntil&&st.lockUntil>now)
+    return{ok:false,wait:Math.ceil((st.lockUntil-now)/1000)};
+  if(st.fails.length>=THROTTLE_MAX){
+    // Exponential lockout: 15s, 30s, 60s, 120s capped at 5min.
+    const prior=Math.floor(st.fails.length/THROTTLE_MAX);
+    const lock=Math.min(300,15*Math.pow(2,prior-1))*1000;
+    st.lockUntil=now+lock;throttleSave(st);
+    return{ok:false,wait:Math.ceil(lock/1000)};
+  }
+  return{ok:true};
+}
+function throttleFail(){
+  const st=throttleState();st.fails.push(Date.now());throttleSave(st);
+}
+function throttleReset(){try{sessionStorage.removeItem(THROTTLE_KEY);}catch(_){}}
+
 async function deriveKey(pw,salt,iter){
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
   return crypto.subtle.deriveKey(
@@ -49,11 +79,56 @@ async function decryptFile(path,key){
   return crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
 }
 
+// Inject the features.js script tag into the decrypted HTML. Placed as the
+// first child of <head> so it runs before Leaflet initializes — features.js
+// uses a setter trap on window.L to capture the map instance at create time
+// without requiring any edits to the encrypted body.
+function injectFeaturesScript(html){
+  // No defer/async — features.js MUST run before Leaflet is processed so its
+  // setter trap on window.L can capture the map instance at create time.
+  const tag='<script src="features.js"></scr'+'ipt>';
+  if(/<head[^>]*>/i.test(html))
+    return html.replace(/<head([^>]*)>/i,(m,attrs)=>'<head'+attrs+'>'+tag);
+  // No <head> — prepend. Browser will still parse it.
+  return tag+html;
+}
+
+// Idle-timeout: after IDLE_MS of no user activity, blow away the decrypted
+// document and bounce back to the gate. Keeps decrypted buffers from
+// lingering in memory on unattended kiosks. The counter resets on any
+// mouse/keyboard/touch activity.
+const IDLE_MS=20*60*1000;   // 20 minutes
+const IDLE_WARN_MS=19*60*1000;
+function installIdleTimer(){
+  let last=Date.now();
+  const bump=()=>{last=Date.now();};
+  ['mousemove','keydown','touchstart','scroll','click'].forEach(ev=>
+    window.addEventListener(ev,bump,{passive:true}));
+  setInterval(()=>{
+    const idle=Date.now()-last;
+    if(idle>=IDLE_MS){
+      try{sessionStorage.setItem('se_idle_reload','1');}catch(_){}
+      location.reload();
+    }else if(idle>=IDLE_WARN_MS){
+      try{
+        const el=document.getElementById('__se_idle_warn')||(()=>{
+          const d=document.createElement('div');
+          d.id='__se_idle_warn';
+          d.style.cssText='position:fixed;top:12px;right:12px;z-index:99999;background:#c41a1a;color:#fff;padding:8px 14px;border-radius:4px;font:13px system-ui;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+          document.body.appendChild(d);return d;})();
+        el.textContent='Session will lock in '+Math.ceil((IDLE_MS-idle)/1000)+'s — move the mouse to stay signed in.';
+      }catch(_){}
+    }
+  },5000);
+}
+
 $('gateForm').addEventListener('submit',async e=>{
   e.preventDefault();
   setErr('');
   const pw=$('pw').value;
   if(!pw){setErr('Enter a password.');return;}
+  const th=throttleCheck();
+  if(!th.ok){setErr('Too many attempts. Try again in '+th.wait+'s.');return;}
   $('gateBtn').disabled=true;
   try{
     setPg('Fetching manifest...');
@@ -79,7 +154,10 @@ $('gateForm').addEventListener('submit',async e=>{
     const dec=new TextDecoder();
     const coreText=dec.decode(coreBuf);
     const layersText=dec.decode(layersBuf);
-    const htmlText=dec.decode(htmlBuf);
+    const htmlText=injectFeaturesScript(dec.decode(htmlBuf));
+
+    // Successful decrypt — clear throttle counter.
+    throttleReset();
 
     // Intercept the real page's fetch calls for data/core.json &
     // data/layers.json and hand back the decrypted payload instead.
@@ -110,6 +188,9 @@ $('gateForm').addEventListener('submit',async e=>{
     document.open();
     document.write(htmlText);
     document.close();
+
+    // Kick off the idle watchdog after the body renders.
+    installIdleTimer();
   }catch(err){
     const msg=String(err&&err.message||err);
     // decrypt_* prefix means the file fetched but GCM tag verification
@@ -118,11 +199,19 @@ $('gateForm').addEventListener('submit',async e=>{
     // underlying HTTP status when present so deploy misconfig is visible.
     if(msg.startsWith('decrypt_')){
       if(msg.indexOf('HTTP ')>=0)setErr('Encrypted asset missing on server: '+msg);
-      else setErr('Wrong password (or corrupted data).');
+      else{throttleFail();setErr('Wrong password (or corrupted data).');}
     }else setErr(msg);
     setPg('');
     $('gateBtn').disabled=false;
   }
 });
+
+// Surface an idle-lockout message on reload.
+try{
+  if(sessionStorage.getItem('se_idle_reload')){
+    sessionStorage.removeItem('se_idle_reload');
+    setPg('Session locked after idle timeout. Re-enter password.');
+  }
+}catch(_){}
 </script>
 </body></html>

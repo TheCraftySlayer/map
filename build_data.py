@@ -461,6 +461,147 @@ def _mean_of(field, nbhd_stats):
     return s / n if n else None
 
 
+def _compute_equity_index(nbhd_stats):
+    """Composite equity index per neighborhood. Blends the existing
+    outreach_need scalar with the exemption-gap residuals and the value-
+    freeze denial rate into a single 0-1 'priority' score the map can
+    render as a headline choropleth.
+
+    Weights:
+      50%  outreach_need          (already a noisy-OR composite)
+      25%  avg(max(0, hoh_gap, vet_gap, vf_gap))   — under-claim pressure
+      25%  pct_vf_denied clipped to [0, 0.5] → [0, 1]
+
+    Also writes equity_index_YY for every year suffix that has both an
+    outreach_need_YY and a pct_vf_denied_YY.
+    """
+    def _clip(x, lo=0.0, hi=1.0):
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        if x != x:  # NaN
+            return None
+        return max(lo, min(hi, x))
+
+    def _score(need, hoh_gap, vet_gap, vf_gap, pct_vf_denied):
+        need = _clip(need) if need is not None else None
+        pct_vf_denied = _clip(pct_vf_denied) if pct_vf_denied is not None else None
+        gaps_pos = [g for g in (hoh_gap, vet_gap, vf_gap)
+                    if isinstance(g, (int, float)) and g > 0]
+        gap_comp = (sum(gaps_pos) / len(gaps_pos)) if gaps_pos else 0.0
+        gap_comp = _clip(gap_comp / 0.15) or 0.0        # ~0.15 residual ≈ max
+        denial_comp = (_clip(pct_vf_denied / 0.5)
+                       if pct_vf_denied is not None else 0.0) or 0.0
+        parts, weights = [], []
+        if need is not None:
+            parts.append(need); weights.append(0.5)
+        parts.append(gap_comp); weights.append(0.25)
+        parts.append(denial_comp); weights.append(0.25)
+        w = sum(weights) or 1.0
+        return round(sum(p * wt for p, wt in zip(parts, weights)) / w, 4)
+
+    # Collect year suffixes from outreach_need_YY.
+    year_suffixes = set()
+    for p in nbhd_stats.values():
+        for k in p.keys():
+            if k.startswith('outreach_need_') and k[14:].isdigit():
+                year_suffixes.add(k[14:])
+
+    for p in nbhd_stats.values():
+        p['equity_index'] = _score(
+            p.get('outreach_need'),
+            p.get('hoh_gap'), p.get('vet_gap'), p.get('vf_gap'),
+            p.get('pct_vf_denied'),
+        )
+        for ys in year_suffixes:
+            p[f'equity_index_{ys}'] = _score(
+                p.get(f'outreach_need_{ys}'),
+                p.get(f'hoh_gap_{ys}'), p.get(f'vet_gap_{ys}'), p.get(f'vf_gap_{ys}'),
+                p.get(f'pct_vf_denied_{ys}'),
+            )
+
+
+# Headline fields we expect every neighborhood to have once the pipeline
+# finishes. Missing values here count against data_completeness.
+_EXPECTED_FIELDS = (
+    'avg_appraised', 'median_yrbuilt', 'pct_hoh', 'pct_vet',
+    'pct_val_freeze', 'pct_vf_denied', 'owner_turnover',
+    'outreach_need', 'hoh_gap', 'vet_gap', 'vf_gap',
+    'contacts_per_parcel', 'parcels',
+)
+
+
+def _compute_data_completeness(nbhd_stats):
+    """Fraction of _EXPECTED_FIELDS present (non-null, finite) per nbhd.
+    Writes 'data_completeness' in [0, 1]."""
+    total = len(_EXPECTED_FIELDS)
+    for p in nbhd_stats.values():
+        hit = 0
+        for f in _EXPECTED_FIELDS:
+            v = p.get(f)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv != fv:
+                continue
+            hit += 1
+        p['data_completeness'] = round(hit / total, 4) if total else None
+
+
+def _compute_outlier_flags(nbhd_stats):
+    """Per-field IQR outlier flag. Writes 'outlier_{field}' = True when a
+    nbhd's value is beyond Q1-1.5*IQR or Q3+1.5*IQR. Tukey fences — the
+    same rule used in box plots. Skipped if fewer than 10 nbhds have a
+    finite value for the field.
+    """
+    fields = ('avg_appraised', 'pct_hoh', 'pct_vet', 'pct_val_freeze',
+              'pct_vf_denied', 'owner_turnover', 'outreach_need',
+              'equity_index', 'hoh_churn')
+    for f in fields:
+        vals = []
+        for p in nbhd_stats.values():
+            v = p.get(f)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv != fv:
+                continue
+            vals.append(fv)
+        if len(vals) < 10:
+            continue
+        vals_sorted = sorted(vals)
+        n = len(vals_sorted)
+        q1 = vals_sorted[n // 4]
+        q3 = vals_sorted[(3 * n) // 4]
+        iqr = q3 - q1
+        if iqr <= 0:
+            continue
+        lo = q1 - 1.5 * iqr
+        hi = q3 + 1.5 * iqr
+        flag = f'outlier_{f}'
+        for p in nbhd_stats.values():
+            v = p.get(f)
+            if v is None:
+                p[flag] = None
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                p[flag] = None
+                continue
+            if fv != fv:
+                p[flag] = None
+                continue
+            p[flag] = bool(fv < lo or fv > hi)
+
+
 def _compute_exemption_gaps(nbhd_stats):
     """Populate hoh_gap / vet_gap / vf_gap per neighborhood — both for the
     latest year (bare field, e.g. 'hoh_gap') AND for every per-year field
@@ -2342,6 +2483,28 @@ def main():
     _boost_outreach_with_gaps(nbhd_stats)
     print(f"  Gaps computed for {sum(1 for p in nbhd_stats.values() if p.get('vf_gap') is not None)} neighborhoods")
 
+    # Composite equity index (outreach_need + gaps + denial), data
+    # completeness %, and per-field IQR outlier flags. All three are
+    # pure additions to the per-nbhd property bag — they don't alter
+    # existing fields, so the body's legacy layers keep rendering.
+    print("\nComputing composite equity index...")
+    _compute_equity_index(nbhd_stats)
+    _yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
+                for k in p.keys() if k.startswith('equity_index_')})
+    print(f"  equity_index: scalar + {_yrs} per-year fields")
+
+    print("Computing data completeness...")
+    _compute_data_completeness(nbhd_stats)
+    _comp_vals = [p.get('data_completeness') for p in nbhd_stats.values()
+                  if p.get('data_completeness') is not None]
+    if _comp_vals:
+        print(f"  completeness: min={min(_comp_vals):.2f} median="
+              f"{sorted(_comp_vals)[len(_comp_vals)//2]:.2f} "
+              f"max={max(_comp_vals):.2f}")
+
+    print("Computing IQR outlier flags...")
+    _compute_outlier_flags(nbhd_stats)
+
     # Per-year Gi* for hot/cold-spot cluster layers. Runs AFTER the gap
     # boost so the current-year outreach_need_YY already carries the
     # gap-feedback signal (only the scalar outreach_need is boosted
@@ -2364,6 +2527,21 @@ def main():
             feat['properties'] = nbhd_stats[nbhd]
 
     existing_core['NBHD_CENTERS'] = build_nbhd_centers(existing_core['DATA'])
+
+    # Metadata consumed by features.js (badge + legend "as of" date) and
+    # by anyone reading core.json programmatically. Kept as a simple dict
+    # at the top level so adding fields here doesn't ripple into the
+    # choropleth rendering paths.
+    from datetime import datetime, timezone
+    _now = datetime.now(timezone.utc)
+    existing_core['META'] = {
+        'as_of': _now.strftime('%Y-%m-%d'),
+        'generated_at': _now.isoformat(timespec='seconds'),
+        'mode': mode,
+        'neighborhoods': len(nbhd_stats),
+        'equity_index_version': 1,
+        'expected_fields': list(_EXPECTED_FIELDS),
+    }
 
     # ── Assemble layers.json ──
     print("Assembling layers.json...")

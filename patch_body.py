@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-patch_body.py — apply the four map-body fixes to a local plaintext HTML
-copy so it can be re-encrypted into index_body.html.enc.
+patch_body.py — apply the map-body fixes / feature patches to a local
+plaintext HTML copy so it can be re-encrypted into index_body.html.enc.
 
 Why this script exists
   The plaintext map body (typically named index_body.html) is intentionally
@@ -33,6 +33,11 @@ What it fixes
      gi_outreach_need_YY / gi_pct_vf_denied_YY so the year selector can
      flip those layers too — but the HTML only honors the selector for
      the fields listed in propYrFields. Extend the map.
+
+  5. propYrFields also omits equity_index (new composite score written
+     by build_data.py alongside outreach_need). Adding it lets the year
+     selector drive the equity choropleth. Layered on top of patch 4 —
+     this patch anchors on the patch-4 output text.
 
 Usage
   python patch_body.py path/to/index_body.html
@@ -138,12 +143,57 @@ P4_NEW = (
 )
 
 
+# ── Patch 5: propYrFields picks up equity_index ───────────────────────────────
+# Anchors on the text P4 installed. Safe to run after P4 is already applied
+# (which is the common case, since P4 shipped in a prior release).
+P5_OLD = P4_NEW
+P5_NEW = (
+    "const propYrFields={avg_appraised:'avg_appraised',median_yrbuilt:'median_yrbuilt',"
+    "valfreeze:'pct_val_freeze',pct_vf_denied:'pct_vf_denied',pct_hoh:'pct_hoh',"
+    "pct_vet:'pct_vet',owner_turnover:'owner_turnover',hoh_gap:'hoh_gap',"
+    "vet_gap:'vet_gap',vf_gap:'vf_gap',hoh_churn:'hoh_churn',"
+    "outreach_need:'outreach_need',gi_outreach_need:'gi_outreach_need',"
+    "gi_pct_vf_denied:'gi_pct_vf_denied',equity_index:'equity_index'};"
+)
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
     ("Gi*: partial-neighbor scale", P3_OLD, P3_NEW),
     ("propYrFields: new per-year layers", P4_OLD, P4_NEW),
+    ("propYrFields: equity_index", P5_OLD, P5_NEW),
 ]
+
+
+# ── Follow-up work that requires the plaintext body ───────────────────────────
+# The feature layer in features.js + build_data.py covers the work that can be
+# done without touching the body. The items below are body-internal and need
+# patches against a local plaintext copy. Sketched here (not wired into
+# PATCHES) so whoever has the plaintext can lift the anchors from the real
+# file and add them.
+#
+#   A. Bivariate choropleth (e.g. pct_hoh × outreach_need): extend
+#      getNbhdColor with a 3x3 color matrix mode; add a layer key 'bivariate'.
+#   B. LISA (Local Moran's I): parallels the existing Gi* block. Reuse knn /
+#      vals / feats; write 'lisa_{field}' cluster categories (HH/LL/HL/LH).
+#   C. Year-animation: add a play button next to the year selector that
+#      advances curYr on a 1s interval; pause on hover.
+#   D. Info-panel sparklines: in info.update(), render a tiny SVG line
+#      chart of pct_hoh_YY / outreach_need_YY / equity_index_YY over time.
+#   E. Lasso select: L.Draw or a minimal polygon tool; intersect with nbhd
+#      polygons; expose selected nbhds to features.js via
+#      window.__se.onLassoSelect(nbhds).
+#   F. Address search: hit Nominatim / ArcGIS World Geocoder, locate the
+#      point, map to nbhd via point-in-polygon, auto-pin.
+#   G. Mobile bottom-sheet: media query swap of the info panel into a
+#      draggable sheet under 640px width.
+#   H. PDF one-pager: render a canvas + html2canvas or a print-specific
+#      single-page stylesheet per pinned nbhd.
+#   I. ECDF on the histogram: add a second path element alongside the bars.
+#
+# Each of these is a single self-contained patch once the anchor text is
+# known. features.js already exposes window.__se for cross-module glue.
 
 
 def main():
