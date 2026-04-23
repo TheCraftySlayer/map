@@ -1613,16 +1613,73 @@ def fetch_drive_times_osrm(centroid_lookup, cc_coords, outdir,
     return times
 
 
-def fetch_tract_acs(tract_geo):
+# ── ACS disk cache ──────────────────────────────────────────────────────
+# The Census API is slow (seconds per request), flaky, and its cost
+# shows up on every rebuild. Cache the two expensive endpoints under
+# data/acs_cache/ keyed by logical name. Cache is checked before every
+# network call and written after a successful fetch.
+ACS_CACHE_DIR = 'acs_cache'
+ACS_CACHE_TTL_DAYS = 30
+
+
+def _acs_cache_path(outdir, name):
+    return Path(outdir) / ACS_CACHE_DIR / f'{name}.json'
+
+
+def _acs_cache_read(outdir, name, ttl_days):
+    """Return cached payload if present and fresher than ttl_days, else None."""
+    path = _acs_cache_path(outdir, name)
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            blob = json.load(f)
+    except Exception as e:
+        print(f"  ACS cache read failed ({path.name}): {e}")
+        return None
+    fetched_at = blob.get('fetched_at', 0)
+    age_s = time.time() - fetched_at
+    if age_s > ttl_days * 86400:
+        return None
+    return blob
+
+
+def _acs_cache_write(outdir, name, payload):
+    path = _acs_cache_path(outdir, name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump({'fetched_at': time.time(), **payload}, f)
+    except Exception as e:
+        print(f"  ACS cache write failed ({path.name}): {e}")
+
+
+def fetch_tract_acs(tract_geo, outdir='data', use_cache=True, refresh=False,
+                    ttl_days=ACS_CACHE_TTL_DAYS):
     """Merge tract-level ACS 5-year variables into TRACT_GEO.features.
 
     Adds: poverty_rate, median_age, spanish_at_home, elderly_alone.
     Silently no-ops on network failure so the frontend degrades gracefully
     (tract layers other than addr_density will just render as missing).
+
+    Caches the per-geoid ACS dict in data/acs_cache/tracts.json so
+    subsequent runs skip the Census API entirely. Pass refresh=True to
+    force a refetch, or use_cache=False to skip cache reads/writes.
     """
     if not tract_geo or not tract_geo.get('features'):
         return
     feats = tract_geo['features']
+
+    # Try cache first — stores the {geoid: {...fields}} dict directly.
+    if use_cache and not refresh:
+        cached = _acs_cache_read(outdir, 'tracts', ttl_days)
+        if cached and cached.get('by_geoid'):
+            by_geoid = cached['by_geoid']
+            yr = cached.get('acs_year')
+            merged = _merge_tract_acs(feats, by_geoid)
+            print(f"  Tract ACS {yr} (cached): merged {merged}/{len(feats)} tracts")
+            return
+
     # Variables:
     #   B01003_001E total population
     #   B01002_001E median age
@@ -1686,24 +1743,46 @@ def fetch_tract_acs(tract_geo):
                 'acs_year': yr,
                 'tract_pop': pop,
             }
-        merged = 0
-        for feat in feats:
-            geoid = feat.get('properties', {}).get('GEOID', '')
-            if geoid in by_geoid:
-                for k, v in by_geoid[geoid].items():
-                    feat['properties'][k] = v
-                merged += 1
+        merged = _merge_tract_acs(feats, by_geoid)
         print(f"  Tract ACS {yr}: merged {merged}/{len(feats)} tracts")
+        if use_cache:
+            _acs_cache_write(outdir, 'tracts', {'acs_year': yr, 'by_geoid': by_geoid})
         return  # stop after first successful year
 
 
-def fetch_census_acs():
+def _merge_tract_acs(feats, by_geoid):
+    """Copy the per-geoid ACS dict onto each matching TRACT_GEO feature."""
+    merged = 0
+    for feat in feats:
+        geoid = feat.get('properties', {}).get('GEOID', '')
+        if geoid in by_geoid:
+            for k, v in by_geoid[geoid].items():
+                feat['properties'][k] = v
+            merged += 1
+    return merged
+
+
+def fetch_census_acs(outdir='data', use_cache=True, refresh=False,
+                     ttl_days=ACS_CACHE_TTL_DAYS):
     """Fetch ACS 5-year data for Bernalillo County from Census API.
 
     County and ZIP queries fall through independently: if the 2023 county
     query succeeds but the 2023 ZIP query fails, we still try 2022 / 2021
     ZIPs instead of shipping a ZIP-less build.
+
+    Caches the combined {county, zips} result under data/acs_cache/census.json.
     """
+    if use_cache and not refresh:
+        cached = _acs_cache_read(outdir, 'census', ttl_days)
+        if cached and (cached.get('county') or cached.get('zips')):
+            result = {k: v for k, v in cached.items() if k != 'fetched_at'}
+            parts = []
+            if result.get('county'):
+                parts.append(f"county {result['county'].get('year')}")
+            if result.get('zips'):
+                parts.append(f"{len(result['zips'])} ZCTAs")
+            print(f"  Census ACS (cached): {', '.join(parts) if parts else 'empty'}")
+            return result
     vars = 'NAME,B01001_001E,B19013_001E,B17001_002E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B03003_003E,B25001_001E,B25077_001E'
     result = {}
     for yr in [2023, 2022, 2021]:
@@ -1797,6 +1876,8 @@ def fetch_census_acs():
                     print(f"  ZIP ACS {yr}: {len(zips)} ZCTAs in Bernalillo area")
             except (URLError, Exception) as e:
                 print(f"  ZIP ACS {yr} failed: {e}")
+    if result and use_cache:
+        _acs_cache_write(outdir, 'census', result)
     return result if result else None
 
 
@@ -1970,6 +2051,12 @@ def main():
     parser.add_argument('--coords', help='Path to geocoding .dbf (PARID, XCOORD, YCOORD)')
     parser.add_argument('--outdir', default='data', help='Output directory (default: data)')
     parser.add_argument('--no-census', action='store_true', help='Skip Census ACS API fetch')
+    parser.add_argument('--refresh-acs', action='store_true',
+                        help='Force a live ACS fetch even if the disk cache is fresh.')
+    parser.add_argument('--no-acs-cache', action='store_true',
+                        help='Skip reading/writing the ACS disk cache (always live).')
+    parser.add_argument('--acs-cache-ttl', type=int, default=ACS_CACHE_TTL_DAYS,
+                        help=f'ACS cache TTL in days (default: {ACS_CACHE_TTL_DAYS}).')
     parser.add_argument('--osrm-url', default='https://router.project-osrm.org',
                         help='OSRM Table-service endpoint for drive-time catchments '
                              '(default: public demo; rate-limited). Set to your own instance '
@@ -2028,10 +2115,16 @@ def main():
     census = None
     if not args.no_census:
         print("\nFetching Census ACS data...")
-        census = fetch_census_acs()
+        acs_kwargs = dict(
+            outdir=outdir,
+            use_cache=not args.no_acs_cache,
+            refresh=args.refresh_acs,
+            ttl_days=args.acs_cache_ttl,
+        )
+        census = fetch_census_acs(**acs_kwargs)
         # Enrich TRACT_GEO with tract-level ACS so the tract choropleth can
         # color poverty/median-age/language/elderly-alone signals.
-        fetch_tract_acs(existing_core.get('TRACT_GEO'))
+        fetch_tract_acs(existing_core.get('TRACT_GEO'), **acs_kwargs)
     else:
         print("\nSkipping Census ACS fetch (--no-census)")
 

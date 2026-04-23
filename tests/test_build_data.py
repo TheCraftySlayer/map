@@ -306,5 +306,76 @@ class TestNoisyOrSemantics(unittest.TestCase):
             self.assertLessEqual(r, 1.0)
 
 
+class TestAcsCache(unittest.TestCase):
+    """Phase 2: disk-cache wrappers around the Census API."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.outdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_read_miss_returns_none(self):
+        self.assertIsNone(build_data._acs_cache_read(self.outdir, "census", 30))
+
+    def test_read_write_roundtrip(self):
+        payload = {"county": {"year": 2023, "pop": 100}, "zips": {"87102": {"pop": 50}}}
+        build_data._acs_cache_write(self.outdir, "census", payload)
+        got = build_data._acs_cache_read(self.outdir, "census", 30)
+        self.assertIsNotNone(got)
+        self.assertEqual(got["county"]["year"], 2023)
+        self.assertIn("fetched_at", got)
+
+    def test_stale_cache_returns_none(self):
+        import time as _t
+        path = build_data._acs_cache_path(self.outdir, "census")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write a payload with a stale timestamp (40 days old).
+        old_ts = _t.time() - 40 * 86400
+        with open(path, "w") as f:
+            import json as _j
+            _j.dump({"fetched_at": old_ts, "county": {}}, f)
+        self.assertIsNone(build_data._acs_cache_read(self.outdir, "census", 30))
+
+    def test_merge_tract_acs_populates_properties(self):
+        feats = [
+            {"properties": {"GEOID": "35001000100"}},
+            {"properties": {"GEOID": "35001000200"}},
+            {"properties": {"GEOID": "99999"}},  # won't match
+        ]
+        by_geoid = {
+            "35001000100": {"poverty_rate": 0.25, "median_age": 35.0},
+            "35001000200": {"poverty_rate": 0.10, "median_age": 50.0},
+        }
+        merged = build_data._merge_tract_acs(feats, by_geoid)
+        self.assertEqual(merged, 2)
+        self.assertEqual(feats[0]["properties"]["poverty_rate"], 0.25)
+        self.assertEqual(feats[1]["properties"]["median_age"], 50.0)
+        self.assertNotIn("poverty_rate", feats[2]["properties"])
+
+    def test_fetch_tract_acs_uses_cache_without_network(self):
+        """When a fresh cache exists, fetch_tract_acs must not touch the network."""
+        payload = {
+            "acs_year": 2023,
+            "by_geoid": {"35001000100": {"poverty_rate": 0.3, "acs_year": 2023}},
+        }
+        build_data._acs_cache_write(self.outdir, "tracts", payload)
+        feats = [{"properties": {"GEOID": "35001000100"}}]
+        tract_geo = {"features": feats}
+
+        # Sabotage urlopen so an accidental fetch would raise loudly.
+        orig = build_data.urlopen
+        build_data.urlopen = lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("network was called despite fresh cache")
+        )
+        try:
+            build_data.fetch_tract_acs(tract_geo, outdir=self.outdir, use_cache=True)
+        finally:
+            build_data.urlopen = orig
+        self.assertEqual(feats[0]["properties"]["poverty_rate"], 0.3)
+
+
 if __name__ == "__main__":
     unittest.main()
