@@ -2156,6 +2156,156 @@ try{
 })();"""
 
 
+#  Patch 16: CHORO_CSV_V1 — robust choropleth CSV export.
+#
+#  The MAP_EXT_V1 worklist button (P5) assumes `nbhdLayer` is a top-level
+#  global. In practice the body declares it inside an IIFE/module, so
+#  `typeof nbhdLayer` resolves to 'undefined' from the patch's outer
+#  scope and the export silently emits 0 rows. P5 also hardcodes a fixed
+#  column list, which never includes whichever layer the user is
+#  currently looking at.
+#
+#  This patch fixes both. It:
+#   - Finds the polygon GeoJSON layer by walking the Leaflet map's
+#     internal `_layers` and picking the one whose features carry an
+#     `nbhd` property — no global lookup, no naming dependency.
+#   - Reads the selected radio + year scrubber to figure out the
+#     currently-displayed layer, then resolves it through the
+#     `propYrFields` map (window-attached by P4) plus the year suffix.
+#   - Emits one row per feature with: nbhd, the active layer name, the
+#     resolved field value, plus a small stable context block. No
+#     `featureHidden` filtering — threshold filters are a viewer
+#     control, not an export filter.
+#   - Logs what it found to the console so a "still nothing" report has
+#     diagnostic info attached.
+P16_OLD = "/*PASTEVENTS_V1*/"
+P16_NEW = """/*PASTEVENTS_V1*//*CHORO_CSV_V1*/
+;(function(){
+try{
+  function findMap(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+    }catch(_){}} return null;
+  }
+  // Walk every layer the map knows about; return the one whose features
+  // carry an `nbhd` property (i.e. the Bernalillo polygon set).
+  function findPolygonLayer(m){
+    if(!m||!m._layers)return null;
+    var hit=null;
+    for(var k in m._layers){
+      var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+      try{
+        lyr.eachLayer(function(sub){
+          if(hit)return;
+          if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null){
+            hit=lyr;
+          }
+        });
+      }catch(_){}
+      if(hit)return hit;
+    }
+    return null;
+  }
+
+  function currentLayerKey(){
+    var r=document.querySelector('input[type=radio]:checked');
+    return r?r.value:null;
+  }
+  function currentYearSuffix(){
+    var sel=document.querySelector('select[name="year"], select#year, select.year-select');
+    if(!sel||!sel.value)return '';
+    var v=String(sel.value);
+    var m=v.match(/(\\d{2})$/);
+    return m?m[1]:'';
+  }
+  function resolveField(layerKey){
+    if(!layerKey)return null;
+    var pyf=(typeof propYrFields!=='undefined'&&propYrFields)||window.propYrFields||{};
+    var base=pyf[layerKey]||layerKey;
+    var yy=currentYearSuffix();
+    return yy?(base+'_'+yy):base;
+  }
+
+  function csvEscape(v){
+    if(v==null)return '';
+    v=String(v);
+    return /[",\\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+  }
+
+  function exportChoroplethCSV(){
+    var m=findMap();
+    if(!m){alert('No Leaflet map found.');return;}
+    var poly=findPolygonLayer(m);
+    if(!poly){alert('No polygon layer found on the map.');return;}
+    var layerKey=currentLayerKey();
+    var field=resolveField(layerKey);
+    var yy=currentYearSuffix();
+
+    // Stable context columns. We look up these names regardless of the
+    // year — they're already per-year-stamped in core.json.
+    var context=['parcels','low_confidence','low_confidence_reason'];
+    var headers=['nbhd','layer','field','value'].concat(context);
+    var rows=[]; var seen=0;
+    poly.eachLayer(function(sub){
+      var p=sub&&sub.feature&&sub.feature.properties; if(!p)return; seen++;
+      var v=field?p[field]:null;
+      // If the year-suffixed field is missing but the bare field exists,
+      // fall back. propYrFields is incomplete for some legacy layers.
+      if(v==null&&yy&&field&&field.endsWith('_'+yy)){
+        var bare=field.slice(0,-3);
+        if(p[bare]!=null)v=p[bare];
+      }
+      var row=[p.nbhd, layerKey||'', field||'', v==null?'':v];
+      context.forEach(function(c){row.push(p[c]==null?'':p[c]);});
+      rows.push(row.map(csvEscape).join(','));
+    });
+    console.log('CHORO_CSV: map=',m,' polygonLayer=',poly,
+                ' layerKey=',layerKey,' resolvedField=',field,
+                ' year=',yy,' features=',seen,' emitted=',rows.length);
+    if(!rows.length){
+      alert('No features in the polygon layer (saw '+seen+'). '+
+            'Check the console for diagnostics.');
+      return;
+    }
+    var csv=headers.join(',')+'\\n'+rows.join('\\n')+'\\n';
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    var ts=new Date().toISOString().slice(0,10);
+    a.download='choropleth-'+(layerKey||'layer')+(yy?'-'+yy:'')+'-'+ts+'.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},0);
+
+    var t=document.querySelector('div[data-choro-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-choro-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:280px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent='Exported '+rows.length+' rows ('+(field||'no field')+')';
+    t.style.display='block';
+    setTimeout(function(){t.style.display='none';},2200);
+  }
+
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    var b=document.createElement('button'); b.type='button'; b.textContent='Map CSV ⬇';
+    b.title='Export the currently-displayed choropleth layer as CSV';
+    b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+      'font:12px system-ui,-apple-system,sans-serif;';
+    b.addEventListener('click',exportChoroplethCSV);
+    panel.appendChild(b);
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('CHORO_CSV_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -2190,6 +2340,9 @@ PATCHES = [
     ("FIELD_V1: GPS + quick-log + online-state pip", P14_OLD, P14_NEW, "/*FIELD_V1*/"),
     # P15: render an outreach-events CSV as a colored point layer.
     ("PASTEVENTS_V1: load past-events CSV as point layer", P15_OLD, P15_NEW, "/*PASTEVENTS_V1*/"),
+    # P16: choropleth-CSV fix — robust map-layer scan, exports the
+    # currently-selected layer's resolved field per tract.
+    ("CHORO_CSV_V1: choropleth CSV export (fixes broken P5 worklist)", P16_OLD, P16_NEW, "/*CHORO_CSV_V1*/"),
 ]
 
 
