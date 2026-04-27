@@ -295,17 +295,14 @@ $('gateForm').addEventListener('submit',async e=>{
       return origFetch(url,init);
     };
 
-    // Pre-write rewrite — see comments in index.html for rationale.
+    // Pre-write rewrite — strip data/*.json preload tags only. Do NOT
+    // touch the cdnjs Leaflet <script> tags; defer/async would reorder
+    // them past inline <script> blocks in the body that use `L`
+    // synchronously, breaking the page with "L is not defined".
     let body=htmlText;
     body=body.replace(
       /<link[^>]*rel=["']preload["'][^>]*href=["'][^"']*data\\/(?:core|layers)\\.json["'][^>]*>/gi,
       '');
-    body=body.replace(
-      /<script(\\s+[^>]*?src=["']https:\\/\\/cdnjs\\.cloudflare\\.com\\/[^"']+["'])([^>]*)>/gi,
-      function(_, srcAttr, rest){
-        if(/\\bdefer\\b/.test(rest))return '<script'+srcAttr+rest+'>';
-        return '<script'+srcAttr+' defer crossorigin="anonymous"'+rest+'>';
-      });
 
     document.open();
     document.write(body);
