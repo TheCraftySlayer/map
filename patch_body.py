@@ -209,16 +209,39 @@ try{
   }
 
   // ── Worklist CSV ──────────────────────────────────────────────────────────
-  // Iterates nbhdLayer (Leaflet) and exports a CSV of every visible feature.
-  // Falls back to all features if featureHidden() isn't defined yet.
+  // Walks the Leaflet map's `_layers` to find the polygon layer (sub-layers
+  // carry an `nbhd` property). The body declares its own `nbhdLayer` inside
+  // an IIFE, so the bare reference resolves to undefined from out here and
+  // the export silently emitted 0 rows — matches the fix CHORO_CSV_V1 made
+  // for the Map CSV button.
+  function findMapL(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+    }catch(_){}} return null;
+  }
+  function findNbhdLayer(){
+    var m=findMapL(); if(!m||!m._layers)return null;
+    var hit=null;
+    for(var k in m._layers){
+      var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+      try{lyr.eachLayer(function(sub){
+        if(hit)return;
+        if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null)hit=lyr;
+      });}catch(_){}
+      if(hit)return hit;
+    }
+    return null;
+  }
   function downloadWorklist(){
     var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
         'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
     var hidden=window.featureHidden||function(){return false;};
     var seen=0; var emitted=0;
+    var poly=findNbhdLayer();
     try{
-      if(typeof nbhdLayer!=='undefined'&&nbhdLayer&&nbhdLayer.eachLayer){
-        nbhdLayer.eachLayer(function(lyr){
+      if(poly&&poly.eachLayer){
+        poly.eachLayer(function(lyr){
           var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
           if(hidden(p))return;
           var r=headers.map(function(h){var v=p[h];
@@ -229,6 +252,7 @@ try{
         });
       }
     }catch(e){console.warn('worklist export:',e);}
+    if(!poly){flash('No polygon layer found on the map.');return;}
     if(!rows.length){flash('No visible nbhds (seen '+seen+'). Check filters.');return;}
     var csv=headers.join(',')+'\\n'+rows.join('\\n')+'\\n';
     var blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
