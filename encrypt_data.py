@@ -295,8 +295,20 @@ $('gateForm').addEventListener('submit',async e=>{
       return origFetch(url,init);
     };
 
+    // Pre-write rewrite — see comments in index.html for rationale.
+    let body=htmlText;
+    body=body.replace(
+      /<link[^>]*rel=["']preload["'][^>]*href=["'][^"']*data\\/(?:core|layers)\\.json["'][^>]*>/gi,
+      '');
+    body=body.replace(
+      /<script(\\s+[^>]*?src=["']https:\\/\\/cdnjs\\.cloudflare\\.com\\/[^"']+["'])([^>]*)>/gi,
+      function(_, srcAttr, rest){
+        if(/\\bdefer\\b/.test(rest))return '<script'+srcAttr+rest+'>';
+        return '<script'+srcAttr+' defer crossorigin="anonymous"'+rest+'>';
+      });
+
     document.open();
-    document.write(htmlText);
+    document.write(body);
     document.close();
   }catch(err){
     const msg=String(err&&err.message||err);

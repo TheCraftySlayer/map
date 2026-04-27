@@ -191,8 +191,31 @@ $('gateForm').addEventListener('submit',async e=>{
       return origFetch(url,init);
     };
 
+    // Pre-write rewrite of the body HTML to silence two Chrome warnings
+    // that fire because document.write injects parser-blocking and
+    // cross-site script tags. Doing this BEFORE document.write means the
+    // parser never sees the offending tags; doing it after (e.g. via a
+    // body-side patch) is too late — the parse has already happened.
+    let body=htmlText;
+    // 1. Strip <link rel="preload"> for the JSON files. The fetch shim
+    //    above already serves them from in-memory plaintext; the preload
+    //    tags only hit the network and 404 (the real files are .enc).
+    body=body.replace(
+      /<link[^>]*rel=["']preload["'][^>]*href=["'][^"']*data\/(?:core|layers)\.json["'][^>]*>/gi,
+      '');
+    // 2. Tame the document.write parser-blocking-cross-site warning by
+    //    upgrading the Leaflet/markercluster <script> tags to defer +
+    //    crossorigin. Chrome stops warning once it can see the script
+    //    will run async after parse, not block it.
+    body=body.replace(
+      /<script(\s+[^>]*?src=["']https:\/\/cdnjs\.cloudflare\.com\/[^"']+["'])([^>]*)>/gi,
+      function(_, srcAttr, rest){
+        if(/\bdefer\b/.test(rest))return '<script'+srcAttr+rest+'>';
+        return '<script'+srcAttr+' defer crossorigin="anonymous"'+rest+'>';
+      });
+
     document.open();
-    document.write(htmlText);
+    document.write(body);
     document.close();
   }catch(err){
     const msg=String(err&&err.message||err);
