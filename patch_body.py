@@ -2260,9 +2260,20 @@ try{
       context.forEach(function(c){row.push(p[c]==null?'':p[c]);});
       rows.push(row.map(csvEscape).join(','));
     });
-    console.log('CHORO_CSV: map=',m,' polygonLayer=',poly,
-                ' layerKey=',layerKey,' resolvedField=',field,
-                ' year=',yy,' features=',seen,' emitted=',rows.length);
+    // Multi-line diagnostics so the console doesn't truncate to "CHORO_CSV:".
+    console.group('CHORO_CSV diagnostic');
+    console.log('map:', !!m);
+    console.log('polygonLayer:', !!poly);
+    console.log('layerKey:', layerKey);
+    console.log('resolvedField:', field);
+    console.log('year suffix:', yy);
+    console.log('features seen:', seen);
+    console.log('rows emitted:', rows.length);
+    if(rows.length === 0 && seen > 0){
+      console.warn('Polygon layer has features but the resolved field is missing on all of them. '+
+                   'Check propYrFields and the year selector.');
+    }
+    console.groupEnd();
     if(!rows.length){
       alert('No features in the polygon layer (saw '+seen+'). '+
             'Check the console for diagnostics.');
@@ -2306,6 +2317,61 @@ try{
 })();"""
 
 
+#  Patch 17: BODY_CLEAN_V1 — kill noise in the deployed console.
+#
+#  Three fixes targeted at the gh-pages console output:
+#
+#   1. `<link rel="preload" href="data/core.json">` (and layers.json):
+#      these were added to speed up first paint but they 404 because
+#      only the .enc files exist on the server. The loader's fetch
+#      shim serves those URLs from in-memory plaintext — preload uses
+#      the network directly, bypasses the shim, and 404s. Strip them.
+#
+#   2. Cross-site Leaflet / markercluster <script> tags trigger a
+#      "parser-blocking script invoked via document.write" warning
+#      because the loader injects the body via document.open/write.
+#      We add `defer` + `crossorigin="anonymous"` attributes — Chrome
+#      stops warning once it can see the script will run async.
+#
+#  Anchored on the standalone `<head>` opening tag, which appears
+#  exactly once and never gets edited by the patch chain.
+P17_OLD = "<head>"
+P17_NEW = """<head>
+<!-- BODY_CLEAN_V1: strip stale preloads + tame document.write warnings -->
+<script>/*BODY_CLEAN_V1*/(function(){
+  try{
+    // Run as soon as parsing starts to catch the head before browser preload.
+    var killHrefs = ['data/core.json','data/layers.json'];
+    function strip(){
+      var links = document.querySelectorAll('link[rel="preload"]');
+      for(var i=0;i<links.length;i++){
+        var href = links[i].getAttribute('href') || '';
+        for(var j=0;j<killHrefs.length;j++){
+          if(href.indexOf(killHrefs[j]) >= 0){links[i].remove(); break;}
+        }
+      }
+    }
+    strip();
+    // Re-run after DOM ready in case more preloads land via the body parse.
+    if(document.readyState !== 'complete'){
+      document.addEventListener('DOMContentLoaded', strip);
+    }
+    // Tame document.write warnings on the cross-site Leaflet scripts:
+    // upgrade them in-flight before the parser commits them.
+    var origWrite = document.write;
+    document.write = function(html){
+      try{
+        if(typeof html === 'string' && html.indexOf('cdnjs.cloudflare.com') >= 0){
+          html = html.replace(/<script(\\s+src="https:\\/\\/cdnjs[^"]+")(\\s*)/g,
+                              '<script$1 defer crossorigin="anonymous"$2');
+        }
+      }catch(_){}
+      return origWrite.call(document, html);
+    };
+  }catch(e){console.warn('BODY_CLEAN_V1:', e);}
+})();</script>"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -2343,6 +2409,10 @@ PATCHES = [
     # P16: choropleth-CSV fix — robust map-layer scan, exports the
     # currently-selected layer's resolved field per tract.
     ("CHORO_CSV_V1: choropleth CSV export (fixes broken P5 worklist)", P16_OLD, P16_NEW, "/*CHORO_CSV_V1*/"),
+    # P17: console hygiene — strip stale data/*.json preloads (they 404
+    # because only .enc files exist on the server) and tame the
+    # document.write parser-blocking warnings on cross-site Leaflet.
+    ("BODY_CLEAN_V1: strip stale preloads + tame document.write warnings", P17_OLD, P17_NEW, "/*BODY_CLEAN_V1*/"),
 ]
 
 
