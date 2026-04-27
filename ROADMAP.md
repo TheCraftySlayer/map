@@ -23,6 +23,27 @@ multi-day project that doesn't fit a single review cycle.
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
 
+### Batch 3 (insights, spatial tools, reports)
+- `patch_body.py` engine now supports an optional 4th-tuple **marker**
+  for idempotency — fixes the latent double-injection bug in PDF_EXPORT_V1
+  and unblocks chained patches that embed prior anchors. Six unit tests
+  in `tests/test_patch_body.py` lock it down.
+- `INSIGHTS_V1` patch: tooltip auto-narration with percentile rank,
+  expandable "Why this color?" breakdown of composite scores, "Movers"
+  side panel listing the 10 nbhds with the largest YoY outreach_need
+  shift, and peer-tract similarity (z-scored Euclidean over the
+  demographic vector).
+- `TOOLS_V1` patch: address-to-tract search via Nominatim (1 req/sec
+  throttled, county-constrained), free-draw polygon → in-polygon
+  aggregator (count/mean/median/sum of the active layer), buffer rings
+  (1 / 2 / 5 mi Euclidean) around the four community centers, and a
+  click-to-measure polyline with distance + closed-polygon area.
+- `REPORTS_V1` patch: multi-page county PDF (cover, methodology,
+  outreach_need quartile pages, low-confidence appendix) and a
+  quarterly Commission packet template (county totals, top-10
+  outreach_need, top-10 dpi, optional outreach-dose-vs-need section).
+  Reuses jsPDF loaded by `PDF_EXPORT_V1`.
+
 ### Batch 2
 - `patch_body.py::PDF_EXPORT_V1` adds an html2canvas + jsPDF PDF
   download button to the extension panel. Both libraries are pinned
