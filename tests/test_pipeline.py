@@ -13,6 +13,7 @@ from pathlib import Path
 from buildlib.pipeline import (
     assemble_layers,
     merge_nbhd_stats_into_core,
+    write_build_info,
     write_core_and_layers,
     write_json_compact,
 )
@@ -112,6 +113,36 @@ class TestWriteCoreAndLayersEndToEnd(unittest.TestCase):
             self.assertEqual(core_back['DATA']['features'][0]['properties'], stats[1])
             self.assertEqual(layers_back, {'TRACT_GEO': 'kept', 'HOH_V': [1, 2, 3]})
             self.assertIs(captured['called_with'], existing_core['DATA'])
+
+
+class TestBuildInfo(unittest.TestCase):
+    def test_writes_required_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'data' / 'build_info.json'
+            write_build_info(
+                out_path=p, core_size=100, layers_size=200,
+                nbhd_count=42, parcel_total=12345, acs_year=2023,
+            )
+            data = json.loads(p.read_text())
+            self.assertEqual(data['nbhd_count'], 42)
+            self.assertEqual(data['parcel_total'], 12345)
+            self.assertEqual(data['acs_year'], 2023)
+            self.assertEqual(data['core_bytes'], 100)
+            self.assertEqual(data['layers_bytes'], 200)
+            self.assertIn('built_at', data)
+            self.assertIn('built_iso', data)
+
+    def test_extra_fields_merged_without_clobbering(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'data' / 'build_info.json'
+            write_build_info(
+                out_path=p, core_size=1, layers_size=1, nbhd_count=1,
+                extra={'note': 'hello', 'core_bytes': 999},
+            )
+            data = json.loads(p.read_text())
+            self.assertEqual(data['note'], 'hello')
+            # core_bytes from the explicit arg must win over the extra dict.
+            self.assertEqual(data['core_bytes'], 1)
 
 
 if __name__ == '__main__':

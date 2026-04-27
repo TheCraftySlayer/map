@@ -111,6 +111,8 @@ LOADER = '''<!DOCTYPE html>
 <title>Bernalillo County Assessor – Spatial Equity</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#185FA5">
 <style>
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f3f4f6;color:#222}
 .gate{background:#fff;padding:28px 32px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.08);max-width:380px;width:92%}
@@ -140,6 +142,14 @@ const $=id=>document.getElementById(id);
 const setErr=s=>$('err').textContent=s||'';
 const setPg=s=>$('pg').textContent=s||'';
 const setTier=s=>$('tier').textContent=s||'';
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('service-worker.js').catch(function(e){
+      console.warn('SW register failed:',e);
+    });
+  });
+}
 
 function b64ToBytes(b64){const s=atob(b64);const b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}
 
@@ -525,6 +535,14 @@ def main():
         print(f"  {name:<26} {enc:>10,} bytes  (plaintext {plain:,})")
     print(f"  data/enc_manifest.json     {(out / 'data' / 'enc_manifest.json').stat().st_size:>10,} bytes")
     print()
+    # Copy PWA assets (manifest + service worker) alongside the loader
+    # so the deployed branch is a self-contained app shell.
+    for asset in ("manifest.webmanifest", "service-worker.js"):
+        a = src / asset
+        if a.exists():
+            (out / asset).write_bytes(a.read_bytes())
+            print(f"  {asset:<26} {(out / asset).stat().st_size:>10,} bytes  (copied)")
+
     print("Upload ALL files under public/ to the deployed branch, overwriting")
     print("the existing index.html and data/ contents. Delete the plaintext")
     print("data/core.json and data/layers.json from the branch — they aren't")

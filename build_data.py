@@ -69,6 +69,7 @@ from buildlib.census import (
 from buildlib.pipeline import (
     merge_nbhd_stats_into_core, assemble_layers,
     write_json_compact, write_core_and_layers,
+    write_build_info,
 )
 
 
@@ -1720,6 +1721,25 @@ def main():
     final_layers = assemble_layers(existing_layers, new_layers, preserved_keys, rebuilt_keys)
     print(f"  {core_path}: {core_size:,} bytes")
     print(f"  {layers_path}: {layers_size:,} bytes")
+
+    # Public-tier provenance: small JSON the loader can fetch without a
+    # password to surface "data current as of …" + the build SHA.
+    parcel_total = sum(int(p.get('parcels', 0)) for p in nbhd_stats.values())
+    acs_yr = None
+    for feat in (existing_core.get('TRACT_GEO') or {}).get('features', []) or []:
+        ay = (feat.get('properties') or {}).get('acs_year')
+        if isinstance(ay, int):
+            acs_yr = ay
+            break
+    write_build_info(
+        out_path=core_path.parent / 'build_info.json',
+        core_size=core_size,
+        layers_size=layers_size,
+        nbhd_count=len(nbhd_stats),
+        parcel_total=parcel_total,
+        acs_year=acs_yr,
+    )
+    print(f"  data/build_info.json: provenance written")
 
     # ── Compute sidebar stats from data ──
     all_roll_years = set()

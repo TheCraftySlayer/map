@@ -1876,6 +1876,286 @@ try{
 })();"""
 
 
+#  Patch 14: FIELD_V1 — field-tools mode for staff in the field.
+#
+#  Three pieces, all client-only (no backend):
+#
+#   - GPS "you are here" pin: Geolocation API, with permission prompt.
+#     A blue dot is added to the map, recentered when the device moves.
+#   - Quick-log buttons: knocked / no-answer / spoke / left-material.
+#     Each click pushes a row into a localStorage queue with timestamp,
+#     coords, and the tract under the cursor at click-time. CSV export.
+#   - Online-state awareness: the panel's status dot turns red when
+#     `navigator.onLine` flips false, and quick-logs are queued for
+#     later replay rather than lost.
+P14_OLD = "/*VIZ_V1*/"
+P14_NEW = """/*VIZ_V1*//*FIELD_V1*/
+;(function(){
+try{
+  var QUEUE_KEY='bernco-field-log-v1';
+
+  function queueLoad(){
+    try{return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]');}
+    catch(e){return [];}
+  }
+  function queueSave(rows){
+    try{localStorage.setItem(QUEUE_KEY,JSON.stringify(rows));}
+    catch(e){console.warn('field log save failed:',e);}
+  }
+  var Q=queueLoad();
+
+  // ── GPS marker ─────────────────────────────────────────────────────────
+  var meMarker=null; var lastFix=null; var watchId=null;
+  function findMap(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function'){return v;}
+    }catch(_){}} return null;
+  }
+  function placeMe(lat,lng){
+    var m=findMap(); if(!m)return;
+    if(!meMarker){
+      meMarker=L.circleMarker([lat,lng],{radius:8,color:'#fff',weight:3,
+        fillColor:'#0a6cff',fillOpacity:0.95}).addTo(m);
+      meMarker.bindTooltip('You are here');
+    }else{meMarker.setLatLng([lat,lng]);}
+    if(!lastFix){m.setView([lat,lng],14);}
+    lastFix={lat:lat,lng:lng,ts:Date.now()};
+  }
+  function startGPS(){
+    if(!navigator.geolocation){alert('Geolocation not available.');return;}
+    if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;flashF('GPS off');return;}
+    watchId=navigator.geolocation.watchPosition(function(pos){
+      placeMe(pos.coords.latitude,pos.coords.longitude);
+    },function(err){alert('GPS error: '+err.message);},
+    {enableHighAccuracy:true,maximumAge:5000,timeout:15000});
+    flashF('GPS on');
+  }
+
+  // ── Quick log ──────────────────────────────────────────────────────────
+  function nbhdAt(lat,lng){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return null;
+    var hit=null;
+    nbhdLayer.eachLayer(function(lyr){
+      if(hit)return;
+      try{
+        if(lyr.getBounds&&lyr.getBounds().contains([lat,lng])){
+          // Bounds is approximate; let Leaflet's contains check the polygon.
+          if(lyr.feature&&lyr.feature.properties)hit=lyr.feature.properties.nbhd;
+        }
+      }catch(_){}
+    });
+    return hit;
+  }
+  function logEvent(kind){
+    var fix=lastFix||{lat:null,lng:null};
+    var nbhd=(fix.lat&&fix.lng)?nbhdAt(fix.lat,fix.lng):null;
+    var row={ts:Date.now(),kind:kind,lat:fix.lat,lng:fix.lng,nbhd:nbhd,
+             online:navigator.onLine};
+    Q.push(row); queueSave(Q);
+    flashF(kind+' logged ('+Q.length+' queued)');
+  }
+  function exportLog(){
+    if(!Q.length){alert('Nothing logged yet.');return;}
+    var headers=['ts','iso','kind','nbhd','lat','lng','online'];
+    var lines=[headers.join(',')];
+    Q.forEach(function(r){
+      lines.push([r.ts,new Date(r.ts).toISOString(),r.kind,r.nbhd||'',
+                  r.lat||'',r.lng||'',r.online?1:0].join(','));
+    });
+    var blob=new Blob([lines.join('\\n')+'\\n'],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    var ts=new Date().toISOString().slice(0,10);
+    a.download='field-log-'+ts+'.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},0);
+  }
+  function clearLog(){
+    if(!confirm('Clear '+Q.length+' queued field-log rows?'))return;
+    Q=[]; queueSave(Q); flashF('Field log cleared');
+  }
+
+  // ── Online status pip ──────────────────────────────────────────────────
+  var pip=null;
+  function repaintPip(){
+    if(!pip)return;
+    pip.style.background=navigator.onLine?'#0a6':'#a30';
+    pip.title=navigator.onLine?'online':'offline (events still queued)';
+  }
+  window.addEventListener('online',repaintPip);
+  window.addEventListener('offline',repaintPip);
+
+  function flashF(msg){
+    var t=document.querySelector('div[data-field-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-field-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:200px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent=msg; t.style.display='block';
+    setTimeout(function(){t.style.display='none';},1800);
+  }
+
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    function fb(label,fn,title){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      if(title)b.title=title;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(fb('GPS ⊕',startGPS,'Start/stop "you are here" pin'));
+    panel.appendChild(fb('Knock',function(){logEvent('knocked');}));
+    panel.appendChild(fb('No-ans',function(){logEvent('no_answer');}));
+    panel.appendChild(fb('Spoke',function(){logEvent('spoke');}));
+    panel.appendChild(fb('Field ⇣',exportLog,'Export field-log CSV'));
+    panel.appendChild(fb('Field ✗',clearLog,'Clear queued field-log rows'));
+    pip=document.createElement('span');
+    pip.style.cssText='display:inline-block;width:8px;height:8px;border-radius:50%;'+
+      'margin:0 4px;align-self:center';
+    panel.appendChild(pip); repaintPip();
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('FIELD_V1 init failed:',err);}
+})();"""
+
+
+#  Patch 15: PASTEVENTS_V1 — render an outreach-events CSV as a point layer.
+#
+#  Drag-and-drop a CSV onto the "Past events" button (or click to file-pick)
+#  and rows render as colored markers. The CSV format mirrors the field-log
+#  export, plus optional `category` for color coding.
+#
+#  Headers (case-insensitive; subset works):
+#    nbhd, lat, lng, ts (or iso), kind, category, note
+P15_OLD = "/*FIELD_V1*/"
+P15_NEW = """/*FIELD_V1*//*PASTEVENTS_V1*/
+;(function(){
+try{
+  var EVENT_KEY='bernco-past-events-v1';
+  var COLORS={knocked:'#08306b',spoke:'#0a6',no_answer:'#a30',
+              left_material:'#f80',event:'#82f',default:'#666'};
+
+  function load(){try{return JSON.parse(localStorage.getItem(EVENT_KEY)||'[]');}catch(e){return [];}}
+  function save(rows){try{localStorage.setItem(EVENT_KEY,JSON.stringify(rows));}catch(e){}}
+  var ROWS=load();
+
+  function findMap(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+    }catch(_){}} return null;
+  }
+  var layer=null;
+  function repaint(){
+    var m=findMap(); if(!m||!L)return;
+    if(layer){m.removeLayer(layer);layer=null;}
+    if(!ROWS.length)return;
+    layer=L.layerGroup();
+    ROWS.forEach(function(r){
+      if(typeof r.lat!=='number'||typeof r.lng!=='number')return;
+      var color=COLORS[r.kind]||COLORS[r.category]||COLORS.default;
+      var marker=L.circleMarker([r.lat,r.lng],{radius:5,color:'#fff',weight:1.5,
+        fillColor:color,fillOpacity:0.85});
+      var iso=r.iso||(r.ts?new Date(r.ts).toISOString().slice(0,16).replace('T',' '):'');
+      var label=(iso?'['+iso+'] ':'')+(r.kind||r.category||'event')+
+                (r.nbhd?' · nbhd '+r.nbhd:'')+(r.note?' — '+r.note:'');
+      marker.bindTooltip(label);
+      layer.addLayer(marker);
+    });
+    layer.addTo(m);
+  }
+  repaint();
+
+  function parseCSV(text){
+    var lines=text.replace(/\\r/g,'').split('\\n').filter(function(l){return l.trim().length;});
+    if(!lines.length)return [];
+    function split(line){
+      // Minimal CSV split: respects double-quoted fields with commas.
+      var out=[],cur='',inQ=false;
+      for(var i=0;i<line.length;i++){
+        var ch=line[i];
+        if(ch==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else{inQ=!inQ;}}
+        else if(ch===','&&!inQ){out.push(cur);cur='';}
+        else cur+=ch;
+      }
+      out.push(cur); return out;
+    }
+    var headers=split(lines[0]).map(function(h){return h.trim().toLowerCase();});
+    var rows=[];
+    for(var i=1;i<lines.length;i++){
+      var fs=split(lines[i]); if(fs.length<2)continue;
+      var r={};
+      headers.forEach(function(h,j){r[h]=fs[j]!==undefined?fs[j].trim():'';});
+      rows.push(r);
+    }
+    return rows;
+  }
+  function ingest(text){
+    var rows=parseCSV(text);
+    var added=0;
+    rows.forEach(function(r){
+      var lat=parseFloat(r.lat||r.latitude); var lng=parseFloat(r.lng||r.lon||r.longitude);
+      if(!isFinite(lat)||!isFinite(lng))return;
+      ROWS.push({ts:r.ts?+r.ts:undefined,iso:r.iso||r.timestamp||r.date||'',
+                 kind:r.kind||r.category||'event',category:r.category||'',
+                 nbhd:r.nbhd||'',lat:lat,lng:lng,note:r.note||r.notes||''});
+      added++;
+    });
+    save(ROWS); repaint();
+    flashE('imported '+added+' events ('+ROWS.length+' total)');
+  }
+  function pickFile(){
+    var inp=document.createElement('input'); inp.type='file'; inp.accept='.csv,text/csv';
+    inp.onchange=function(){var f=inp.files&&inp.files[0]; if(!f)return;
+      var fr=new FileReader(); fr.onload=function(){ingest(fr.result);}; fr.readAsText(f);};
+    inp.click();
+  }
+  function clearAll(){
+    if(!ROWS.length){alert('No events loaded.');return;}
+    if(!confirm('Clear '+ROWS.length+' event markers?'))return;
+    ROWS=[]; save(ROWS); repaint();
+  }
+
+  function flashE(msg){
+    var t=document.querySelector('div[data-pe-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-pe-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:240px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent=msg; t.style.display='block';
+    setTimeout(function(){t.style.display='none';},2500);
+  }
+
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    function pb(label,fn,title){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      if(title)b.title=title;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(pb('Past ⇡',pickFile,'Load past-events CSV'));
+    panel.appendChild(pb('Past ✗',clearAll,'Clear loaded events'));
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('PASTEVENTS_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -1906,6 +2186,10 @@ PATCHES = [
     ("DECIDE_V1: forecast cone + recommend-N-tracts", P12_OLD, P12_NEW, "/*DECIDE_V1*/"),
     # P13: visualization — sparkline-in-tooltip + bivariate choropleth.
     ("VIZ_V1: sparkline tooltip + bivariate choropleth", P13_OLD, P13_NEW, "/*VIZ_V1*/"),
+    # P14: field-tools — GPS pin + quick-log buttons + online-state pip.
+    ("FIELD_V1: GPS + quick-log + online-state pip", P14_OLD, P14_NEW, "/*FIELD_V1*/"),
+    # P15: render an outreach-events CSV as a colored point layer.
+    ("PASTEVENTS_V1: load past-events CSV as point layer", P15_OLD, P15_NEW, "/*PASTEVENTS_V1*/"),
 ]
 
 

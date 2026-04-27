@@ -23,6 +23,26 @@ multi-day project that doesn't fit a single review cycle.
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
 
+### Batch 6 (PWA / field-tools, provenance, past-events overlay)
+- `manifest.webmanifest` + `service-worker.js` — installable PWA with
+  cache-first ciphertext + network-first manifest. Offline-capable
+  once the loader has been visited at least once. SW never sees
+  plaintext.
+- `index.html` and `encrypt_data.py::LOADER` register the SW + link
+  the manifest. `encrypt_data.py` copies both PWA assets into the
+  deploy bundle on every run.
+- `FIELD_V1` patch: GPS "you are here" pin (Geolocation API), four
+  quick-log buttons (knock / no-answer / spoke / left-material),
+  online/offline status pip, CSV export of the queued log.
+- `PASTEVENTS_V1` patch: load any past-events CSV (drag/click) and
+  render as colored point markers; persisted in localStorage.
+- `buildlib/pipeline.py::write_build_info` writes `data/build_info.json`
+  on every rebuild — non-secret provenance the loader can fetch
+  without a password (built_at, git_sha, nbhd_count, ACS vintage).
+- `buildlib/census.py::fetch_tract_acs` now stamps `acs_stale: true`
+  on tracts whose ACS came from a fallback vintage older than 2023,
+  so the frontend can desaturate stale data.
+
 ### Batch 5 (statistical robustness, decision support, dataviz)
 - `buildlib/scoring.py::_compute_slope_cis` — bootstrap 90% CIs around
   every `*_slope`. Writes `*_slope_ci_lo` / `*_slope_ci_hi`. Default
