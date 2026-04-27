@@ -56,6 +56,7 @@ from buildlib.scoring import (
     _compute_exemption_gaps, _boost_outreach_with_gaps,
     _compute_gi_star_per_year, _compute_dpi_per_year,
     _compute_uptake_ratios, _compute_trend_slopes,
+    _flag_low_confidence,
 )
 from buildlib.census import (
     ACS_CACHE_DIR, ACS_CACHE_TTL_DAYS,
@@ -63,6 +64,10 @@ from buildlib.census import (
     _merge_tract_acs, fetch_tract_acs, fetch_census_acs,
     fetch_drive_times_osrm,
     urlopen, Request, URLError,  # re-exported so existing refs / tests don't break
+)
+from buildlib.pipeline import (
+    merge_nbhd_stats_into_core, assemble_layers,
+    write_json_compact, write_core_and_layers,
 )
 
 
@@ -1682,45 +1687,34 @@ def main():
     _compute_dpi_per_year(nbhd_stats)
     _compute_uptake_ratios(nbhd_stats)
     _compute_trend_slopes(nbhd_stats)
+    _flag_low_confidence(nbhd_stats)
+    _lc = sum(1 for p in nbhd_stats.values() if p.get('low_confidence'))
+    print(f"  Low-confidence flag: {_lc} nbhds")
     _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                     for k in p.keys() if k.startswith('dpi_')})
     _slope_nbhds = sum(1 for p in nbhd_stats.values()
                        if p.get('outreach_need_slope') is not None)
     print(f"  DPI: {_dpi_yrs} years; outreach_need_slope: {_slope_nbhds} nbhds")
 
-    # ── Assemble core.json ──
-    print("\nAssembling core.json...")
-    for feat in existing_core['DATA']['features']:
-        # .get('nbhd', 0) can still return None when nbhd is present but null
-        # in core.json — int(None) would crash here. Use safe_int so missing
-        # / null / non-numeric nbhds just fall through the lookup.
-        nbhd = safe_int(feat['properties'].get('nbhd'))
-        if nbhd and nbhd in nbhd_stats:
-            feat['properties'] = nbhd_stats[nbhd]
-
-    existing_core['NBHD_CENTERS'] = build_nbhd_centers(existing_core['DATA'])
-
-    # ── Assemble layers.json ──
-    print("Assembling layers.json...")
-    final_layers = {}
-    for k in preserved_keys:
-        if k in existing_layers:
-            final_layers[k] = existing_layers[k]
-    for k in rebuilt_keys:
-        final_layers[k] = new_layers.get(k, [])
-
-    # ── Write output ──
-    print(f"\nWriting {core_path}...")
-    with open(core_path, 'w') as f:
-        json.dump(existing_core, f, separators=(',', ':'))
-    core_size = core_path.stat().st_size
-    print(f"  → {core_size:,} bytes")
-
-    print(f"Writing {layers_path}...")
-    with open(layers_path, 'w') as f:
-        json.dump(final_layers, f, separators=(',', ':'))
-    layers_size = layers_path.stat().st_size
-    print(f"  → {layers_size:,} bytes")
+    # ── Assemble + write core.json and layers.json ──
+    # The mechanical merge / preserve / write step lives in
+    # buildlib/pipeline.py so it can be reused by other scripts and
+    # unit-tested without spinning up the full ETL.
+    print("\nAssembling core.json + layers.json...")
+    core_size, layers_size = write_core_and_layers(
+        existing_core=existing_core,
+        nbhd_stats=nbhd_stats,
+        existing_layers=existing_layers,
+        new_layers=new_layers,
+        preserved_keys=preserved_keys,
+        rebuilt_keys=rebuilt_keys,
+        build_nbhd_centers=build_nbhd_centers,
+        core_path=core_path,
+        layers_path=layers_path,
+    )
+    final_layers = assemble_layers(existing_layers, new_layers, preserved_keys, rebuilt_keys)
+    print(f"  {core_path}: {core_size:,} bytes")
+    print(f"  {layers_path}: {layers_size:,} bytes")
 
     # ── Compute sidebar stats from data ──
     all_roll_years = set()

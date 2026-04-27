@@ -314,6 +314,89 @@ def _make_verify_blob(password: str, salt: bytes, kdf: str) -> bytes:
     return _encrypt_with_password(password, salt, kdf, VERIFY_PLAINTEXT)
 
 
+def _rotate_tier(args):
+    """Re-encrypt only the named tier's files with a fresh salt; leave the
+    other tier's manifest entry and ciphertext untouched.
+
+    Reads <src>/data/enc_manifest.json, requires it to be v2, then:
+      1. Generates a new salt for the target tier.
+      2. Derives a new key from --{public,staff}-password + new salt.
+      3. Re-encrypts every file currently mapped to the target tier.
+      4. Writes a new manifest with the rotated tier's salt/verify replaced
+         and the other tier preserved verbatim.
+
+    Output mirrors --src layout into --out (default public/). Files
+    belonging to the *other* tier are NOT re-encrypted, but their
+    ciphertext is COPIED into <out> so the resulting public/ folder
+    is a complete deploy bundle.
+    """
+    tier = args.rotate_tier
+    pw = args.staff_password if tier == "staff" else args.public_password
+    if not pw:
+        sys.exit(f"--rotate-tier={tier} requires --{tier}-password")
+
+    src = Path(args.src)
+    out = Path(args.out)
+    (out / "data").mkdir(parents=True, exist_ok=True)
+
+    manifest_path = src / "data" / "enc_manifest.json"
+    if not manifest_path.exists():
+        sys.exit(f"Missing manifest at {manifest_path}; can't rotate.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("v") != 2:
+        sys.exit("--rotate-tier requires a v2 manifest. Migrate to v2 first.")
+
+    kdf = manifest.get("kdf", KDF_DEFAULT)
+    files = manifest.get("files") or dict(DEFAULT_TIER_ASSIGNMENT)
+    tiers = dict(manifest.get("tiers") or {})
+    other = "public" if tier == "staff" else "staff"
+    if other not in tiers:
+        sys.exit(f"Manifest is missing the '{other}' tier; not safe to rotate.")
+
+    new_salt = os.urandom(SALT_BYTES)
+    print(f"Rotating tier='{tier}' with fresh salt; other tier ('{other}') preserved.")
+
+    rotated_files, copied_files = [], []
+    for rel_path, tier_of_file in files.items():
+        src_path = src / rel_path
+        out_path = out / rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if not src_path.exists():
+            print(f"  WARN: {rel_path} not under --src; skipping")
+            continue
+        if tier_of_file == tier:
+            # Need plaintext to re-encrypt. The plaintext lives outside the
+            # repo (decrypt_data.py output, not committed), so the operator
+            # must pre-stage it under <src> with the same relative path
+            # *minus* the .enc suffix.
+            plain_path = src / rel_path.replace(".enc", "")
+            if not plain_path.exists():
+                sys.exit(
+                    f"To rotate, the plaintext for {rel_path} must be at "
+                    f"{plain_path}. Run decrypt_data.py first."
+                )
+            new_blob = _encrypt_with_password(pw, new_salt, kdf, plain_path.read_bytes())
+            out_path.write_bytes(new_blob)
+            rotated_files.append(rel_path)
+            print(f"  rotated: {rel_path}")
+        else:
+            out_path.write_bytes(src_path.read_bytes())
+            copied_files.append(rel_path)
+            print(f"  copied:  {rel_path}")
+
+    tiers[tier] = {
+        "salt": base64.b64encode(new_salt).decode("ascii"),
+        "verify": base64.b64encode(_make_verify_blob(pw, new_salt, kdf)).decode("ascii"),
+    }
+    new_manifest = {"v": 2, "kdf": kdf, "tiers": tiers, "files": files}
+    (out / "data" / "enc_manifest.json").write_text(json.dumps(new_manifest, indent=2))
+    (out / "index.html").write_text(LOADER, encoding="utf-8")
+
+    print(f"Wrote {out.resolve()}:")
+    print(f"  rotated {len(rotated_files)} file(s); copied {len(copied_files)} file(s) untouched.")
+    print("  upload public/ to the deploy branch; the other tier's password remains valid.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--password", help="Legacy v1 single-password mode. Deprecated — prefer --public-password/--staff-password.")
@@ -326,10 +409,36 @@ def main():
     ap.add_argument("--src", default=".", help="Source directory (contains index.html and data/). Default: current dir.")
     ap.add_argument("--body", default=None, help="Path to the plaintext body HTML to encrypt. Defaults to <src>/index.html.")
     ap.add_argument("--out", default="public", help="Output directory. Default: public/")
+    ap.add_argument(
+        "--rotate-tier",
+        choices=["public", "staff"],
+        help=(
+            "Rotate ONLY the named tier's salt + ciphertext. Reads the existing "
+            "manifest (under <src>/data/enc_manifest.json), keeps the other tier "
+            "unchanged, and re-encrypts only the rotated tier's files with a "
+            "new salt. Useful when a staff password leaks and you don't want "
+            "to re-deploy public-tier data. Requires --staff-password (when "
+            "--rotate-tier=staff) or --public-password (when public)."
+        ),
+    )
     args = ap.parse_args()
+
+    if args.rotate_tier:
+        return _rotate_tier(args)
 
     if args.v1 and not args.password:
         sys.exit("--v1 requires --password")
+    if args.v1:
+        # v1 ships a single-tier 200k-iteration manifest. v2 (default) gives
+        # a 3× harder KDF and tier separation. Operators staying on v1 are
+        # opting into both a weaker derivation and the loss of a public/
+        # staff split — surface that explicitly so it's a deliberate choice.
+        print(
+            "WARNING: --v1 is legacy. Prefer v2 (omit --v1, pass "
+            "--public-password/--staff-password) for 600k PBKDF2 + tier "
+            "separation. v1 will be removed in a future release.",
+            file=sys.stderr,
+        )
     if not args.v1 and not (args.public_password and args.staff_password):
         # Backward-compat: if only --password is given and --v1 isn't set,
         # use it for BOTH tiers. That gives the v2 manifest/hardening with

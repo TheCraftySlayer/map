@@ -10,7 +10,9 @@ Modules:
   census     — ACS disk cache, fetch_census_acs, fetch_tract_acs, OSRM drive
                times.
   scoring    — _cap, _noisy_or, exemption gap/boost, Gi* clusters, DPI_YY,
-               uptake ratios, trend slopes.
+               uptake ratios, trend slopes, low-confidence flag.
+  pipeline   — extracted assembly + write-out tail (merge stats into core,
+               assemble layers, write JSON). Re-usable from one-off scripts.
 
 build_data.py re-exports everything listed here so existing callers and the
 test suite don't need to change their imports.

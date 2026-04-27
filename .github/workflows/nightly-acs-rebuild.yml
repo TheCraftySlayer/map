@@ -1,0 +1,130 @@
+name: Nightly ACS rebuild
+
+# Pulls fresh tract-level + ZIP-level Census ACS, runs build_data.py against
+# whatever roll/coords/enriched inputs are committed under inputs/, and opens
+# a PR if the resulting tract cluster categories changed since main.
+#
+# This workflow does NOT decrypt the production core.json.enc — comparing
+# the new build to the previous one requires either:
+#   (a) a redacted, committed `core_summary.json` snapshot at HEAD, or
+#   (b) a CENSUS_API_KEY + STAFF_PASSWORD pair stored as repo secrets so
+#       the workflow can decrypt the prior build for diffing.
+#
+# By default the workflow runs in mode (a). To enable mode (b), set the
+# secrets and uncomment the decrypt step below.
+
+on:
+  schedule:
+    # Daily at 09:00 UTC (~03:00 MST) — Census ACS doesn't change daily but
+    # OSRM drive-time routing can drift, and a daily scrubber catches our
+    # own data quality regressions early.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      open_pr:
+        description: 'Open a PR even if no clusters changed (smoke run)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install dbfread pyproj cryptography
+
+      # Cache the Census ACS responses so a re-run within 30 days doesn't
+      # hammer the API. build_data.py honors this directory natively.
+      - name: Cache ACS responses
+        uses: actions/cache@v4
+        with:
+          path: data/acs_cache
+          key: acs-cache-${{ runner.os }}-${{ hashFiles('buildlib/census.py') }}
+          restore-keys: |
+            acs-cache-${{ runner.os }}-
+
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -v
+
+      # Mode (a): rebuild from committed inputs/ and snapshot summary.
+      # Adjust --roll / --enriched paths to match how inputs are committed.
+      - name: Rebuild data
+        id: rebuild
+        env:
+          CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+        run: |
+          if [ -d inputs ]; then
+            echo "Running build_data.py against inputs/"
+            ROLLS=$(ls inputs/taxroll*.dbf 2>/dev/null | xargs)
+            ENRICHED=$(ls inputs/enriched*.dbf 2>/dev/null | head -n1)
+            if [ -n "$ENRICHED" ]; then
+              python build_data.py --roll $ROLLS --enriched "$ENRICHED" || exit 1
+            elif [ -n "$ROLLS" ]; then
+              python build_data.py --roll $ROLLS || exit 1
+            else
+              echo "No DBF inputs found under inputs/; running ACS-cache-only refresh"
+              python -c "from buildlib.census import fetch_census_acs, fetch_tract_acs; \
+                fetch_census_acs(refresh=True); print('ACS cache warmed')"
+            fi
+          else
+            echo "::warning::inputs/ directory not present; running ACS-cache-only refresh"
+            python -c "from buildlib.census import fetch_census_acs, fetch_tract_acs; \
+              fetch_census_acs(refresh=True); print('ACS cache warmed')"
+          fi
+
+      - name: Snapshot cluster categories
+        id: snapshot
+        run: |
+          python scripts/cluster_snapshot.py \
+            --in data/core.json --out core_summary.json \
+            --prev core_summary.json --diff cluster_diff.txt || true
+          echo "diff_lines=$(wc -l < cluster_diff.txt 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
+
+      - name: Open PR if clusters changed
+        if: steps.snapshot.outputs.diff_lines != '0' || inputs.open_pr == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: nightly/acs-rebuild
+          commit-message: 'Nightly ACS rebuild: cluster updates'
+          title: 'Nightly ACS rebuild — cluster category changes'
+          body: |
+            Automated rebuild from `${{ github.workflow }}`.
+
+            Cluster diff (vs prior `core_summary.json`):
+
+            ```
+            $(cat cluster_diff.txt | head -n 200)
+            ```
+
+            Review the per-tract changes before merging. Re-encrypt + redeploy
+            the gated build separately — this PR only updates the redacted
+            summary committed to the repo.
+          add-paths: |
+            core_summary.json
+            data/acs_cache/**
+
+      # Mode (b) — decrypt the prior production build for a richer diff.
+      # Requires STAFF_PASSWORD secret. Uncomment when configured.
+      #
+      # - name: Decrypt prior build
+      #   env:
+      #     STAFF_PW: ${{ secrets.STAFF_PASSWORD }}
+      #   run: |
+      #     python decrypt_data.py --staff-password "$STAFF_PW" \
+      #       --src . --out _prior
+      #     python scripts/cluster_snapshot.py \
+      #       --in _prior/data/core.json --out _prior_summary.json

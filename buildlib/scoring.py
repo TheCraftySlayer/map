@@ -275,6 +275,44 @@ def _compute_uptake_ratios(nbhd_stats):
         _run_ratio('pct_vet', None, 'vet_uptake', ys, use_predictor=False)
 
 
+def _flag_low_confidence(nbhd_stats,
+                         min_parcels=100,
+                         min_tract_pop=500):
+    """Mark neighborhoods whose underlying signals are too thin for stable
+    scoring. The frontend can use this to desaturate / hatch the polygon
+    so a viewer doesn't read precise meaning into a noisy estimate.
+
+    This is an MOE-proxy, not the real ACS margin of error. The Census
+    fetch in buildlib/census.py only requests the *_E (estimate) variables
+    today; once the matching *_M (margin) vars are added, this can be
+    upgraded to a true CV-based threshold (e.g. flag when MOE/estimate >
+    0.4). Until then, two operational thresholds catch the worst cases:
+
+      * parcels < min_parcels — too few parcels for any per-year ratio to
+        have <10% relative uncertainty.
+      * tract_pop < min_tract_pop — ACS estimates at this scale carry
+        relative MOEs commonly >40% for poverty/income variables.
+
+    Writes p['low_confidence'] = True only when triggered. Absent key =
+    confident enough. Also stamps p['low_confidence_reason'] with a short
+    code so a tooltip can explain WHY a polygon is hatched.
+    """
+    for p in nbhd_stats.values():
+        reasons = []
+        try:
+            parcels = float(p.get('parcels') or 0)
+        except (TypeError, ValueError):
+            parcels = 0
+        if parcels and parcels < min_parcels:
+            reasons.append(f'parcels<{min_parcels}')
+        tract_pop = p.get('tract_pop')
+        if isinstance(tract_pop, (int, float)) and tract_pop < min_tract_pop:
+            reasons.append(f'tract_pop<{min_tract_pop}')
+        if reasons:
+            p['low_confidence'] = True
+            p['low_confidence_reason'] = ','.join(reasons)
+
+
 def _compute_trend_slopes(nbhd_stats):
     """OLS slope of each per-year series — sign and magnitude of the
     multi-year trend. Slope is in units-per-year. Skipped when fewer
