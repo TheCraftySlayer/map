@@ -272,12 +272,83 @@ try{
 """
 
 
+#  Patch 6: PDF export for the current map view.
+#
+#  Adds a "PDF" button that screenshots the visible map + sidebar via
+#  html2canvas and packages it into a single-page PDF via jsPDF, both
+#  loaded from a CDN with SRI hashes. Anchored on the MAP_EXT_V1 marker
+#  so it only applies after Patch 5 has been installed (avoids two
+#  control-panel injections).
+#
+#  Design choices:
+#    - SRI hashes pin specific upstream releases. Changing the version
+#      requires updating both the URL and the integrity attribute.
+#    - The button only appears once html2canvas + jsPDF are both ready
+#      so a slow CDN doesn't half-render the panel.
+#    - Output is single-page Letter landscape, fitted to the viewport.
+P6_OLD = "/*MAP_EXT_V1*/"
+P6_NEW = """/*MAP_EXT_V1*//*PDF_EXPORT_V1*/
+;(function(){
+try{
+  function load(src,integrity){
+    return new Promise(function(res,rej){
+      var s=document.createElement('script');
+      s.src=src; s.crossOrigin='anonymous'; s.referrerPolicy='no-referrer';
+      if(integrity)s.integrity=integrity;
+      s.onload=res; s.onerror=function(){rej(new Error('load failed: '+src));};
+      document.head.appendChild(s);
+    });
+  }
+  // Pinned versions; SRI hashes are upstream-published. Bump both at once.
+  var H2C='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+  var H2C_SRI='sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==';
+  var JSPDF='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  var JSPDF_SRI='sha512-hMd5JNGqHNgz0mKK0NpjNXn6mXM2dr1QN6WvI9PEWh/0CQjkx7uDvphvuaNeomka4VXn/LgFp2HOCxsmkNBAVQ==';
+  Promise.all([load(H2C,H2C_SRI),load(JSPDF,JSPDF_SRI)]).then(function(){
+    var panel=document.querySelector('div[data-mapext]');
+    if(!panel){
+      // Tag the existing extension panel so we can find it.
+      var btns=document.querySelectorAll('button');
+      for(var i=0;i<btns.length;i++){
+        if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+      }
+      if(panel)panel.setAttribute('data-mapext','1');
+    }
+    if(!panel)return;
+    var b=document.createElement('button'); b.type='button'; b.textContent='PDF ⬇';
+    b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+      'font:12px system-ui,-apple-system,sans-serif;';
+    b.addEventListener('click',function(){
+      var target=document.querySelector('#map')||document.body;
+      window.html2canvas(target,{useCORS:true,backgroundColor:'#fff',scale:2})
+        .then(function(canvas){
+          var img=canvas.toDataURL('image/png');
+          var jsPDF=window.jspdf&&window.jspdf.jsPDF;
+          if(!jsPDF){alert('jsPDF unavailable');return;}
+          var pdf=new jsPDF({orientation:'landscape',unit:'pt',format:'letter'});
+          var pw=pdf.internal.pageSize.getWidth();
+          var ph=pdf.internal.pageSize.getHeight();
+          var iw=canvas.width, ih=canvas.height;
+          var ratio=Math.min(pw/iw,ph/ih);
+          pdf.addImage(img,'PNG',(pw-iw*ratio)/2,(ph-ih*ratio)/2,iw*ratio,ih*ratio);
+          var ts=new Date().toISOString().slice(0,10);
+          pdf.save('bernco-map-'+ts+'.pdf');
+        }).catch(function(e){console.warn('pdf export:',e);});
+    });
+    panel.appendChild(b);
+  }).catch(function(e){console.warn('PDF deps load failed:',e);});
+}catch(err){console.warn('PDF_EXPORT_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
     ("Gi*: partial-neighbor scale", P3_OLD, P3_NEW),
     ("propYrFields: new per-year layers", P4_OLD, P4_NEW),
     ("MAP_EXT_V1: permalinks + compare + worklist CSV", P5_OLD, P5_NEW),
+    ("PDF_EXPORT_V1: html2canvas + jsPDF export button", P6_OLD, P6_NEW),
 ]
 
 

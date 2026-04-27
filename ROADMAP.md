@@ -7,6 +7,7 @@ multi-day project that doesn't fit a single review cycle.
 
 ## Shipped on `claude/brainstorm-SjOC5`
 
+### Batch 1
 - `encrypt_data.py --v1` now prints a deprecation warning. v1 stays
   decryptable in the loader so legacy deploys keep working, but new
   encrypts should drop `--v1` in favor of dual-tier v2 (600k PBKDF2).
@@ -21,6 +22,38 @@ multi-day project that doesn't fit a single review cycle.
   features (permalinks, split-screen via second window, worklist CSV
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
+
+### Batch 2
+- `patch_body.py::PDF_EXPORT_V1` adds an html2canvas + jsPDF PDF
+  download button to the extension panel. Both libraries are pinned
+  by SRI hash, loaded from cdnjs.
+- `.github/workflows/nightly-acs-rebuild.yml` runs the test suite,
+  refreshes the ACS cache (mode A) or rebuilds against committed
+  inputs (mode B), and opens a PR via `peter-evans/create-pull-request`
+  when cluster categories shift. Companion script:
+  `scripts/cluster_snapshot.py` for the redacted snapshot diff.
+- `encrypt_data.py --rotate-tier {public,staff}` re-encrypts only the
+  named tier's files with a fresh salt and writes a new manifest that
+  preserves the other tier verbatim. Closes the "rotating staff
+  forces re-encrypting public" footgun.
+- `buildlib/census.py::fetch_tract_acs` now requests the senior age
+  cohort variables (B01001 age bands 65+, both sexes) and writes
+  `pct_65plus` per tract — feeds the language/age outreach crosswalk
+  alongside the existing `spanish_at_home`.
+- `scripts/reconcile_tax_roll.py` flags tracts where parcel-level
+  exemption uptake diverges from ACS-derived eligibility (HOH vs
+  owner-occupied share, vet uptake vs ACS veteran share).
+- `scripts/fetch_chas.py` pulls HUD CHAS renter-cost-burden data into
+  `layers.json::renter_cost_burden`.
+- `scripts/fetch_evictions.py` ingests Eviction Lab tract CSV into
+  `layers.json::eviction_filings` (operator-supplied download).
+- `scripts/merge_outreach_dose.py` joins an Assessor outreach
+  spend/staff-hours CSV into core.json as `outreach_dose_YY` /
+  `outreach_dose_ratio_YY` for the dose-vs-need overlay.
+- `buildlib/pipeline.py` is the first slice of the build_data.py
+  refactor: `merge_nbhd_stats_into_core`, `assemble_layers`, and
+  `write_core_and_layers` are now reusable + unit-tested.
+  `tests/test_pipeline.py` covers them.
 
 ## Blocked — needs external inputs
 

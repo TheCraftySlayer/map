@@ -85,9 +85,26 @@ def fetch_tract_acs(tract_geo, outdir='data', use_cache=True, refresh=False,
             print(f"  Tract ACS {yr} (cached): merged {merged}/{len(feats)} tracts")
             return
 
+    # Variables fetched per tract:
+    #   B01003_001E  total pop
+    #   B01002_001E  median age
+    #   B17001_001E  poverty universe (denominator)
+    #   B17001_002E  pop below poverty
+    #   C16001_001E  language universe
+    #   C16001_005E  speak Spanish at home
+    #   B11007_001E  household-by-65+ universe
+    #   B11007_003E  hh with 65+ living alone
+    #   B01001_020E..B01001_025E  males 65-66, 67-69, 70-74, 75-79, 80-84, 85+
+    #   B01001_044E..B01001_049E  females 65-66, 67-69, 70-74, 75-79, 80-84, 85+
+    # These additions feed the language / age-cohort outreach crosswalk
+    # (Spanish-language door hangers vs. senior-focused) without inflating
+    # the per-tract payload meaningfully.
+    senior_male = [f'B01001_{i:03d}E' for i in range(20, 26)]
+    senior_female = [f'B01001_{i:03d}E' for i in range(44, 50)]
     vars_ = ','.join([
         'B01003_001E','B01002_001E','B17001_001E','B17001_002E',
         'C16001_001E','C16001_005E','B11007_001E','B11007_003E',
+        *senior_male, *senior_female,
     ])
     for yr in [2023, 2022, 2021]:
         url = (
@@ -134,11 +151,15 @@ def fetch_tract_acs(tract_geo, outdir='data', use_cache=True, refresh=False,
             hh_univ = _vi('B11007_001E') or 0
             elderly_alone = _vi('B11007_003E') or 0
             median_age = _vf('B01002_001E')
+            seniors = 0
+            for k in (*senior_male, *senior_female):
+                seniors += _vi(k) or 0
             by_geoid[geoid] = {
                 'poverty_rate': round(pov_below / pov_univ, 4) if pov_univ else None,
                 'median_age': round(median_age, 1) if median_age is not None else None,
                 'spanish_at_home': round(spanish / lang_univ, 4) if lang_univ else None,
                 'elderly_alone': round(elderly_alone / hh_univ, 4) if hh_univ else None,
+                'pct_65plus': round(seniors / pop, 4) if pop else None,
                 'acs_year': yr,
                 'tract_pop': pop,
             }
