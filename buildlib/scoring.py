@@ -4,6 +4,7 @@ All pure functions over the nbhd_stats dict. No network, no file I/O.
 """
 from __future__ import annotations
 
+import random
 import re
 
 from .spatial import _ols_fit, _mean_of
@@ -313,6 +314,24 @@ def _flag_low_confidence(nbhd_stats,
             p['low_confidence_reason'] = ','.join(reasons)
 
 
+def _slope_pairs(pairs):
+    """OLS slope estimate over a list of (x, y) pairs. Returns None when
+    n < 4 or x has zero variance. Shared by both _compute_trend_slopes
+    and _compute_slope_cis."""
+    n = len(pairs)
+    if n < 4:
+        return None
+    sx = sum(x for x, _ in pairs)
+    sy = sum(y for _, y in pairs)
+    sxx = sum(x * x for x, _ in pairs)
+    sxy = sum(x * y for x, y in pairs)
+    mx = sx / n
+    vx = sxx - n * mx * mx
+    if vx <= 0:
+        return None
+    return (sxy - n * mx * (sy / n)) / vx
+
+
 def _compute_trend_slopes(nbhd_stats):
     """OLS slope of each per-year series — sign and magnitude of the
     multi-year trend. Slope is in units-per-year. Skipped when fewer
@@ -320,20 +339,6 @@ def _compute_trend_slopes(nbhd_stats):
     """
     BASES = ('outreach_need', 'pct_hoh', 'pct_vet',
              'pct_val_freeze', 'hoh_churn')
-
-    def _slope(pairs):
-        n = len(pairs)
-        if n < 4:
-            return None
-        sx = sum(x for x, _ in pairs)
-        sy = sum(y for _, y in pairs)
-        sxx = sum(x * x for x, _ in pairs)
-        sxy = sum(x * y for x, y in pairs)
-        mx = sx / n
-        vx = sxx - n * mx * mx
-        if vx <= 0:
-            return None
-        return (sxy - n * mx * (sy / n)) / vx
 
     for p in nbhd_stats.values():
         for base in BASES:
@@ -347,6 +352,106 @@ def _compute_trend_slopes(nbhd_stats):
                 yr_full = 2000 + yr if yr < 80 else 1900 + yr
                 pairs.append((yr_full, float(v)))
             pairs.sort()
-            s = _slope(pairs)
+            s = _slope_pairs(pairs)
             if s is not None:
                 p[f'{base}_slope'] = round(s, 6)
+
+
+def _compute_slope_cis(nbhd_stats, n_bootstrap=200, seed=20240101):
+    """Bootstrap 90% confidence intervals around each *_slope.
+
+    For each per-nbhd series of (year, value) pairs, resamples with
+    replacement n_bootstrap times, refits the slope, and writes the
+    5th / 95th percentiles as `<base>_slope_ci_lo` / `<base>_slope_ci_hi`.
+    Skipped when the slope itself wasn't produced (n<4 / zero-variance).
+
+    The CI width is the quiet caveat the UI needs: a tract with slope
+    0.05 ± 0.04 is qualitatively different from 0.05 ± 0.005, but the
+    sidebar treats them identically today. Frontend can hatch /
+    desaturate when |slope| < ci_width.
+    """
+    BASES = ('outreach_need', 'pct_hoh', 'pct_vet',
+             'pct_val_freeze', 'hoh_churn')
+    rng = random.Random(seed)
+
+    for p in nbhd_stats.values():
+        for base in BASES:
+            if p.get(f'{base}_slope') is None:
+                continue
+            pat = re.compile(rf'^{base}_(\d+)$')
+            pairs = []
+            for k, v in p.items():
+                m = pat.match(k)
+                if not m or v is None or not isinstance(v, (int, float)):
+                    continue
+                yr = int(m.group(1))
+                yr_full = 2000 + yr if yr < 80 else 1900 + yr
+                pairs.append((yr_full, float(v)))
+            pairs.sort()
+            n = len(pairs)
+            if n < 4:
+                continue
+            slopes = []
+            for _ in range(n_bootstrap):
+                sample = [pairs[rng.randrange(n)] for _ in range(n)]
+                s = _slope_pairs(sample)
+                if s is not None:
+                    slopes.append(s)
+            if len(slopes) < n_bootstrap // 2:
+                continue
+            slopes.sort()
+            lo_idx = max(0, int(0.05 * len(slopes)))
+            hi_idx = min(len(slopes) - 1, int(0.95 * len(slopes)))
+            p[f'{base}_slope_ci_lo'] = round(slopes[lo_idx], 6)
+            p[f'{base}_slope_ci_hi'] = round(slopes[hi_idx], 6)
+
+
+def _flag_anomalies(nbhd_stats, sigma=3.0):
+    """Mark neighborhoods whose year-over-year change in a key series
+    exceeds `sigma` standard deviations of the county-wide YoY-change
+    distribution. Catches both data-entry bugs (impossible jumps) and
+    real policy shifts (tax-freeze rollout) — both worth a human eye.
+
+    Writes `<base>_anomaly_yy` (the abnormal year) and
+    `<base>_anomaly_z` (the z-score) per offending neighborhood.
+    """
+    BASES = ('pct_vf_denied', 'pct_hoh', 'outreach_need', 'hoh_churn')
+
+    for base in BASES:
+        # Collect every (nbhd, year) → value; compute YoY deltas; build
+        # the county-wide z-distribution from those deltas, then flag
+        # outliers per nbhd.
+        pat = re.compile(rf'^{base}_(\d+)$')
+        per_nbhd_series = {}
+        for nbhd, p in nbhd_stats.items():
+            series = []
+            for k, v in p.items():
+                m = pat.match(k)
+                if not m or v is None or not isinstance(v, (int, float)):
+                    continue
+                series.append((int(m.group(1)), float(v)))
+            series.sort()
+            per_nbhd_series[nbhd] = series
+
+        all_deltas = []
+        for series in per_nbhd_series.values():
+            for i in range(1, len(series)):
+                all_deltas.append(series[i][1] - series[i - 1][1])
+        if len(all_deltas) < 30:
+            continue
+        mean = sum(all_deltas) / len(all_deltas)
+        var = sum((d - mean) ** 2 for d in all_deltas) / (len(all_deltas) - 1)
+        sd = var ** 0.5
+        if sd <= 0:
+            continue
+
+        for nbhd, series in per_nbhd_series.items():
+            worst_yy, worst_z = None, 0.0
+            for i in range(1, len(series)):
+                z = (series[i][1] - series[i - 1][1] - mean) / sd
+                if abs(z) > abs(worst_z):
+                    worst_z = z
+                    worst_yy = series[i][0]
+            if worst_yy is not None and abs(worst_z) >= sigma:
+                nbhd_stats[nbhd][f'{base}_anomaly_yy'] = worst_yy
+                nbhd_stats[nbhd][f'{base}_anomaly_z'] = round(worst_z, 3)

@@ -1506,6 +1506,376 @@ try{
 })();"""
 
 
+#  Patch 12: DECIDE_V1 — forecast cone + recommend-N-tracts.
+#
+#  Two decision-support tools:
+#
+#   - "Forecast" picks a layer base, projects each nbhd's next-year value
+#     using the existing OLS slope + a 90% bootstrap CI band (when the
+#     ETL has stamped *_slope_ci_lo / *_slope_ci_hi). Repaints by the
+#     forecast magnitude. Falls back to slope-only if no CIs are present.
+#   - "Recommend N" takes a budget N, scores each non-low-confidence
+#     nbhd by `outreach_need * sqrt(parcels)`, sorts, highlights the
+#     top N, and exports the same list as CSV. The sqrt(parcels) keeps
+#     the recommender from collapsing onto one giant nbhd while still
+#     respecting "people, not just polygons."
+P12_OLD = "/*COMPARE_V1*/"
+P12_NEW = """/*COMPARE_V1*//*DECIDE_V1*/
+;(function(){
+try{
+  function fieldNames(){
+    var s={};
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return [];
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      Object.keys(p).forEach(function(k){
+        if(typeof p[k]==='number'&&isFinite(p[k]))s[k]=true;
+      });
+    });
+    return Object.keys(s).sort();
+  }
+
+  // ── Forecast cone ──────────────────────────────────────────────────────
+  function latestYearOf(p,base){
+    var max=null;
+    var pat=new RegExp('^'+base+'_(\\\\d+)$');
+    for(var k in p){var m=pat.exec(k); if(m){var yy=+m[1]; if(max==null||yy>max)max=yy;}}
+    return max;
+  }
+  function forecastValue(p,base){
+    var yy=latestYearOf(p,base); if(yy==null)return null;
+    var v=p[base+'_'+(yy<10?'0'+yy:yy)]; if(typeof v!=='number')return null;
+    var s=p[base+'_slope']; if(typeof s!=='number')return null;
+    return {est:v+s, lo:v+(p[base+'_slope_ci_lo']||s), hi:v+(p[base+'_slope_ci_hi']||s),
+            base_yy:yy, latest:v, slope:s};
+  }
+  function forecastColor(t){
+    if(t==null||!isFinite(t))return '#f0f0f0';
+    var c=Math.max(0,Math.min(1,t));
+    var r=Math.round(255-180*c), g=Math.round(80+170*(1-c)), b=Math.round(60);
+    return 'rgb('+r+','+g+','+b+')';
+  }
+  var forecastActive=false;
+  function applyForecast(base){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    var max=0;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var f=forecastValue(p,base); if(f&&Math.abs(f.est)>max)max=Math.abs(f.est);
+    });
+    if(max<=0)max=1;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var f=forecastValue(p,base);
+      if(f){
+        lyr.setStyle&&lyr.setStyle({fillColor:forecastColor(f.est/max),fillOpacity:0.75});
+        var width=Math.abs((f.hi-f.lo))/max;
+        lyr.setStyle&&lyr.setStyle({weight:width>0.4?3:1.5,
+                                    dashArray:width>0.4?'3,3':null});
+      }else{
+        lyr.setStyle&&lyr.setStyle({fillColor:'#eee',fillOpacity:0.4});
+      }
+    });
+    forecastActive=true;
+    flashD('forecast: next-year '+base+' (dashed = wide CI)');
+  }
+  function clearForecast(){
+    forecastActive=false;
+    if(nbhdLayer&&nbhdLayer.resetStyle){
+      nbhdLayer.eachLayer(function(lyr){nbhdLayer.resetStyle(lyr);});
+    }
+  }
+  function openForecastPicker(){
+    var bases={};
+    fieldNames().forEach(function(f){
+      var m=/^([a-z_]+)_slope$/.exec(f); if(m)bases[m[1]]=true;
+    });
+    var keys=Object.keys(bases).sort();
+    if(!keys.length){alert('No *_slope fields found; rebuild with the slopes step enabled.');return;}
+    var pick=prompt('Forecast which base? ('+keys.join(', ')+')',keys[0]);
+    if(!pick)return;
+    if(!bases[pick]){alert('Unknown base: '+pick);return;}
+    applyForecast(pick);
+  }
+
+  // ── Recommend N ────────────────────────────────────────────────────────
+  function recommend(n){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return [];
+    var rows=[];
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      if(p.low_confidence)return;
+      var need=p.outreach_need; var parcels=p.parcels;
+      if(typeof need!=='number'||!isFinite(need))return;
+      var score=need*Math.sqrt(Math.max(parcels||1,1));
+      rows.push({nbhd:p.nbhd,need:need,parcels:parcels,score:score,layer:lyr});
+    });
+    rows.sort(function(a,b){return b.score-a.score;});
+    return rows.slice(0,n);
+  }
+  var recommendActive=false;
+  function highlightRecommended(rows){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    var picked={}; rows.forEach(function(r){picked[r.nbhd]=true;});
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      if(picked[p.nbhd]){
+        lyr.setStyle&&lyr.setStyle({weight:3,color:'#0a3',fillOpacity:0.7});
+        lyr.bringToFront&&lyr.bringToFront();
+      }else{
+        lyr.setStyle&&lyr.setStyle({fillOpacity:0.18,color:'#bbb',weight:0.6});
+      }
+    });
+    recommendActive=true;
+  }
+  function clearRecommend(){
+    recommendActive=false;
+    if(nbhdLayer&&nbhdLayer.resetStyle){
+      nbhdLayer.eachLayer(function(lyr){nbhdLayer.resetStyle(lyr);});
+    }
+  }
+  function openRecommendPicker(){
+    var n=parseInt(prompt('How many tracts to recommend?','25'),10);
+    if(!n||n<=0)return;
+    var rows=recommend(n);
+    if(!rows.length){alert('No eligible tracts (outreach_need missing or all low-confidence).');return;}
+    highlightRecommended(rows);
+    var headers=['rank','nbhd','outreach_need','parcels','score'];
+    var lines=[headers.join(',')];
+    rows.forEach(function(r,i){
+      lines.push([i+1,r.nbhd,r.need,r.parcels||'',r.score.toFixed(4)].join(','));
+    });
+    var blob=new Blob([lines.join('\\n')+'\\n'],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    var ts=new Date().toISOString().slice(0,10);
+    a.download='recommend-top'+n+'-'+ts+'.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},0);
+    flashD('recommended top '+n+' tracts (CSV downloaded)');
+  }
+
+  function flashD(msg){
+    var t=document.querySelector('div[data-decide-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-decide-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:120px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent=msg; t.style.display='block';
+    setTimeout(function(){t.style.display='none';},2800);
+  }
+
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    function db(label,fn){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(db('Forecast →',function(){if(forecastActive)clearForecast();else openForecastPicker();}));
+    panel.appendChild(db('Recommend N',function(){if(recommendActive)clearRecommend();else openRecommendPicker();}));
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('DECIDE_V1 init failed:',err);}
+})();"""
+
+
+#  Patch 13: VIZ_V1 — sparkline-in-tooltip + bivariate choropleth.
+#
+#   - Hover a tract: a tiny inline SVG sparkline shows its full per-year
+#     trajectory for the currently selected layer base. Comes from the
+#     same propYrFields map P4 already populated.
+#   - "Bivariate" pairs two layers on a 3×3 color matrix (high/med/low
+#     × high/med/low). Single map, two dimensions of color. Keeps the
+#     legacy choropleth as the off-state.
+P13_OLD = "/*DECIDE_V1*/"
+P13_NEW = """/*DECIDE_V1*//*VIZ_V1*/
+;(function(){
+try{
+  function currentLayer(){
+    var r=document.querySelector('input[type=radio]:checked');
+    return r?r.value:null;
+  }
+  function baseOf(layer){
+    if(typeof propYrFields==='object'&&propYrFields&&propYrFields[layer])
+      return propYrFields[layer];
+    return layer;
+  }
+  function seriesFor(p,base){
+    var pat=new RegExp('^'+base+'_(\\\\d+)$');
+    var pairs=[];
+    for(var k in p){var m=pat.exec(k);
+      if(m&&typeof p[k]==='number'&&isFinite(p[k])){pairs.push([+m[1],p[k]]);}}
+    pairs.sort(function(a,b){return a[0]-b[0];});
+    return pairs;
+  }
+  function sparkSvg(pairs,w,h){
+    if(pairs.length<2)return '';
+    var min=Infinity,max=-Infinity;
+    pairs.forEach(function(pr){if(pr[1]<min)min=pr[1]; if(pr[1]>max)max=pr[1];});
+    if(max-min<1e-9){min-=1;max+=1;}
+    var pts=pairs.map(function(pr,i){
+      var x=(i/(pairs.length-1))*(w-2)+1;
+      var y=h-1-((pr[1]-min)/(max-min))*(h-2);
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    return '<svg width="'+w+'" height="'+h+'" style="vertical-align:middle">'+
+      '<polyline fill="none" stroke="#08306b" stroke-width="1.4" points="'+pts+'"/>'+
+      '</svg>';
+  }
+
+  // Augment any tooltip the body opens with a sparkline. We rely on
+  // the body's existing tooltip writer — wrap it.
+  var sparkActive=true;
+  function attachSparkline(){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return false;
+    nbhdLayer.eachLayer(function(lyr){
+      lyr.on('mouseover',function(e){
+        if(!sparkActive)return;
+        var p=e.target.feature&&e.target.feature.properties; if(!p)return;
+        var base=baseOf(currentLayer()); if(!base)return;
+        var pairs=seriesFor(p,base); if(pairs.length<2)return;
+        var html=sparkSvg(pairs,90,28)+
+          ' <span style="font:11px monospace;color:#666">'+
+          pairs[0][0]+'→'+pairs[pairs.length-1][0]+'</span>';
+        // Try to write into Leaflet's info panel if present.
+        var holder=document.querySelector('.info, .leaflet-control.info');
+        if(holder){
+          if(!holder.querySelector('.viz-spark')){
+            var s=document.createElement('div'); s.className='viz-spark';
+            s.style.cssText='margin-top:4px';
+            holder.appendChild(s);
+          }
+          holder.querySelector('.viz-spark').innerHTML=html;
+        }
+      });
+      lyr.on('mouseout',function(){
+        var holder=document.querySelector('.info, .leaflet-control.info');
+        var s=holder&&holder.querySelector('.viz-spark');
+        if(s)s.innerHTML='';
+      });
+    });
+    return true;
+  }
+
+  // ── Bivariate choropleth ───────────────────────────────────────────────
+  var BIVAR_COLORS=[
+    // rows: A high → low; cols: B low → high. Stevens' diverging scheme.
+    ['#3b4994','#8c62aa','#be64ac'],
+    ['#5698b9','#a5add3','#dfb0d6'],
+    ['#5ac8c8','#ace4e4','#e8e8e8'],
+  ];
+  function tertile(values,v){
+    if(!values.length)return 1;
+    var sorted=values.slice().sort(function(a,b){return a-b;});
+    var t1=sorted[Math.floor(sorted.length/3)];
+    var t2=sorted[Math.floor(2*sorted.length/3)];
+    return v<=t1?0:(v<=t2?1:2);
+  }
+  var bivarActive=false;
+  function applyBivar(fieldA,fieldB){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    var aVals=[],bVals=[];
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      if(typeof p[fieldA]==='number'&&isFinite(p[fieldA]))aVals.push(p[fieldA]);
+      if(typeof p[fieldB]==='number'&&isFinite(p[fieldB]))bVals.push(p[fieldB]);
+    });
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var a=p[fieldA],b=p[fieldB];
+      if(typeof a!=='number'||typeof b!=='number'||!isFinite(a)||!isFinite(b)){
+        lyr.setStyle&&lyr.setStyle({fillColor:'#f0f0f0',fillOpacity:0.5}); return;
+      }
+      var ar=2-tertile(aVals,a); // row 0 = A high
+      var bc=tertile(bVals,b);
+      lyr.setStyle&&lyr.setStyle({fillColor:BIVAR_COLORS[ar][bc],fillOpacity:0.8});
+    });
+    bivarActive=true;
+    drawBivarLegend(fieldA,fieldB);
+  }
+  function clearBivar(){
+    bivarActive=false;
+    if(nbhdLayer&&nbhdLayer.resetStyle){
+      nbhdLayer.eachLayer(function(lyr){nbhdLayer.resetStyle(lyr);});
+    }
+    var lg=document.querySelector('div[data-bivar-legend]');
+    if(lg)lg.remove();
+  }
+  function drawBivarLegend(a,b){
+    var lg=document.querySelector('div[data-bivar-legend]');
+    if(lg)lg.remove();
+    lg=document.createElement('div'); lg.setAttribute('data-bivar-legend','1');
+    lg.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;'+
+      'background:#fff;padding:8px;border:1px solid #ccc;border-radius:4px;'+
+      'font:11px system-ui;box-shadow:0 1px 4px rgba(0,0,0,.1);';
+    var html='<div style="margin-bottom:4px"><b>Bivariate</b><br>↑ '+a+'<br>→ '+b+'</div>';
+    html+='<table style="border-collapse:collapse">';
+    for(var r=0;r<3;r++){html+='<tr>';
+      for(var c=0;c<3;c++){
+        html+='<td style="width:18px;height:18px;background:'+BIVAR_COLORS[r][c]+'"></td>';
+      }
+      html+='</tr>';
+    }
+    html+='</table>';
+    lg.innerHTML=html; document.body.appendChild(lg);
+  }
+  function openBivarPicker(){
+    var fields=[];
+    if(typeof nbhdLayer!=='undefined'&&nbhdLayer&&nbhdLayer.eachLayer){
+      var s={}; nbhdLayer.eachLayer(function(lyr){
+        var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+        for(var k in p)if(typeof p[k]==='number'&&isFinite(p[k]))s[k]=true;
+      });
+      fields=Object.keys(s).sort();
+    }
+    if(!fields.length){alert('No numeric fields available.');return;}
+    var a=prompt('Field A (vertical axis):','outreach_need');
+    if(!a||fields.indexOf(a)<0){alert('Unknown field: '+a);return;}
+    var b=prompt('Field B (horizontal axis):','dpi');
+    if(!b||fields.indexOf(b)<0){alert('Unknown field: '+b);return;}
+    applyBivar(a,b);
+  }
+
+  function ready(){
+    var ok=attachSparkline();
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return ok;
+    function vb(label,fn){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(vb('Bivariate ▦',function(){if(bivarActive)clearBivar();else openBivarPicker();}));
+    panel.appendChild(vb('Spark ⇆',function(){sparkActive=!sparkActive;
+      flashV('Sparklines '+(sparkActive?'on':'off'));}));
+    return true;
+  }
+  function flashV(msg){
+    var t=document.querySelector('div[data-viz-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-viz-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:160px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent=msg; t.style.display='block';
+    setTimeout(function(){t.style.display='none';},1800);
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('VIZ_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -1532,6 +1902,10 @@ PATCHES = [
     ("ANNOTATE_V1: sticky notes + status badges", P10_OLD, P10_NEW, "/*ANNOTATE_V1*/"),
     # P11: layer math — diverging A−B compare and boolean overlay filter.
     ("COMPARE_V1: layer math (A-B + boolean filter)", P11_OLD, P11_NEW, "/*COMPARE_V1*/"),
+    # P12: decision support — forecast cone + recommend-N-tracts CSV.
+    ("DECIDE_V1: forecast cone + recommend-N-tracts", P12_OLD, P12_NEW, "/*DECIDE_V1*/"),
+    # P13: visualization — sparkline-in-tooltip + bivariate choropleth.
+    ("VIZ_V1: sparkline tooltip + bivariate choropleth", P13_OLD, P13_NEW, "/*VIZ_V1*/"),
 ]
 
 

@@ -94,7 +94,7 @@ class TestExistingPatchesShape(unittest.TestCase):
         # must have an idempotency marker. The naming convention is _V1 etc.
         embed_prefixes = (
             "MAP_EXT_V1", "PDF_EXPORT_V1", "INSIGHTS_V1", "TOOLS_V1",
-            "REPORTS_V1", "ANNOTATE_V1", "COMPARE_V1",
+            "REPORTS_V1", "ANNOTATE_V1", "COMPARE_V1", "DECIDE_V1", "VIZ_V1",
         )
         for entry in patch_body.PATCHES:
             name = entry[0]

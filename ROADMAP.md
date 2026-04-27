@@ -23,6 +23,24 @@ multi-day project that doesn't fit a single review cycle.
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
 
+### Batch 5 (statistical robustness, decision support, dataviz)
+- `buildlib/scoring.py::_compute_slope_cis` — bootstrap 90% CIs around
+  every `*_slope`. Writes `*_slope_ci_lo` / `*_slope_ci_hi`. Default
+  200 resamples, deterministic seed.
+- `buildlib/scoring.py::_flag_anomalies` — z-score per-nbhd on the
+  county-wide YoY-change distribution; flags `<base>_anomaly_yy` and
+  `<base>_anomaly_z` when any year exceeds 3σ.
+- `scripts/schema_diff.py` — diffs key sets / types / coverage between
+  two `core.json` builds. Pairs with `cluster_snapshot.py` so the
+  nightly workflow catches both schema drift and cluster drift.
+- `DECIDE_V1` patch: forecast cone (slope-based projection w/ CI band
+  visualized as dashed outlines) and "Recommend N tracts" with a
+  CSV-exported worklist. Score = `outreach_need * sqrt(parcels)` so
+  the recommender doesn't collapse onto the largest nbhd.
+- `VIZ_V1` patch: per-tract sparkline-in-tooltip showing the full
+  per-year trajectory of the current layer base, plus a bivariate
+  3×3 choropleth (Stevens' palette) for two-dimensional cross-tab.
+
 ### Batch 4 (operator ergonomics, annotations, layer math, docs)
 - `CLAUDE.md` — orientation for future Claude sessions: repo layout,
   encryption workflow, idempotency-marker convention, common pitfalls.
