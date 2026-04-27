@@ -138,11 +138,146 @@ P4_NEW = (
 )
 
 
+#  Patch 5: extensions bundle — permalinks, split-screen compare, worklist CSV.
+#
+#  This is a single injection at end-of-body so it doesn't depend on internal
+#  variable layout we can't see from the encrypted side. The injected code:
+#
+#   - reads/writes ?layer=…&year=…&q=… on the URL so a tract or layer/year
+#     can be linked. On load it dispatches synthetic 'change' events on the
+#     matching radio inputs and year selector.
+#   - adds a fixed-position "Copy link" / "Compare ▤" / "Worklist CSV ⇩"
+#     control panel. "Compare" opens the same URL in a new window with the
+#     current hash state preserved — no shared-memory split, but cheap and
+#     works on the password-gated deploy.
+#   - "Worklist CSV" iterates Leaflet's nbhdLayer.eachLayer, filters to
+#     features whose current-layer field is non-null AND not hidden, and
+#     downloads a CSV with a stable column set.
+#
+#  Each block is wrapped in try/catch so the page still renders if a piece
+#  of the harness has been renamed since this patch was written. The marker
+#  comment '/*MAP_EXT_V1*/' is what patch_body.py uses for idempotency.
+P5_OLD = "</body></html>\n"
+P5_NEW = """<script>/*MAP_EXT_V1*/
+(function(){
+try{
+  // ── Permalinks ────────────────────────────────────────────────────────────
+  // Read ?layer=…&year=…&q=… on load and re-apply by dispatching change
+  // events. Hooks into existing radios by VALUE, not by selector — so the
+  // patch survives most CSS-class renames.
+  function applyState(){
+    var p=new URLSearchParams(window.location.hash.replace(/^#/,''));
+    var l=p.get('layer'); var y=p.get('year'); var q=p.get('q');
+    if(l){
+      var radio=document.querySelector('input[type=radio][value="'+l+'"]');
+      if(radio){radio.checked=true;radio.dispatchEvent(new Event('change',{bubbles:true}));}
+    }
+    if(y){
+      var sel=document.querySelector('select[name="year"], select#year, select.year-select');
+      if(sel){sel.value=y;sel.dispatchEvent(new Event('change',{bubbles:true}));}
+    }
+    if(q){var box=document.querySelector('input[type=search], input[name="q"]');
+          if(box){box.value=q;box.dispatchEvent(new Event('input',{bubbles:true}));}}
+  }
+  function snapshotState(){
+    var l=(document.querySelector('input[type=radio]:checked')||{}).value||'';
+    var sel=document.querySelector('select[name="year"], select#year, select.year-select');
+    var y=sel?sel.value:'';
+    var box=document.querySelector('input[type=search], input[name="q"]');
+    var q=box?box.value:'';
+    var p=new URLSearchParams();
+    if(l)p.set('layer',l); if(y)p.set('year',y); if(q)p.set('q',q);
+    return p.toString();
+  }
+  function copyPermalink(){
+    var s=snapshotState();
+    var url=window.location.origin+window.location.pathname+(s?'#'+s:'');
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(function(){flash('Link copied');},
+                                              function(){window.prompt('Copy link:',url);});
+    }else{window.prompt('Copy link:',url);}
+  }
+
+  // ── Split-screen compare ──────────────────────────────────────────────────
+  // Open a second window of the same URL with the current hash. The viewer
+  // arranges them side by side. No shared state — both windows are fully
+  // independent (they each prompted for the password).
+  function openCompare(){
+    var s=snapshotState();
+    var url=window.location.origin+window.location.pathname+(s?'#'+s:'');
+    window.open(url,'_blank','width=900,height=900,noopener');
+  }
+
+  // ── Worklist CSV ──────────────────────────────────────────────────────────
+  // Iterates nbhdLayer (Leaflet) and exports a CSV of every visible feature.
+  // Falls back to all features if featureHidden() isn't defined yet.
+  function downloadWorklist(){
+    var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
+        'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
+    var hidden=window.featureHidden||function(){return false;};
+    var seen=0; var emitted=0;
+    try{
+      if(typeof nbhdLayer!=='undefined'&&nbhdLayer&&nbhdLayer.eachLayer){
+        nbhdLayer.eachLayer(function(lyr){
+          var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
+          if(hidden(p))return;
+          var r=headers.map(function(h){var v=p[h];
+            if(v==null)return ''; v=String(v);
+            if(/[",\\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+            return v;});
+          rows.push(r.join(',')); emitted++;
+        });
+      }
+    }catch(e){console.warn('worklist export:',e);}
+    if(!rows.length){flash('No visible nbhds (seen '+seen+'). Check filters.');return;}
+    var csv=headers.join(',')+'\\n'+rows.join('\\n')+'\\n';
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    var ts=new Date().toISOString().slice(0,10);
+    a.download='outreach-worklist-'+ts+'.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},0);
+    flash('Worklist: '+emitted+' nbhds');
+  }
+
+  // ── UI panel + flash toast ────────────────────────────────────────────────
+  var panel=document.createElement('div');
+  panel.style.cssText='position:fixed;right:10px;bottom:10px;z-index:9999;'+
+    'display:flex;gap:6px;font:12px system-ui,-apple-system,sans-serif;';
+  function btn(label,fn){
+    var b=document.createElement('button'); b.type='button'; b.textContent=label;
+    b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);';
+    b.addEventListener('click',fn); return b;
+  }
+  panel.appendChild(btn('Copy link',copyPermalink));
+  panel.appendChild(btn('Compare ▤',openCompare));
+  panel.appendChild(btn('Worklist CSV ⇩',downloadWorklist));
+  var toast=document.createElement('div');
+  toast.style.cssText='position:fixed;left:50%;top:18px;transform:translateX(-50%);'+
+    'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+    'font:12px system-ui;display:none;';
+  function flash(msg){toast.textContent=msg;toast.style.display='block';
+    setTimeout(function(){toast.style.display='none';},1800);}
+  document.body.appendChild(panel);
+  document.body.appendChild(toast);
+
+  // Apply hash state once the body has had a chance to wire up its listeners.
+  if(window.location.hash){setTimeout(applyState,400);}
+}catch(err){console.warn('MAP_EXT_V1 init failed:',err);}
+})();
+</script>
+</body></html>
+"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
     ("Gi*: partial-neighbor scale", P3_OLD, P3_NEW),
     ("propYrFields: new per-year layers", P4_OLD, P4_NEW),
+    ("MAP_EXT_V1: permalinks + compare + worklist CSV", P5_OLD, P5_NEW),
 ]
 
 

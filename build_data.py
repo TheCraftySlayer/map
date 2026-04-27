@@ -56,6 +56,7 @@ from buildlib.scoring import (
     _compute_exemption_gaps, _boost_outreach_with_gaps,
     _compute_gi_star_per_year, _compute_dpi_per_year,
     _compute_uptake_ratios, _compute_trend_slopes,
+    _flag_low_confidence,
 )
 from buildlib.census import (
     ACS_CACHE_DIR, ACS_CACHE_TTL_DAYS,
@@ -1682,6 +1683,9 @@ def main():
     _compute_dpi_per_year(nbhd_stats)
     _compute_uptake_ratios(nbhd_stats)
     _compute_trend_slopes(nbhd_stats)
+    _flag_low_confidence(nbhd_stats)
+    _lc = sum(1 for p in nbhd_stats.values() if p.get('low_confidence'))
+    print(f"  Low-confidence flag: {_lc} nbhds")
     _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                     for k in p.keys() if k.startswith('dpi_')})
     _slope_nbhds = sum(1 for p in nbhd_stats.values()

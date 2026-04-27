@@ -330,6 +330,17 @@ def main():
 
     if args.v1 and not args.password:
         sys.exit("--v1 requires --password")
+    if args.v1:
+        # v1 ships a single-tier 200k-iteration manifest. v2 (default) gives
+        # a 3× harder KDF and tier separation. Operators staying on v1 are
+        # opting into both a weaker derivation and the loss of a public/
+        # staff split — surface that explicitly so it's a deliberate choice.
+        print(
+            "WARNING: --v1 is legacy. Prefer v2 (omit --v1, pass "
+            "--public-password/--staff-password) for 600k PBKDF2 + tier "
+            "separation. v1 will be removed in a future release.",
+            file=sys.stderr,
+        )
     if not args.v1 and not (args.public_password and args.staff_password):
         # Backward-compat: if only --password is given and --v1 isn't set,
         # use it for BOTH tiers. That gives the v2 manifest/hardening with
