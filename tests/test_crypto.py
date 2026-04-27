@@ -151,6 +151,53 @@ class TestV2RoundTrip(CryptoRoundTripBase):
                                "--src", str(rt), "--out", str(rt / "out")])
 
 
+class TestCheckMode(CryptoRoundTripBase):
+    """`decrypt_data.py --check` must verify ciphertext without writing
+    plaintext to disk, and exit nonzero on any decryption failure."""
+
+    def _bundle(self):
+        out = self.root / "public"
+        self._run_encrypt(["--public-password", "pub", "--staff-password", "staff",
+                           "--src", str(self.root), "--out", str(out)])
+        return out
+
+    def test_check_v2_succeeds_with_correct_password(self):
+        bundle = self._bundle()
+        argv = [sys.argv[0], "--staff-password", "staff", "--src", str(bundle), "--check"]
+        old = sys.argv; sys.argv = argv
+        try:
+            rc = decrypt_mod.main()
+        finally:
+            sys.argv = old
+        self.assertIn(rc, (0, None))
+        # No plaintext written under bundle/ — only the original .enc + manifest.
+        self.assertFalse((bundle / "index_body.html").exists())
+        self.assertFalse((bundle / "data" / "core.json").exists())
+        self.assertFalse((bundle / "data" / "layers.json").exists())
+
+    def test_check_v2_fails_with_wrong_password(self):
+        bundle = self._bundle()
+        argv = [sys.argv[0], "--staff-password", "WRONG", "--src", str(bundle), "--check"]
+        old = sys.argv; sys.argv = argv
+        try:
+            with self.assertRaises(SystemExit):
+                decrypt_mod.main()
+        finally:
+            sys.argv = old
+
+    def test_check_v1_succeeds(self):
+        out = self.root / "v1pub"
+        self._run_encrypt(["--v1", "--password", "legacy",
+                           "--src", str(self.root), "--out", str(out)])
+        argv = [sys.argv[0], "--password", "legacy", "--src", str(out), "--check"]
+        old = sys.argv; sys.argv = argv
+        try:
+            rc = decrypt_mod.main()
+        finally:
+            sys.argv = old
+        self.assertIn(rc, (0, None))
+
+
 class TestVerifyBlob(unittest.TestCase):
     """The tier-identifier verify blob must round-trip cleanly."""
 

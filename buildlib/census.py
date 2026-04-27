@@ -162,6 +162,13 @@ def fetch_tract_acs(tract_geo, outdir='data', use_cache=True, refresh=False,
                 'pct_65plus': round(seniors / pop, 4) if pop else None,
                 'acs_year': yr,
                 'tract_pop': pop,
+                # Stale-tract flag: when the loop falls through to an
+                # earlier vintage (e.g. 2023 fetch failed → 2022 used),
+                # mark the tract so the frontend can desaturate it.
+                # The loop bails on the first successful year, so any
+                # vintage older than 2023 means the freshest data wasn't
+                # available for this tract.
+                'acs_stale': yr < 2023,
             }
         merged = _merge_tract_acs(feats, by_geoid)
         print(f"  Tract ACS {yr}: merged {merged}/{len(feats)} tracts")

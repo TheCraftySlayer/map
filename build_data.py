@@ -56,6 +56,7 @@ from buildlib.scoring import (
     _compute_exemption_gaps, _boost_outreach_with_gaps,
     _compute_gi_star_per_year, _compute_dpi_per_year,
     _compute_uptake_ratios, _compute_trend_slopes,
+    _compute_slope_cis, _flag_anomalies,
     _flag_low_confidence,
 )
 from buildlib.census import (
@@ -68,6 +69,7 @@ from buildlib.census import (
 from buildlib.pipeline import (
     merge_nbhd_stats_into_core, assemble_layers,
     write_json_compact, write_core_and_layers,
+    write_build_info,
 )
 
 
@@ -1687,9 +1689,13 @@ def main():
     _compute_dpi_per_year(nbhd_stats)
     _compute_uptake_ratios(nbhd_stats)
     _compute_trend_slopes(nbhd_stats)
+    _compute_slope_cis(nbhd_stats)
+    _flag_anomalies(nbhd_stats)
     _flag_low_confidence(nbhd_stats)
     _lc = sum(1 for p in nbhd_stats.values() if p.get('low_confidence'))
-    print(f"  Low-confidence flag: {_lc} nbhds")
+    _anom = sum(1 for p in nbhd_stats.values()
+                if any(k.endswith('_anomaly_z') for k in p))
+    print(f"  Low-confidence flag: {_lc} nbhds; anomalies: {_anom} nbhds")
     _dpi_yrs = len({k.rsplit('_', 1)[-1] for p in nbhd_stats.values()
                     for k in p.keys() if k.startswith('dpi_')})
     _slope_nbhds = sum(1 for p in nbhd_stats.values()
@@ -1715,6 +1721,25 @@ def main():
     final_layers = assemble_layers(existing_layers, new_layers, preserved_keys, rebuilt_keys)
     print(f"  {core_path}: {core_size:,} bytes")
     print(f"  {layers_path}: {layers_size:,} bytes")
+
+    # Public-tier provenance: small JSON the loader can fetch without a
+    # password to surface "data current as of …" + the build SHA.
+    parcel_total = sum(int(p.get('parcels', 0)) for p in nbhd_stats.values())
+    acs_yr = None
+    for feat in (existing_core.get('TRACT_GEO') or {}).get('features', []) or []:
+        ay = (feat.get('properties') or {}).get('acs_year')
+        if isinstance(ay, int):
+            acs_yr = ay
+            break
+    write_build_info(
+        out_path=core_path.parent / 'build_info.json',
+        core_size=core_size,
+        layers_size=layers_size,
+        nbhd_count=len(nbhd_stats),
+        parcel_total=parcel_total,
+        acs_year=acs_yr,
+    )
+    print(f"  data/build_info.json: provenance written")
 
     # ── Compute sidebar stats from data ──
     all_roll_years = set()

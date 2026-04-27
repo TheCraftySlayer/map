@@ -15,6 +15,9 @@ extraction is the per-year scoring orchestration.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import time
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -60,6 +63,52 @@ def write_json_compact(path: Path, payload: object) -> int:
     with open(path, 'w') as f:
         json.dump(payload, f, separators=(',', ':'))
     return path.stat().st_size
+
+
+def _git_sha(repo_dir: Path) -> str | None:
+    """Best-effort `git rev-parse HEAD`; returns None outside a checkout."""
+    try:
+        out = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=str(repo_dir),
+            stderr=subprocess.DEVNULL, timeout=2,
+        )
+        return out.decode().strip()
+    except Exception:
+        return None
+
+
+def write_build_info(out_path: Path,
+                     core_size: int,
+                     layers_size: int,
+                     nbhd_count: int,
+                     parcel_total: int | None = None,
+                     acs_year: int | None = None,
+                     extra: Mapping[str, object] | None = None) -> Path:
+    """Write data/build_info.json — non-secret provenance for the deploy.
+
+    The loader can fetch this to display "data current as of …" without
+    needing a password (the file is public-tier by design). The schema
+    is intentionally small so it can be eyeballed in a PR review.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        'built_at': int(time.time()),
+        'built_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'git_sha': _git_sha(out_path.parent.parent if out_path.parent.name == 'data' else Path('.')),
+        'nbhd_count': nbhd_count,
+        'core_bytes': core_size,
+        'layers_bytes': layers_size,
+    }
+    if parcel_total is not None:
+        payload['parcel_total'] = parcel_total
+    if acs_year is not None:
+        payload['acs_year'] = acs_year
+    if extra:
+        for k, v in extra.items():
+            payload.setdefault(k, v)
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    return out_path
 
 
 def write_core_and_layers(existing_core: dict,

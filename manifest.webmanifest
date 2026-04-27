@@ -1,0 +1,25 @@
+{
+  "name": "Bernalillo County Spatial Equity",
+  "short_name": "BernCo Equity",
+  "description": "Bernalillo County Assessor spatial-equity map. Password-gated; staff use only.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3f4f6",
+  "theme_color": "#185FA5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%23185FA5'/><text x='50%25' y='54%25' text-anchor='middle' fill='%23fff' font-family='system-ui' font-size='90' font-weight='700'>BC</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%23185FA5'/><text x='50%25' y='54%25' text-anchor='middle' fill='%23fff' font-family='system-ui' font-size='220' font-weight='700'>BC</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable any"
+    }
+  ]
+}

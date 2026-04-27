@@ -7,3 +7,9 @@ data/core.json
 data/layers.json
 # ACS disk cache — re-fetched on demand; don't ship it in the repo
 data/acs_cache/
+# CHAS disk cache — same story
+data/chas_cache/
+# Operator scratch directory used by the Makefile (decrypt → patch → encrypt)
+_work/
+# Bundle from `make rotate-{staff,public}` — review then upload, don't commit
+public_rotated/

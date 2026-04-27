@@ -40,6 +40,9 @@ EXPECTED_SCALAR_FIELDS = {
     'outreach_need_slope',
     'pct_hoh_slope', 'pct_vet_slope', 'pct_val_freeze_slope',
     'hoh_churn_slope',
+    # Bootstrap CIs added in batch 5 — at least the outreach_need pair
+    # should appear given the synthetic test fixture has 6 years.
+    'outreach_need_slope_ci_lo', 'outreach_need_slope_ci_hi',
 }
 
 
@@ -81,6 +84,9 @@ class TestSchemaSnapshot(unittest.TestCase):
         build_data._compute_dpi_per_year(self.stats)
         build_data._compute_uptake_ratios(self.stats)
         build_data._compute_trend_slopes(self.stats)
+        # Smaller bootstrap to keep the test fast.
+        build_data._compute_slope_cis(self.stats, n_bootstrap=40)
+        build_data._flag_anomalies(self.stats)
         build_data._flag_low_confidence(self.stats)
 
     def _emitted_per_year_bases(self):
@@ -133,6 +139,63 @@ class TestSchemaSnapshot(unittest.TestCase):
             "Add them to EXPECTED_PER_YEAR_BASES and wire them up in "
             "patch_body.py / body HTML so the year selector flips them.",
         )
+
+
+class TestSlopeCIs(unittest.TestCase):
+    def test_ci_brackets_point_estimate(self):
+        # Simple, low-noise series → CI should bracket the OLS slope tightly.
+        stats = {1: {f'outreach_need_{yy}': 0.2 + 0.05 * (yy - 20)
+                     for yy in range(20, 26)}}
+        build_data._compute_trend_slopes(stats)
+        slope = stats[1]['outreach_need_slope']
+        build_data._compute_slope_cis(stats, n_bootstrap=200)
+        lo = stats[1]['outreach_need_slope_ci_lo']
+        hi = stats[1]['outreach_need_slope_ci_hi']
+        self.assertLessEqual(lo, slope)
+        self.assertGreaterEqual(hi, slope)
+
+    def test_ci_skipped_when_slope_skipped(self):
+        # < 4 years → no slope and no CI.
+        stats = {1: {'outreach_need_24': 0.4, 'outreach_need_25': 0.5}}
+        build_data._compute_trend_slopes(stats)
+        build_data._compute_slope_cis(stats, n_bootstrap=50)
+        self.assertNotIn('outreach_need_slope_ci_lo', stats[1])
+
+    def test_ci_deterministic_with_fixed_seed(self):
+        # Same input + same seed → same output.
+        def mk():
+            return {1: {f'pct_hoh_{yy}': 0.18 + 0.005 * (yy - 20) + 0.001 * yy
+                        for yy in range(20, 26)}}
+        a = mk(); b = mk()
+        build_data._compute_trend_slopes(a); build_data._compute_trend_slopes(b)
+        build_data._compute_slope_cis(a, n_bootstrap=100, seed=42)
+        build_data._compute_slope_cis(b, n_bootstrap=100, seed=42)
+        self.assertEqual(a[1]['pct_hoh_slope_ci_lo'], b[1]['pct_hoh_slope_ci_lo'])
+        self.assertEqual(a[1]['pct_hoh_slope_ci_hi'], b[1]['pct_hoh_slope_ci_hi'])
+
+
+class TestAnomalyFlag(unittest.TestCase):
+    def test_huge_jump_flagged(self):
+        # 30+ ordinary deltas, then one massive one — must trip the 3σ flag.
+        stats = {}
+        for n in range(1, 41):
+            stats[n] = {f'pct_vf_denied_{yy}': 0.02 + 0.001 * n
+                        for yy in range(20, 26)}
+        # Implant a 50-pp jump in nbhd 99's last year.
+        stats[99] = {f'pct_vf_denied_{yy}': 0.02 for yy in range(20, 25)}
+        stats[99]['pct_vf_denied_25'] = 0.52
+        build_data._flag_anomalies(stats)
+        self.assertEqual(stats[99].get('pct_vf_denied_anomaly_yy'), 25)
+        self.assertGreater(abs(stats[99].get('pct_vf_denied_anomaly_z', 0)), 3)
+        # Untouched nbhds shouldn't trip.
+        for n in range(1, 41):
+            self.assertNotIn('pct_vf_denied_anomaly_yy', stats[n])
+
+    def test_no_op_with_too_few_deltas(self):
+        # < 30 deltas overall → bail out, no flags.
+        stats = {1: {'pct_vf_denied_24': 0.0, 'pct_vf_denied_25': 0.5}}
+        build_data._flag_anomalies(stats)
+        self.assertNotIn('pct_vf_denied_anomaly_yy', stats[1])
 
 
 class TestLowConfidenceFlag(unittest.TestCase):

@@ -162,6 +162,79 @@ def _decrypt_v2(manifest, args, src, out):
         sys.exit("Nothing was decrypted. Check that the .enc files are under --src and the password matches.")
 
 
+def _check_bundle(manifest, version, args, src):
+    """Verify every ciphertext file the supplied passwords can reach
+    decrypts cleanly. Doesn't write plaintext anywhere — bytes are
+    decrypted in-memory and discarded.
+
+    Exits 0 on success, 1 if anything failed. Intended for CI / smoke
+    checks before publishing a deploy.
+    """
+    failures = []
+    if version == 1:
+        if not args.password:
+            sys.exit("--check on a v1 manifest needs --password.")
+        try:
+            salt = base64.b64decode(manifest["salt"])
+            iterations = int(manifest["iterations"])
+        except (KeyError, ValueError) as e:
+            sys.exit(f"Bad v1 manifest: {e}")
+        kdf = "pbkdf2-sha256-600k" if iterations == 600_000 else "pbkdf2-sha256-200k"
+        key = derive_key(args.password, salt, kdf)
+        for rel in ("index_body.html.enc", "data/core.json.enc", "data/layers.json.enc"):
+            p = src / rel
+            if not p.exists():
+                failures.append(f"{rel}: missing on disk")
+                continue
+            try:
+                decrypt(p.read_bytes(), key)
+                print(f"  OK    {rel}")
+            except Exception as e:
+                failures.append(f"{rel}: {e}")
+                print(f"  FAIL  {rel}: {e}")
+    elif version == 2:
+        kdf = manifest.get("kdf", "pbkdf2-sha256-600k")
+        tiers = manifest.get("tiers", {})
+        files = manifest.get("files", {})
+        keys = {}
+        for tier_name, tier in tiers.items():
+            pw = (args.staff_password if tier_name == "staff"
+                  else args.public_password) or args.password
+            if not pw:
+                continue
+            k = _try_derive(pw, tier["salt"], tier["verify"], kdf)
+            if k is not None:
+                keys[tier_name] = k
+                print(f"  OK    tier={tier_name} (verify blob decrypted)")
+        if not keys:
+            sys.exit("No tier passwords matched. Pass --password or "
+                     "--public-password/--staff-password.")
+        for rel, tier_name in files.items():
+            k = keys.get(tier_name)
+            if k is None:
+                print(f"  skip  {rel:<26} (no key for tier={tier_name})")
+                continue
+            p = src / rel
+            if not p.exists():
+                failures.append(f"{rel}: missing on disk")
+                print(f"  FAIL  {rel} missing on disk")
+                continue
+            try:
+                decrypt(p.read_bytes(), k)
+                print(f"  OK    {rel}")
+            except Exception as e:
+                failures.append(f"{rel}: {e}")
+                print(f"  FAIL  {rel}: {e}")
+    else:
+        sys.exit(f"Unknown manifest version: {version}")
+
+    if failures:
+        print(f"\n--check: {len(failures)} failure(s)")
+        return 1
+    print("\n--check: OK (no plaintext written)")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--password", help="Single password: v1 main key, or v2 fallback for either tier.")
@@ -169,20 +242,35 @@ def main():
     ap.add_argument("--staff-password", help="v2: staff-tier password (layers + body).")
     ap.add_argument("--src", default=".", help="Directory containing the .enc files. Default: current dir.")
     ap.add_argument("--out", default=".", help="Where to write the plaintext. Default: current dir.")
+    ap.add_argument(
+        "--check", action="store_true",
+        help=(
+            "Verify the deploy bundle decrypts cleanly without writing any "
+            "plaintext to disk. Useful in CI before publishing — catches a "
+            "salt/manifest mismatch or a corrupt ciphertext early. Exits 0 "
+            "on success, 1 on any decryption failure."
+        ),
+    )
     args = ap.parse_args()
 
     if not (args.password or args.public_password or args.staff_password):
         sys.exit("Provide --password (any tier) or --public-password/--staff-password.")
 
     src = Path(args.src)
-    out = Path(args.out)
-    (out / "data").mkdir(parents=True, exist_ok=True)
 
     manifest_path = src / "data" / "enc_manifest.json"
     if not manifest_path.exists():
         sys.exit(f"Missing manifest: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     version = manifest.get("v", 1)
+
+    if args.check:
+        # Discard plaintext immediately; the goal is just "did AES-GCM
+        # authenticate?". Exits 1 on any failure.
+        return _check_bundle(manifest, version, args, src)
+
+    out = Path(args.out)
+    (out / "data").mkdir(parents=True, exist_ok=True)
 
     if version == 1:
         if not args.password:
@@ -199,4 +287,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

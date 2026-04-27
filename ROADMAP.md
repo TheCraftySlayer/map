@@ -23,6 +23,86 @@ multi-day project that doesn't fit a single review cycle.
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
 
+### Batch 6 (PWA / field-tools, provenance, past-events overlay)
+- `manifest.webmanifest` + `service-worker.js` — installable PWA with
+  cache-first ciphertext + network-first manifest. Offline-capable
+  once the loader has been visited at least once. SW never sees
+  plaintext.
+- `index.html` and `encrypt_data.py::LOADER` register the SW + link
+  the manifest. `encrypt_data.py` copies both PWA assets into the
+  deploy bundle on every run.
+- `FIELD_V1` patch: GPS "you are here" pin (Geolocation API), four
+  quick-log buttons (knock / no-answer / spoke / left-material),
+  online/offline status pip, CSV export of the queued log.
+- `PASTEVENTS_V1` patch: load any past-events CSV (drag/click) and
+  render as colored point markers; persisted in localStorage.
+- `buildlib/pipeline.py::write_build_info` writes `data/build_info.json`
+  on every rebuild — non-secret provenance the loader can fetch
+  without a password (built_at, git_sha, nbhd_count, ACS vintage).
+- `buildlib/census.py::fetch_tract_acs` now stamps `acs_stale: true`
+  on tracts whose ACS came from a fallback vintage older than 2023,
+  so the frontend can desaturate stale data.
+
+### Batch 5 (statistical robustness, decision support, dataviz)
+- `buildlib/scoring.py::_compute_slope_cis` — bootstrap 90% CIs around
+  every `*_slope`. Writes `*_slope_ci_lo` / `*_slope_ci_hi`. Default
+  200 resamples, deterministic seed.
+- `buildlib/scoring.py::_flag_anomalies` — z-score per-nbhd on the
+  county-wide YoY-change distribution; flags `<base>_anomaly_yy` and
+  `<base>_anomaly_z` when any year exceeds 3σ.
+- `scripts/schema_diff.py` — diffs key sets / types / coverage between
+  two `core.json` builds. Pairs with `cluster_snapshot.py` so the
+  nightly workflow catches both schema drift and cluster drift.
+- `DECIDE_V1` patch: forecast cone (slope-based projection w/ CI band
+  visualized as dashed outlines) and "Recommend N tracts" with a
+  CSV-exported worklist. Score = `outreach_need * sqrt(parcels)` so
+  the recommender doesn't collapse onto the largest nbhd.
+- `VIZ_V1` patch: per-tract sparkline-in-tooltip showing the full
+  per-year trajectory of the current layer base, plus a bivariate
+  3×3 choropleth (Stevens' palette) for two-dimensional cross-tab.
+
+### Batch 4 (operator ergonomics, annotations, layer math, docs)
+- `CLAUDE.md` — orientation for future Claude sessions: repo layout,
+  encryption workflow, idempotency-marker convention, common pitfalls.
+- `Makefile` wraps the body-edit ritual: `make decrypt → patch →
+  encrypt → check → clean`. Plus `rotate-staff` / `rotate-public`
+  one-shots that produce a `public_rotated/` bundle for review.
+- `.githooks/pre-commit` refuses commits that include plaintext map
+  data, ACS cache, or `_work/` outputs. Installed via `make hooks`.
+- `decrypt_data.py --check` verifies a deploy bundle decrypts without
+  writing plaintext to disk. Three new tests in `tests/test_crypto.py`
+  cover v1 + v2 + wrong-password paths.
+- `.gitignore` extended to cover `_work/`, `data/chas_cache/`, and
+  `public_rotated/`.
+- `ANNOTATE_V1` patch: per-tract sticky notes + `investigating /
+  verified / resolved` status badges, persisted in `localStorage`.
+  Alt-click any nbhd to edit. Export/import as JSON for hand-off.
+- `COMPARE_V1` patch: layer math — diverging A−B compare across any
+  two numeric fields (or two years), and a free-form boolean filter
+  (`p.dpi > 0.4 && p.hoh_uptake < 0.7`) that highlights matching
+  tracts and dims non-matches.
+
+### Batch 3 (insights, spatial tools, reports)
+- `patch_body.py` engine now supports an optional 4th-tuple **marker**
+  for idempotency — fixes the latent double-injection bug in PDF_EXPORT_V1
+  and unblocks chained patches that embed prior anchors. Six unit tests
+  in `tests/test_patch_body.py` lock it down.
+- `INSIGHTS_V1` patch: tooltip auto-narration with percentile rank,
+  expandable "Why this color?" breakdown of composite scores, "Movers"
+  side panel listing the 10 nbhds with the largest YoY outreach_need
+  shift, and peer-tract similarity (z-scored Euclidean over the
+  demographic vector).
+- `TOOLS_V1` patch: address-to-tract search via Nominatim (1 req/sec
+  throttled, county-constrained), free-draw polygon → in-polygon
+  aggregator (count/mean/median/sum of the active layer), buffer rings
+  (1 / 2 / 5 mi Euclidean) around the four community centers, and a
+  click-to-measure polyline with distance + closed-polygon area.
+- `REPORTS_V1` patch: multi-page county PDF (cover, methodology,
+  outreach_need quartile pages, low-confidence appendix) and a
+  quarterly Commission packet template (county totals, top-10
+  outreach_need, top-10 dpi, optional outreach-dose-vs-need section).
+  Reuses jsPDF loaded by `PDF_EXPORT_V1`.
+
 ### Batch 2
 - `patch_body.py::PDF_EXPORT_V1` adds an html2canvas + jsPDF PDF
   download button to the extension panel. Both libraries are pinned
