@@ -1139,6 +1139,373 @@ try{
 })();"""
 
 
+#  Patch 10: ANNOTATE_V1 — per-tract sticky notes + workflow status badges.
+#
+#  All persistence is local: window.localStorage with a versioned key. No
+#  shared state, no backend. The export/import buttons make the notes
+#  shareable as a single JSON file an operator can email to a colleague.
+#
+#  Schema (per nbhd):
+#    { note: "...free-form text...",
+#      status: "investigating|verified|resolved|null",
+#      updated: <epoch ms> }
+#
+#  Status colors are deliberately muted — the badge sits next to the
+#  layer color, doesn't replace it.
+P10_OLD = "/*REPORTS_V1*/"
+P10_NEW = """/*REPORTS_V1*//*ANNOTATE_V1*/
+;(function(){
+try{
+  var STORE_KEY='bernco-annotations-v1';
+  var STATUSES=['investigating','verified','resolved'];
+  var STATUS_COLOR={investigating:'#c80',verified:'#063',resolved:'#666'};
+
+  function load(){
+    try{return JSON.parse(localStorage.getItem(STORE_KEY)||'{}');}
+    catch(e){return {};}
+  }
+  function save(db){
+    try{localStorage.setItem(STORE_KEY,JSON.stringify(db));}
+    catch(e){console.warn('annotate save failed:',e);}
+  }
+  var DB=load();
+
+  function annotationFor(nbhd){return DB[String(nbhd)]||null;}
+  function setAnnotation(nbhd,patch){
+    var k=String(nbhd);
+    var cur=DB[k]||{};
+    var next=Object.assign({},cur,patch,{updated:Date.now()});
+    if(!next.note&&!next.status){delete DB[k];}
+    else{DB[k]=next;}
+    save(DB);
+    repaintBadges();
+  }
+
+  // Render a small status dot inside each Leaflet path. Cheap to redo
+  // on every mutation since nbhd count is ~200.
+  function repaintBadges(){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var ann=annotationFor(p.nbhd);
+      // Use Leaflet path's setStyle to add a dashArray when annotated;
+      // doesn't repaint the choropleth color.
+      if(ann){
+        lyr.setStyle&&lyr.setStyle({dashArray:'4,2'});
+      }else{
+        lyr.setStyle&&lyr.setStyle({dashArray:null});
+      }
+    });
+    renderBadgeOverlay();
+  }
+
+  // SVG overlay layer of small status circles at each annotated nbhd's centroid.
+  var badgeLayer=null;
+  function renderBadgeOverlay(){
+    var map=null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function'){map=v;break;}
+    }catch(_){}}
+    if(!map||typeof L==='undefined')return;
+    if(badgeLayer){map.removeLayer(badgeLayer);badgeLayer=null;}
+    badgeLayer=L.layerGroup();
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer){badgeLayer.addTo(map);return;}
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var ann=annotationFor(p.nbhd); if(!ann)return;
+      var c=lyr.getBounds&&lyr.getBounds().getCenter(); if(!c)return;
+      var color=STATUS_COLOR[ann.status]||'#888';
+      L.circleMarker(c,{radius:6,color:'#fff',weight:2,
+        fillColor:color,fillOpacity:0.9}).addTo(badgeLayer)
+        .bindTooltip((ann.status?'['+ann.status+'] ':'')+(ann.note||''));
+    });
+    badgeLayer.addTo(map);
+  }
+
+  // ── Editor popup ───────────────────────────────────────────────────────
+  function openEditor(p){
+    var existing=annotationFor(p.nbhd)||{};
+    var bg=document.createElement('div');
+    bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:10001;'+
+      'display:flex;align-items:center;justify-content:center;';
+    var card=document.createElement('div');
+    card.style.cssText='background:#fff;border-radius:6px;padding:18px 22px;'+
+      'min-width:340px;max-width:480px;font:13px system-ui,-apple-system,sans-serif;'+
+      'box-shadow:0 4px 18px rgba(0,0,0,.18);';
+    card.innerHTML=
+      '<h3 style="margin:0 0 10px;font-size:14px">Annotate nbhd '+p.nbhd+'</h3>'+
+      '<label style="display:block;margin-bottom:6px">Status</label>'+
+      '<select id="ann-status" style="width:100%;padding:5px;margin-bottom:12px">'+
+        '<option value="">— none —</option>'+
+        STATUSES.map(function(s){
+          return '<option value="'+s+'"'+(existing.status===s?' selected':'')+'>'+s+'</option>';
+        }).join('')+
+      '</select>'+
+      '<label style="display:block;margin-bottom:6px">Note</label>'+
+      '<textarea id="ann-note" rows="4" style="width:100%;padding:5px;font:12px monospace;'+
+        'box-sizing:border-box">'+
+        (existing.note||'').replace(/</g,'&lt;')+'</textarea>'+
+      '<div style="margin-top:6px;font-size:11px;color:#888">'+
+        (existing.updated?'Last updated '+new Date(existing.updated).toLocaleString():'New annotation')+
+      '</div>'+
+      '<div style="margin-top:14px;display:flex;gap:6px;justify-content:flex-end">'+
+        '<button id="ann-cancel" type="button" style="padding:5px 12px">Cancel</button>'+
+        '<button id="ann-delete" type="button" style="padding:5px 12px;color:#a30">Delete</button>'+
+        '<button id="ann-save" type="button" style="padding:5px 14px;background:#185FA5;'+
+          'color:#fff;border:none;border-radius:3px">Save</button>'+
+      '</div>';
+    bg.appendChild(card); document.body.appendChild(bg);
+    function close(){document.body.removeChild(bg);}
+    card.querySelector('#ann-cancel').onclick=close;
+    card.querySelector('#ann-delete').onclick=function(){
+      setAnnotation(p.nbhd,{note:'',status:''}); close();
+    };
+    card.querySelector('#ann-save').onclick=function(){
+      setAnnotation(p.nbhd,{
+        note:card.querySelector('#ann-note').value.trim(),
+        status:card.querySelector('#ann-status').value||null,
+      }); close();
+    };
+  }
+
+  // Hook click on each nbhd to open the editor (only when the user
+  // alt-clicks, so we don't steal normal click semantics from the body).
+  function attachClicks(){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return false;
+    nbhdLayer.eachLayer(function(lyr){
+      lyr.on('click',function(e){
+        if(!(e.originalEvent&&(e.originalEvent.altKey||e.originalEvent.metaKey)))return;
+        var p=e.target.feature&&e.target.feature.properties; if(!p)return;
+        openEditor(p);
+      });
+    });
+    return true;
+  }
+
+  // ── Export / import JSON ───────────────────────────────────────────────
+  function exportNotes(){
+    var blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    var ts=new Date().toISOString().slice(0,10);
+    a.download='annotations-'+ts+'.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},0);
+  }
+  function importNotes(){
+    var inp=document.createElement('input'); inp.type='file'; inp.accept='application/json';
+    inp.onchange=function(){
+      var f=inp.files&&inp.files[0]; if(!f)return;
+      var fr=new FileReader();
+      fr.onload=function(){
+        try{var incoming=JSON.parse(fr.result);
+          var keys=Object.keys(incoming);
+          if(!confirm('Import '+keys.length+' annotations? Existing notes for the same nbhds will be replaced.'))return;
+          keys.forEach(function(k){DB[k]=incoming[k];});
+          save(DB); repaintBadges();
+        }catch(e){alert('Import failed: '+e.message);}
+      };
+      fr.readAsText(f);
+    };
+    inp.click();
+  }
+
+  function ready(){
+    if(!attachClicks())return false;
+    repaintBadges();
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return true;
+    function ab(label,fn){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(ab('Notes ↑',exportNotes));
+    panel.appendChild(ab('Notes ↓',importNotes));
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('ANNOTATE_V1 init failed:',err);}
+})();"""
+
+
+#  Patch 11: COMPARE_V1 — layer math (diverging A−B and boolean overlay).
+#
+#  Two new tools that operate on the data already loaded into nbhdLayer:
+#
+#    - A−B compare: pick two layers (or two years of one), pick a diverging
+#      color scale, and the polygon is repainted by the per-nbhd difference.
+#      Original layer is restored on toggle off.
+#    - Boolean overlay: enter a JS expression (sandboxed by `Function`)
+#      over the per-nbhd properties dict — e.g. `p.dpi>0.4 && p.hoh_uptake<0.7`
+#      — and matching tracts get a yellow outline. Non-matching are dimmed.
+#
+#  Both leave the body's existing color logic alone; they layer on top so
+#  toggling either off restores normal rendering.
+P11_OLD = "/*ANNOTATE_V1*/"
+P11_NEW = """/*ANNOTATE_V1*//*COMPARE_V1*/
+;(function(){
+try{
+  // ── List per-nbhd field names from the loaded layer ────────────────────
+  function fieldNames(){
+    var s={};
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return [];
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      Object.keys(p).forEach(function(k){
+        if(typeof p[k]==='number'&&isFinite(p[k]))s[k]=true;
+      });
+    });
+    return Object.keys(s).sort();
+  }
+
+  // Diverging color (red high, blue low) over a normalized [-1,1] range.
+  function divColor(t){
+    if(t==null||!isFinite(t))return '#f0f0f0';
+    var c=Math.max(-1,Math.min(1,t));
+    if(c>=0){
+      var g=Math.round(255-200*c), b=Math.round(255-200*c);
+      return 'rgb(255,'+g+','+b+')';
+    }else{
+      var r=Math.round(255+200*c), g2=Math.round(255+200*c);
+      return 'rgb('+r+','+g2+',255)';
+    }
+  }
+
+  var diffActive=false;
+  function applyDiff(fieldA,fieldB){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    var max=0;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var a=p[fieldA],b=p[fieldB];
+      if(typeof a==='number'&&typeof b==='number'&&isFinite(a)&&isFinite(b)){
+        var d=Math.abs(a-b); if(d>max)max=d;
+      }
+    });
+    if(max<=0)max=1;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var a=p[fieldA],b=p[fieldB];
+      if(typeof a==='number'&&typeof b==='number'&&isFinite(a)&&isFinite(b)){
+        lyr.setStyle&&lyr.setStyle({fillColor:divColor((a-b)/max),fillOpacity:0.7});
+      }else{
+        lyr.setStyle&&lyr.setStyle({fillColor:'#eee',fillOpacity:0.5});
+      }
+    });
+    diffActive=true;
+  }
+  function clearDiff(){
+    diffActive=false;
+    if(nbhdLayer&&nbhdLayer.resetStyle){
+      nbhdLayer.eachLayer(function(lyr){nbhdLayer.resetStyle(lyr);});
+    }
+  }
+
+  function openDiffPicker(){
+    var fields=fieldNames();
+    if(!fields.length){alert('No numeric fields found.');return;}
+    var bg=document.createElement('div');
+    bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:10001;'+
+      'display:flex;align-items:center;justify-content:center;';
+    var opts=fields.map(function(f){return '<option>'+f+'</option>';}).join('');
+    var card=document.createElement('div');
+    card.style.cssText='background:#fff;border-radius:6px;padding:18px 22px;min-width:320px;'+
+      'font:13px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.18);';
+    card.innerHTML=
+      '<h3 style="margin:0 0 10px;font-size:14px">Diverging compare: A − B</h3>'+
+      '<label style="display:block;margin-bottom:4px">A (red when higher)</label>'+
+      '<select id="cmp-a" style="width:100%;padding:5px;margin-bottom:10px">'+opts+'</select>'+
+      '<label style="display:block;margin-bottom:4px">B (blue when higher)</label>'+
+      '<select id="cmp-b" style="width:100%;padding:5px;margin-bottom:14px">'+opts+'</select>'+
+      '<div style="display:flex;gap:6px;justify-content:flex-end">'+
+        '<button id="cmp-cancel" type="button" style="padding:5px 12px">Cancel</button>'+
+        '<button id="cmp-apply" type="button" style="padding:5px 14px;background:#185FA5;color:#fff;border:none;border-radius:3px">Apply</button>'+
+      '</div>';
+    bg.appendChild(card); document.body.appendChild(bg);
+    function close(){document.body.removeChild(bg);}
+    card.querySelector('#cmp-cancel').onclick=close;
+    card.querySelector('#cmp-apply').onclick=function(){
+      var a=card.querySelector('#cmp-a').value, b=card.querySelector('#cmp-b').value;
+      if(a===b){alert('Pick two different fields.');return;}
+      applyDiff(a,b); close();
+    };
+  }
+
+  // ── Boolean overlay ────────────────────────────────────────────────────
+  var boolActive=false; var lastExpr='';
+  function applyBool(expr){
+    if(typeof nbhdLayer==='undefined'||!nbhdLayer||!nbhdLayer.eachLayer)return;
+    var fn;
+    try{fn=new Function('p','return ('+expr+');');}
+    catch(e){alert('Bad expression: '+e.message);return;}
+    var matched=0,errors=0;
+    nbhdLayer.eachLayer(function(lyr){
+      var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return;
+      var hit=false;
+      try{hit=Boolean(fn(p));}catch(_){errors++;}
+      if(hit){
+        lyr.setStyle&&lyr.setStyle({weight:3,color:'#ff0',fillOpacity:0.6});
+        lyr.bringToFront&&lyr.bringToFront();
+        matched++;
+      }else{
+        lyr.setStyle&&lyr.setStyle({fillOpacity:0.15,color:'#ccc',weight:1});
+      }
+    });
+    boolActive=true; lastExpr=expr;
+    flash3('matched '+matched+' / '+(matched+(boolActive?0:0))+' nbhds'+
+           (errors?' ('+errors+' eval errors)':''));
+  }
+  function clearBool(){
+    boolActive=false;
+    if(nbhdLayer&&nbhdLayer.resetStyle){
+      nbhdLayer.eachLayer(function(lyr){nbhdLayer.resetStyle(lyr);});
+    }
+  }
+  function openBoolPicker(){
+    var sample='p.outreach_need>0.5 && p.low_confidence!==true';
+    var expr=prompt('Boolean expression over per-nbhd `p` (e.g. '+sample+'):',
+                    lastExpr||sample);
+    if(!expr)return;
+    applyBool(expr);
+  }
+
+  function flash3(msg){
+    var t=document.querySelector('div[data-cmp-toast]');
+    if(!t){t=document.createElement('div');t.setAttribute('data-cmp-toast','1');
+      t.style.cssText='position:fixed;left:50%;bottom:80px;transform:translateX(-50%);'+
+        'z-index:10000;background:#222;color:#fff;padding:6px 12px;border-radius:4px;'+
+        'font:12px system-ui;display:none;';document.body.appendChild(t);}
+    t.textContent=msg; t.style.display='block';
+    setTimeout(function(){t.style.display='none';},2500);
+  }
+
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    function cb(label,fn){
+      var b=document.createElement('button'); b.type='button'; b.textContent=label;
+      b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+        'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+        'font:12px system-ui,-apple-system,sans-serif;';
+      b.addEventListener('click',fn); return b;
+    }
+    panel.appendChild(cb('A−B ⇄',function(){if(diffActive)clearDiff();else openDiffPicker();}));
+    panel.appendChild(cb('Filter ⌕',function(){if(boolActive)clearBool();else openBoolPicker();}));
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('COMPARE_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -1161,6 +1528,10 @@ PATCHES = [
     # P9: paginated PDF reports + quarterly Commission packet template.
     # Reuses jsPDF loaded by P6.
     ("REPORTS_V1: multi-page county report + commission packet", P9_OLD, P9_NEW, "/*REPORTS_V1*/"),
+    # P10: per-tract sticky notes + workflow status badges (localStorage).
+    ("ANNOTATE_V1: sticky notes + status badges", P10_OLD, P10_NEW, "/*ANNOTATE_V1*/"),
+    # P11: layer math — diverging A−B compare and boolean overlay filter.
+    ("COMPARE_V1: layer math (A-B + boolean filter)", P11_OLD, P11_NEW, "/*COMPARE_V1*/"),
 ]
 
 

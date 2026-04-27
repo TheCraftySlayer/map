@@ -23,6 +23,27 @@ multi-day project that doesn't fit a single review cycle.
   export) added in one end-of-body `<script>` block. Operator must
   run `decrypt_data.py → patch_body.py → encrypt_data.py` to deploy.
 
+### Batch 4 (operator ergonomics, annotations, layer math, docs)
+- `CLAUDE.md` — orientation for future Claude sessions: repo layout,
+  encryption workflow, idempotency-marker convention, common pitfalls.
+- `Makefile` wraps the body-edit ritual: `make decrypt → patch →
+  encrypt → check → clean`. Plus `rotate-staff` / `rotate-public`
+  one-shots that produce a `public_rotated/` bundle for review.
+- `.githooks/pre-commit` refuses commits that include plaintext map
+  data, ACS cache, or `_work/` outputs. Installed via `make hooks`.
+- `decrypt_data.py --check` verifies a deploy bundle decrypts without
+  writing plaintext to disk. Three new tests in `tests/test_crypto.py`
+  cover v1 + v2 + wrong-password paths.
+- `.gitignore` extended to cover `_work/`, `data/chas_cache/`, and
+  `public_rotated/`.
+- `ANNOTATE_V1` patch: per-tract sticky notes + `investigating /
+  verified / resolved` status badges, persisted in `localStorage`.
+  Alt-click any nbhd to edit. Export/import as JSON for hand-off.
+- `COMPARE_V1` patch: layer math — diverging A−B compare across any
+  two numeric fields (or two years), and a free-form boolean filter
+  (`p.dpi > 0.4 && p.hoh_uptake < 0.7`) that highlights matching
+  tracts and dims non-matches.
+
 ### Batch 3 (insights, spatial tools, reports)
 - `patch_body.py` engine now supports an optional 4th-tuple **marker**
   for idempotency — fixes the latent double-injection bug in PDF_EXPORT_V1

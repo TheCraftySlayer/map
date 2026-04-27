@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Refuse to commit any file that should never live in the repo:
+#   - the plaintext map body or its backup
+#   - the plaintext core.json / layers.json
+#   - any _work/ output (the canonical decrypt destination)
+#   - the ACS disk cache (regenerated on each build, never authoritative)
+#
+# The .gitignore already lists most of these, but `git add -f index_body.html`
+# would bypass it. This hook bails out before the commit lands.
+#
+# Install once per checkout:
+#     make hooks       # runs git config core.hooksPath .githooks
+
+set -e
+
+# Files staged for this commit.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+FORBIDDEN_REGEX='^(index_body\.html(\.bak)?|data/core\.json|data/layers\.json|_work/|data/acs_cache/|data/chas_cache/)'
+
+OFFENDERS=$(echo "$STAGED" | grep -E "$FORBIDDEN_REGEX" || true)
+
+if [ -n "$OFFENDERS" ]; then
+    echo "pre-commit: refusing to commit plaintext / cache artifacts:"
+    echo "$OFFENDERS" | sed 's/^/  - /'
+    echo ""
+    echo "These files are intermediate state and must not be checked in."
+    echo "If you really know what you're doing: git commit --no-verify"
+    exit 1
+fi
+
+# Light schema sanity: if patch_body.py changed, the test suite for it must pass.
+PATCH_CHANGED=$(echo "$STAGED" | grep -E '^patch_body\.py$' || true)
+if [ -n "$PATCH_CHANGED" ]; then
+    if ! python -m unittest tests.test_patch_body > /dev/null 2>&1; then
+        echo "pre-commit: patch_body.py changed but tests/test_patch_body failed."
+        echo "Run: python -m unittest tests.test_patch_body -v"
+        exit 1
+    fi
+fi
+
+exit 0

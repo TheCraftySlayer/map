@@ -89,12 +89,16 @@ class TestMarkerIdempotency(unittest.TestCase):
 class TestExistingPatchesShape(unittest.TestCase):
     """The shipped PATCHES list: every entry that injects-via-embed has a marker."""
 
-    def test_p5_through_p9_have_markers(self):
+    def test_embed_anchor_patches_have_markers(self):
+        # Every patch whose NEW content embeds its OLD anchor as a substring
+        # must have an idempotency marker. The naming convention is _V1 etc.
+        embed_prefixes = (
+            "MAP_EXT_V1", "PDF_EXPORT_V1", "INSIGHTS_V1", "TOOLS_V1",
+            "REPORTS_V1", "ANNOTATE_V1", "COMPARE_V1",
+        )
         for entry in patch_body.PATCHES:
             name = entry[0]
-            if any(name.startswith(p) for p in (
-                "MAP_EXT_V1", "PDF_EXPORT_V1", "INSIGHTS_V1", "TOOLS_V1", "REPORTS_V1",
-            )):
+            if any(name.startswith(p) for p in embed_prefixes):
                 self.assertEqual(len(entry), 4,
                     f"Patch '{name}' is an embed-anchor patch and needs a marker")
 
