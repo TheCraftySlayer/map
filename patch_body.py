@@ -2485,6 +2485,394 @@ P19B_OLD = "const btn=document.getElementById('exportCsvBtn');\n  if(!btn)return
 P19B_NEW = "const btn=document.getElementById('downloadCsvBtn');\n  if(!btn)return;"
 
 
+#  Patch 20: RADAR_V1 — z-scored demographic radar chart in the tooltip.
+#
+#  Cross-sectional complement to the VIZ_V1 sparkline (which is purely
+#  time-series). Five axes: pct_hoh, pct_65plus, spanish_at_home, dpi,
+#  outreach_need. Each value is z-scored against the county distribution
+#  for the currently-selected year (year-suffixed field if present, else
+#  the bare field name). The polygon is drawn on a centered radar so
+#  z=0 sits at the half-radius ring, z=±2 at the rim. Stats are cached
+#  per (year, axis) and invalidated on year change.
+#
+#  Anchored on /*CHORO_CSV_V1*/ — the current end of the body-tail
+#  patch chain. New marker is /*RADAR_V1*/.
+P20_OLD = "/*CHORO_CSV_V1*/"
+P20_NEW = """/*CHORO_CSV_V1*//*RADAR_V1*/
+;(function(){
+try{
+  var AXES=['pct_hoh','pct_65plus','spanish_at_home','dpi','outreach_need'];
+  var SHORT={pct_hoh:'hoh',pct_65plus:'65+',spanish_at_home:'spanish',
+             dpi:'dpi',outreach_need:'need'};
+  var radarActive=false;
+  var statsCache=null;
+  var statsKey=null;
+
+  function findMap(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+    }catch(_){}} return null;
+  }
+  function findPolygonLayer(m){
+    if(!m||!m._layers)return null;
+    var hit=null;
+    for(var k in m._layers){
+      var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+      try{lyr.eachLayer(function(sub){
+        if(hit)return;
+        if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null)hit=lyr;
+      });}catch(_){}
+      if(hit)return hit;
+    }
+    return null;
+  }
+  function currentYearSuffix(){
+    var sel=document.querySelector('select[name="year"], select#year, select.year-select');
+    if(!sel||!sel.value)return '';
+    var m=String(sel.value).match(/(\\d{2})$/);
+    return m?m[1]:'';
+  }
+  function fieldName(axis,yy){
+    return yy?(axis+'_'+yy):axis;
+  }
+  function valFor(p,axis,yy){
+    var f=fieldName(axis,yy);
+    var v=p[f];
+    if(v==null||!isFinite(v)){
+      if(yy&&p[axis]!=null&&isFinite(p[axis]))v=p[axis];
+      else return null;
+    }
+    return +v;
+  }
+  function buildStats(poly,yy){
+    var acc={}; AXES.forEach(function(a){acc[a]=[];});
+    poly.eachLayer(function(sub){
+      var p=sub&&sub.feature&&sub.feature.properties; if(!p)return;
+      AXES.forEach(function(a){var v=valFor(p,a,yy); if(v!=null)acc[a].push(v);});
+    });
+    var stats={};
+    AXES.forEach(function(a){
+      var vs=acc[a];
+      if(!vs.length){stats[a]={mean:0,std:1};return;}
+      var mean=vs.reduce(function(s,x){return s+x;},0)/vs.length;
+      var variance=vs.reduce(function(s,x){return s+(x-mean)*(x-mean);},0)/Math.max(1,vs.length-1);
+      var std=Math.sqrt(variance);
+      stats[a]={mean:mean,std:std>1e-9?std:1};
+    });
+    return stats;
+  }
+  function radarSvg(p,stats,yy){
+    var n=AXES.length, cx=60, cy=60, R=42;
+    var pts=[];
+    for(var i=0;i<n;i++){
+      var v=valFor(p,AXES[i],yy);
+      var z=v==null?0:(v-stats[AXES[i]].mean)/stats[AXES[i]].std;
+      var zc=Math.max(-2,Math.min(2,z));
+      var r=((zc+2)/4)*R;
+      var ang=-Math.PI/2+i*(2*Math.PI/n);
+      pts.push([cx+r*Math.cos(ang),cy+r*Math.sin(ang)]);
+    }
+    var poly=pts.map(function(pt){return pt[0].toFixed(1)+','+pt[1].toFixed(1);}).join(' ');
+    var rings='';
+    [0.25,0.5,0.75,1].forEach(function(f){
+      var pr=[];
+      for(var i=0;i<n;i++){
+        var ang=-Math.PI/2+i*(2*Math.PI/n);
+        pr.push((cx+R*f*Math.cos(ang)).toFixed(1)+','+(cy+R*f*Math.sin(ang)).toFixed(1));
+      }
+      rings+='<polygon points="'+pr.join(' ')+'" fill="none" stroke="#ddd" stroke-width="0.5"/>';
+    });
+    var spokes='', labels='';
+    for(var i=0;i<n;i++){
+      var ang=-Math.PI/2+i*(2*Math.PI/n);
+      var ex=cx+R*Math.cos(ang), ey=cy+R*Math.sin(ang);
+      spokes+='<line x1="'+cx+'" y1="'+cy+'" x2="'+ex.toFixed(1)+'" y2="'+ey.toFixed(1)+'" stroke="#ddd" stroke-width="0.5"/>';
+      var lx=cx+(R+12)*Math.cos(ang), ly=cy+(R+12)*Math.sin(ang)+3;
+      labels+='<text x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" fill="#666">'+SHORT[AXES[i]]+'</text>';
+    }
+    return '<svg width="135" height="125" viewBox="0 0 135 125" style="display:block">'+
+      rings+spokes+
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+(R/2).toFixed(1)+'" fill="none" stroke="#bbb" stroke-width="0.6" stroke-dasharray="2,2"/>'+
+      '<polygon points="'+poly+'" fill="rgba(8,48,107,0.25)" stroke="#08306b" stroke-width="1.2"/>'+
+      labels+
+      '</svg>';
+  }
+  function getStats(poly){
+    var yy=currentYearSuffix();
+    if(statsCache&&statsKey===yy)return {stats:statsCache,yy:yy};
+    statsCache=buildStats(poly,yy);
+    statsKey=yy;
+    return {stats:statsCache,yy:yy};
+  }
+  function getHolder(){
+    return document.querySelector('.info, .leaflet-control.info');
+  }
+  function clearRadar(){
+    var holder=getHolder();
+    var s=holder&&holder.querySelector('.viz-radar');
+    if(s)s.innerHTML='';
+  }
+
+  function attachRadar(){
+    var m=findMap(); var poly=m?findPolygonLayer(m):null;
+    if(!poly||!poly.eachLayer)return false;
+    poly.eachLayer(function(sub){
+      sub.on('mouseover',function(e){
+        if(!radarActive)return;
+        var p=e.target.feature&&e.target.feature.properties; if(!p)return;
+        var sy=getStats(poly);
+        var holder=getHolder(); if(!holder)return;
+        var s=holder.querySelector('.viz-radar');
+        if(!s){s=document.createElement('div'); s.className='viz-radar';
+          s.style.cssText='margin-top:4px'; holder.appendChild(s);}
+        s.innerHTML=radarSvg(p,sy.stats,sy.yy)+
+          '<div style="font:10px monospace;color:#888;text-align:center">z vs county (-2…+2)</div>';
+      });
+      sub.on('mouseout',clearRadar);
+    });
+    var sel=document.querySelector('select[name="year"], select#year, select.year-select');
+    if(sel&&!sel.dataset.radarBound){
+      sel.addEventListener('change',function(){statsCache=null;statsKey=null;clearRadar();});
+      sel.dataset.radarBound='1';
+    }
+    return true;
+  }
+  function ready(){
+    var ok=attachRadar();
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return ok;
+    if(panel.querySelector('button[data-radar-toggle]'))return true;
+    var b=document.createElement('button'); b.type='button'; b.textContent='Radar ○';
+    b.setAttribute('data-radar-toggle','1');
+    b.title='Toggle z-scored demographic radar in tooltip';
+    b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+      'font:12px system-ui,-apple-system,sans-serif;';
+    b.addEventListener('click',function(){
+      radarActive=!radarActive;
+      b.style.background=radarActive?'#e6f0fb':'#fff';
+      if(!radarActive)clearRadar();
+    });
+    panel.appendChild(b);
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('RADAR_V1 init failed:',err);}
+})();"""
+
+
+#  Patch 21: CLUSTER_SANKEY_V1 — year-over-year Sankey of cluster transitions.
+#
+#  Reuses cluster_snapshot.py's classification: per tract per year, the
+#  Gi* on outreach_need (gi_outreach_need_YY) classifies into hot (≥+1.96),
+#  cold (≤−1.96), or neutral. The Sankey shows how many tracts moved
+#  between cluster categories from one year to the next.
+#
+#  Pure SVG, rendered in a modal. Stays-in-place flows are drawn at lower
+#  opacity than moves so the moves stand out. Hover any flow band for a
+#  tooltip with the count.
+#
+#  Anchored on /*RADAR_V1*/ (the new chain end after P20).
+P21_OLD = "/*RADAR_V1*/"
+P21_NEW = """/*RADAR_V1*//*CLUSTER_SANKEY_V1*/
+;(function(){
+try{
+  var CLUSTERS=['hot','neutral','cold'];
+  var COLORS={hot:'#cb181d',neutral:'#969696',cold:'#08519c'};
+
+  function findMap(){
+    if(typeof L==='undefined')return null;
+    for(var k in window){try{var v=window[k];
+      if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+    }catch(_){}} return null;
+  }
+  function findPolygonLayer(m){
+    if(!m||!m._layers)return null;
+    var hit=null;
+    for(var k in m._layers){
+      var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+      try{lyr.eachLayer(function(sub){
+        if(hit)return;
+        if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null)hit=lyr;
+      });}catch(_){}
+      if(hit)return hit;
+    }
+    return null;
+  }
+  function classify(gi){
+    if(gi==null||!isFinite(gi))return null;
+    if(gi>=1.96)return 'hot';
+    if(gi<=-1.96)return 'cold';
+    return 'neutral';
+  }
+  function collect(poly){
+    var pat=/^gi_outreach_need_(\\d{2})$/;
+    var ySet={}; var perTract=[];
+    poly.eachLayer(function(sub){
+      var p=sub&&sub.feature&&sub.feature.properties; if(!p)return;
+      var byYear={};
+      for(var k in p){
+        var m=pat.exec(k);
+        if(m){var yy=+m[1]; var c=classify(p[k]);
+          if(c){byYear[yy]=c; ySet[yy]=true;}}
+      }
+      perTract.push(byYear);
+    });
+    var years=Object.keys(ySet).map(Number).sort(function(a,b){return a-b;});
+    return {years:years,perTract:perTract};
+  }
+  function buildFlows(data){
+    var stages=[];
+    for(var i=0;i<data.years.length-1;i++){
+      var ya=data.years[i], yb=data.years[i+1];
+      var counts={};
+      CLUSTERS.forEach(function(c){counts[c]={};
+        CLUSTERS.forEach(function(d){counts[c][d]=0;});});
+      data.perTract.forEach(function(t){
+        var a=t[ya], b=t[yb];
+        if(a&&b)counts[a][b]++;
+      });
+      stages.push({ya:ya,yb:yb,counts:counts});
+    }
+    return stages;
+  }
+  function renderSankey(stages){
+    if(!stages.length)return '<div style="padding:1em">No multi-year cluster data available.</div>';
+    var W=110, GAP=110, H=320, PAD=30;
+    var nCols=stages.length+1;
+    var totalW=PAD*2+nCols*W+(nCols-1)*GAP;
+    var totalH=H+50;
+    function colSums(cnt,which){
+      var s={hot:0,neutral:0,cold:0};
+      CLUSTERS.forEach(function(from){CLUSTERS.forEach(function(to){
+        s[which==='from'?from:to]+=cnt[from][to];
+      });});
+      return s;
+    }
+    var cols=[];
+    cols.push({year:stages[0].ya,totals:colSums(stages[0].counts,'from')});
+    stages.forEach(function(s){cols.push({year:s.yb,totals:colSums(s.counts,'to')});});
+    var maxTot=Math.max.apply(null,cols.map(function(c){
+      return CLUSTERS.reduce(function(a,k){return a+c.totals[k];},0);
+    }));
+    if(maxTot===0)maxTot=1;
+    var GAP_BLOCK=8;
+    var SCALE=(H-2*GAP_BLOCK)/maxTot;
+    function colX(i){return PAD+i*(W+GAP);}
+    function blockGeom(col){
+      var totSum=CLUSTERS.reduce(function(a,k){return a+col.totals[k];},0);
+      var totalH_=totSum*SCALE+(CLUSTERS.length-1)*GAP_BLOCK;
+      var y=10+(H-totalH_)/2; var out={};
+      CLUSTERS.forEach(function(c){
+        var h=col.totals[c]*SCALE;
+        out[c]={y:y,h:h};
+        y+=h+(h>0?GAP_BLOCK:0);
+      });
+      return out;
+    }
+    var colGeom=cols.map(blockGeom);
+    var svg='<svg width="'+totalW+'" height="'+totalH+'" font-family="system-ui">';
+    cols.forEach(function(c,i){
+      var yLabel=20+(c.year<10?'0'+c.year:c.year);
+      svg+='<text x="'+(colX(i)+W/2)+'" y="'+(H+30)+'" text-anchor="middle" font-size="11" fill="#444">'+yLabel+'</text>';
+    });
+    stages.forEach(function(s,i){
+      var srcOff={hot:0,neutral:0,cold:0};
+      var dstOff={hot:0,neutral:0,cold:0};
+      var gA=colGeom[i], gB=colGeom[i+1];
+      var xA=colX(i)+W, xB=colX(i+1);
+      CLUSTERS.forEach(function(from){
+        CLUSTERS.forEach(function(to){
+          var n=s.counts[from][to];
+          if(!n)return;
+          var h=n*SCALE;
+          var y1=gA[from].y+srcOff[from];
+          var y2=gB[to].y+dstOff[to];
+          srcOff[from]+=h; dstOff[to]+=h;
+          var midX=(xA+xB)/2;
+          var d='M '+xA+' '+y1.toFixed(1)+
+                ' C '+midX+' '+y1.toFixed(1)+', '+midX+' '+y2.toFixed(1)+', '+xB+' '+y2.toFixed(1)+
+                ' L '+xB+' '+(y2+h).toFixed(1)+
+                ' C '+midX+' '+(y2+h).toFixed(1)+', '+midX+' '+(y1+h).toFixed(1)+', '+xA+' '+(y1+h).toFixed(1)+
+                ' Z';
+          var op=(from===to)?0.22:0.6;
+          svg+='<path d="'+d+'" fill="'+COLORS[from]+'" fill-opacity="'+op+'" stroke="none">'+
+               '<title>'+from+' → '+to+': '+n+' nbhds</title></path>';
+        });
+      });
+    });
+    cols.forEach(function(c,i){
+      var g=colGeom[i];
+      CLUSTERS.forEach(function(cl){
+        var rect=g[cl];
+        if(rect.h<=0)return;
+        svg+='<rect x="'+colX(i)+'" y="'+rect.y.toFixed(1)+'" width="'+W+'" height="'+rect.h.toFixed(1)+'" fill="'+COLORS[cl]+'"/>';
+        if(rect.h>14){
+          svg+='<text x="'+(colX(i)+W/2)+'" y="'+(rect.y+rect.h/2+4).toFixed(1)+'" text-anchor="middle" font-size="11" fill="#fff">'+cl+' '+c.totals[cl]+'</text>';
+        }
+      });
+    });
+    svg+='</svg>';
+    return svg;
+  }
+  function openSankey(){
+    var m=findMap(); var poly=m?findPolygonLayer(m):null;
+    if(!poly){alert('No polygon layer found.');return;}
+    var data=collect(poly);
+    if(data.years.length<2){
+      alert('Need at least two years of gi_outreach_need_YY data.');
+      return;
+    }
+    var existing=document.querySelector('div[data-sankey-modal]');
+    if(existing){existing.remove();return;}
+    var html=renderSankey(buildFlows(data));
+    var modal=document.createElement('div');
+    modal.setAttribute('data-sankey-modal','1');
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);'+
+      'z-index:10001;display:flex;align-items:center;justify-content:center;';
+    var card=document.createElement('div');
+    card.style.cssText='background:#fff;padding:16px;border-radius:6px;'+
+      'max-height:90vh;max-width:95vw;overflow:auto;'+
+      'box-shadow:0 4px 16px rgba(0,0,0,0.25);font:12px system-ui;';
+    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<h3 style="margin:0;font:600 14px system-ui">Cluster transitions (Gi* on outreach_need)</h3>'+
+      '<button data-sankey-close style="border:0;background:transparent;font-size:20px;cursor:pointer;line-height:1">×</button></div>'+
+      html+
+      '<div style="margin-top:8px;font:11px system-ui;color:#666">'+
+      'Cluster: hot ≥ +1.96, cold ≤ −1.96, else neutral. '+
+      'Stayed-in-cluster flows shown at lower opacity. Hover a band for the count.</div>';
+    modal.appendChild(card);
+    modal.addEventListener('click',function(e){if(e.target===modal)modal.remove();});
+    card.querySelector('[data-sankey-close]').addEventListener('click',function(){modal.remove();});
+    document.body.appendChild(modal);
+  }
+  function ready(){
+    var btns=document.querySelectorAll('button'); var panel=null;
+    for(var i=0;i<btns.length;i++)if(btns[i].textContent==='Copy link'){panel=btns[i].parentElement;break;}
+    if(!panel)return false;
+    if(panel.querySelector('button[data-sankey-toggle]'))return true;
+    var b=document.createElement('button'); b.type='button';
+    b.textContent='Cluster Sankey ↔';
+    b.setAttribute('data-sankey-toggle','1');
+    b.title='Year-over-year flow of nbhds between Gi* clusters';
+    b.style.cssText='padding:6px 10px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+      'font:12px system-ui,-apple-system,sans-serif;';
+    b.addEventListener('click',openSankey);
+    panel.appendChild(b);
+    return true;
+  }
+  var tries=0; var ivl=setInterval(function(){
+    if(ready()||++tries>20){clearInterval(ivl);}
+  },500);
+}catch(err){console.warn('CLUSTER_SANKEY_V1 init failed:',err);}
+})();"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -2539,6 +2927,15 @@ PATCHES = [
     # rewire its IIFE handler. Two 3-tuple swaps (legacy idempotency).
     ("CSV_DUPID_FIX_V1a: rename legend Download-CSV button id", P19A_OLD, P19A_NEW),
     ("CSV_DUPID_FIX_V1b: rewire legend Download-CSV handler", P19B_OLD, P19B_NEW),
+    # P20: z-scored demographic radar in the tooltip. Anchored on
+    # /*CHORO_CSV_V1*/ — the prior chain end. Cross-sectional companion
+    # to the VIZ_V1 sparkline.
+    ("RADAR_V1: z-scored demographic radar in tooltip", P20_OLD, P20_NEW, "/*RADAR_V1*/"),
+    # P21: year-over-year cluster-transition Sankey rendered in a modal.
+    # Reuses cluster_snapshot.py classification (hot/neutral/cold from
+    # gi_outreach_need_YY thresholds). Anchored on /*RADAR_V1*/.
+    ("CLUSTER_SANKEY_V1: yoY cluster transition Sankey",
+     P21_OLD, P21_NEW, "/*CLUSTER_SANKEY_V1*/"),
 ]
 
 

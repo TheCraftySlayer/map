@@ -96,7 +96,7 @@ class TestExistingPatchesShape(unittest.TestCase):
             "MAP_EXT_V1", "PDF_EXPORT_V1", "INSIGHTS_V1", "TOOLS_V1",
             "REPORTS_V1", "ANNOTATE_V1", "COMPARE_V1", "DECIDE_V1", "VIZ_V1",
             "FIELD_V1", "PASTEVENTS_V1", "CHORO_CSV_V1", "BODY_CLEAN_V1",
-            "WORKLIST_CSV_FIX_V1",
+            "WORKLIST_CSV_FIX_V1", "RADAR_V1", "CLUSTER_SANKEY_V1",
         )
         for entry in patch_body.PATCHES:
             name = entry[0]
@@ -168,6 +168,46 @@ class TestWorklistCsvFix(unittest.TestCase):
         self.assertNotIn("typeof nbhdLayer!=='undefined'", out)
         # The fixed function should be the only downloadWorklist defn.
         self.assertEqual(out.count("function downloadWorklist("), 1)
+
+
+class TestRadarSankeyChain(unittest.TestCase):
+    """P20 (RADAR_V1) must chain onto P16 (CHORO_CSV_V1)'s marker, and
+    P21 (CLUSTER_SANKEY_V1) onto P20's marker. Both are end-of-chain
+    body-tail patches, so the marker convention matters."""
+
+    def _by_name(self, prefix):
+        for entry in patch_body.PATCHES:
+            if entry[0].startswith(prefix):
+                return entry
+        return None
+
+    def test_radar_anchors_on_choro_csv_marker(self):
+        p20 = self._by_name("RADAR_V1")
+        self.assertIsNotNone(p20)
+        self.assertEqual(p20[1], "/*CHORO_CSV_V1*/")
+        self.assertIn("/*RADAR_V1*/", p20[2])
+
+    def test_sankey_anchors_on_radar_marker(self):
+        p21 = self._by_name("CLUSTER_SANKEY_V1")
+        self.assertIsNotNone(p21)
+        self.assertEqual(p21[1], "/*RADAR_V1*/")
+        self.assertIn("/*CLUSTER_SANKEY_V1*/", p21[2])
+
+    def test_chain_round_trips_from_choro_marker(self):
+        # Synthetic body that already carries the CHORO_CSV_V1 marker —
+        # then P20 and P21 should land in order.
+        text = "prefix /*CHORO_CSV_V1*/ suffix\n"
+        keep = [e for e in patch_body.PATCHES
+                if e[0].startswith(("RADAR_V1", "CLUSTER_SANKEY_V1"))]
+        self.assertEqual(len(keep), 2)
+        out = _run_patches(text, keep)
+        self.assertIn("/*RADAR_V1*/", out)
+        self.assertIn("/*CLUSTER_SANKEY_V1*/", out)
+        # Idempotent re-application.
+        twice = _run_patches(out, keep)
+        self.assertEqual(out, twice)
+        self.assertEqual(out.count("/*RADAR_V1*/"), 1)
+        self.assertEqual(out.count("/*CLUSTER_SANKEY_V1*/"), 1)
 
 
 if __name__ == "__main__":
