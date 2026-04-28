@@ -2501,9 +2501,29 @@ P20_OLD = "/*CHORO_CSV_V1*/"
 P20_NEW = """/*CHORO_CSV_V1*//*RADAR_V1*/
 ;(function(){
 try{
-  var AXES=['pct_hoh','pct_65plus','spanish_at_home','dpi','outreach_need'];
+  var DEFAULT_AXES=['pct_hoh','pct_65plus','spanish_at_home','dpi','outreach_need'];
   var SHORT={pct_hoh:'hoh',pct_65plus:'65+',spanish_at_home:'spanish',
              dpi:'dpi',outreach_need:'need'};
+  function loadAxes(){
+    try{var s=localStorage.getItem('radar_axes');
+      if(s){var arr=JSON.parse(s);
+        if(Array.isArray(arr)&&arr.length===5&&arr.every(function(x){return typeof x==='string';}))
+          return arr;}
+    }catch(_){}
+    return DEFAULT_AXES.slice();
+  }
+  function saveAxes(arr){
+    AXES=arr.slice(); statsCache=null; statsKey=null;
+    try{localStorage.setItem('radar_axes',JSON.stringify(arr));}catch(_){}
+  }
+  function shortLabel(name){
+    if(SHORT[name])return SHORT[name];
+    var s=String(name).replace('pct_','').replace('_at_home','')
+                      .replace('outreach_','out_').replace('owner_','own_')
+                      .replace('median_','med_');
+    return s.length>9?s.slice(0,9):s;
+  }
+  var AXES=loadAxes();
   var radarActive=false;
   var statsCache=null;
   var statsKey=null;
@@ -2589,7 +2609,7 @@ try{
       var ex=cx+R*Math.cos(ang), ey=cy+R*Math.sin(ang);
       spokes+='<line x1="'+cx+'" y1="'+cy+'" x2="'+ex.toFixed(1)+'" y2="'+ey.toFixed(1)+'" stroke="#ddd" stroke-width="0.5"/>';
       var lx=cx+(R+12)*Math.cos(ang), ly=cy+(R+12)*Math.sin(ang)+3;
-      labels+='<text x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" fill="#666">'+SHORT[AXES[i]]+'</text>';
+      labels+='<text x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" fill="#666">'+shortLabel(AXES[i])+'</text>';
     }
     return '<svg width="135" height="125" viewBox="0 0 135 125" style="display:block">'+
       rings+spokes+
@@ -2612,6 +2632,71 @@ try{
     var holder=getHolder();
     var s=holder&&holder.querySelector('.viz-radar');
     if(s)s.innerHTML='';
+  }
+
+  function discoverBases(poly){
+    var bases={};
+    poly.eachLayer(function(sub){
+      var p=sub&&sub.feature&&sub.feature.properties; if(!p)return;
+      for(var k in p){
+        if(typeof p[k]!=='number'||!isFinite(p[k]))continue;
+        var m=k.match(/^(.+)_(\\d{2})$/);
+        var base=m?m[1]:k;
+        bases[base]=true;
+      }
+    });
+    return Object.keys(bases).sort();
+  }
+  function openAxisPicker(){
+    var existing=document.querySelector('div[data-radar-picker]');
+    if(existing){existing.remove();return;}
+    var m=findMap(); var poly=m?findPolygonLayer(m):null;
+    if(!poly){alert('No polygon layer found.');return;}
+    var bases=discoverBases(poly);
+    if(!bases.length){alert('No numeric fields available.');return;}
+    var modal=document.createElement('div');
+    modal.setAttribute('data-radar-picker','1');
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);'+
+      'z-index:10001;display:flex;align-items:center;justify-content:center;';
+    var card=document.createElement('div');
+    card.style.cssText='background:#fff;padding:16px;border-radius:6px;'+
+      'font:12px system-ui;min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,0.25);';
+    var html='<h3 style="margin:0 0 8px;font:600 14px system-ui">Radar axes</h3>'+
+      '<div style="color:#666;margin-bottom:6px">Pick five numeric bases. '+
+      'Per-year fields use the bare base; the active year is applied automatically.</div>';
+    for(var i=0;i<5;i++){
+      html+='<div style="margin:5px 0">'+
+        '<span style="display:inline-block;width:50px;color:#666">Axis '+(i+1)+'</span>'+
+        '<select data-radar-axis="'+i+'" style="min-width:200px">';
+      for(var j=0;j<bases.length;j++){
+        var b=bases[j];
+        html+='<option value="'+b+'"'+(b===AXES[i]?' selected':'')+'>'+b+'</option>';
+      }
+      html+='</select></div>';
+    }
+    html+='<div style="margin-top:12px;text-align:right">'+
+      '<button data-radar-reset style="margin-right:8px;padding:4px 10px">Reset</button>'+
+      '<button data-radar-cancel style="margin-right:8px;padding:4px 10px">Cancel</button>'+
+      '<button data-radar-save style="padding:4px 10px;background:#08306b;color:#fff;border:0;border-radius:3px">Save</button>'+
+      '</div>';
+    card.innerHTML=html;
+    modal.appendChild(card);
+    modal.addEventListener('click',function(e){if(e.target===modal)modal.remove();});
+    card.querySelector('[data-radar-cancel]').addEventListener('click',function(){modal.remove();});
+    card.querySelector('[data-radar-reset]').addEventListener('click',function(){
+      saveAxes(DEFAULT_AXES); clearRadar(); modal.remove();
+    });
+    card.querySelector('[data-radar-save]').addEventListener('click',function(){
+      var picked=[]; var seen={};
+      for(var i=0;i<5;i++){
+        var v=card.querySelector('[data-radar-axis="'+i+'"]').value;
+        picked.push(v); seen[v]=(seen[v]||0)+1;
+      }
+      var dupe=Object.keys(seen).filter(function(k){return seen[k]>1;});
+      if(dupe.length){alert('Each axis must be unique. Duplicates: '+dupe.join(', '));return;}
+      saveAxes(picked); clearRadar(); modal.remove();
+    });
+    document.body.appendChild(modal);
   }
 
   function attachRadar(){
@@ -2656,6 +2741,14 @@ try{
       if(!radarActive)clearRadar();
     });
     panel.appendChild(b);
+    var bg=document.createElement('button'); bg.type='button'; bg.textContent='⚙';
+    bg.setAttribute('data-radar-config','1');
+    bg.title='Configure radar axes';
+    bg.style.cssText='padding:6px 8px;border:1px solid #ccc;border-radius:4px;'+
+      'background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08);'+
+      'font:12px system-ui,-apple-system,sans-serif;';
+    bg.addEventListener('click',openAxisPicker);
+    panel.appendChild(bg);
     return true;
   }
   var tries=0; var ivl=setInterval(function(){
@@ -2683,6 +2776,11 @@ P21_NEW = """/*RADAR_V1*//*CLUSTER_SANKEY_V1*/
 try{
   var CLUSTERS=['hot','neutral','cold'];
   var COLORS={hot:'#cb181d',neutral:'#969696',cold:'#08519c'};
+  var SANKEY_LAYERS=[
+    {key:'gi_outreach_need',label:'Outreach need (Gi*)'},
+    {key:'gi_pct_vf_denied',label:'Procedural denial (Gi*)'},
+  ];
+  var sankeyBase='gi_outreach_need';
 
   function findMap(){
     if(typeof L==='undefined')return null;
@@ -2709,8 +2807,8 @@ try{
     if(gi<=-1.96)return 'cold';
     return 'neutral';
   }
-  function collect(poly){
-    var pat=/^gi_outreach_need_(\\d{2})$/;
+  function collect(poly,base){
+    var pat=new RegExp('^'+base+'_(\\\\d{2})$');
     var ySet={}; var perTract=[];
     poly.eachLayer(function(sub){
       var p=sub&&sub.feature&&sub.feature.properties; if(!p)return;
@@ -2820,16 +2918,10 @@ try{
     return svg;
   }
   function openSankey(){
-    var m=findMap(); var poly=m?findPolygonLayer(m):null;
-    if(!poly){alert('No polygon layer found.');return;}
-    var data=collect(poly);
-    if(data.years.length<2){
-      alert('Need at least two years of gi_outreach_need_YY data.');
-      return;
-    }
     var existing=document.querySelector('div[data-sankey-modal]');
     if(existing){existing.remove();return;}
-    var html=renderSankey(buildFlows(data));
+    var m=findMap(); var poly=m?findPolygonLayer(m):null;
+    if(!poly){alert('No polygon layer found.');return;}
     var modal=document.createElement('div');
     modal.setAttribute('data-sankey-modal','1');
     modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);'+
@@ -2838,16 +2930,39 @@ try{
     card.style.cssText='background:#fff;padding:16px;border-radius:6px;'+
       'max-height:90vh;max-width:95vw;overflow:auto;'+
       'box-shadow:0 4px 16px rgba(0,0,0,0.25);font:12px system-ui;';
-    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-      '<h3 style="margin:0;font:600 14px system-ui">Cluster transitions (Gi* on outreach_need)</h3>'+
+    var radioHtml='';
+    SANKEY_LAYERS.forEach(function(l){
+      radioHtml+='<label style="margin-right:14px;font:11px system-ui;cursor:pointer">'+
+        '<input type="radio" name="sankey-base" value="'+l.key+'"'+
+        (l.key===sankeyBase?' checked':'')+' style="vertical-align:middle"> '+l.label+'</label>';
+    });
+    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<h3 style="margin:0;font:600 14px system-ui">Cluster transitions</h3>'+
       '<button data-sankey-close style="border:0;background:transparent;font-size:20px;cursor:pointer;line-height:1">×</button></div>'+
-      html+
+      '<div style="margin-bottom:8px">'+radioHtml+'</div>'+
+      '<div data-sankey-content></div>'+
       '<div style="margin-top:8px;font:11px system-ui;color:#666">'+
       'Cluster: hot ≥ +1.96, cold ≤ −1.96, else neutral. '+
       'Stayed-in-cluster flows shown at lower opacity. Hover a band for the count.</div>';
+    function rerender(){
+      var data=collect(poly,sankeyBase);
+      var content=card.querySelector('[data-sankey-content]');
+      if(data.years.length<2){
+        content.innerHTML='<div style="padding:1em;color:#666">Need ≥2 years of '+sankeyBase+'_YY data.</div>';
+      }else{
+        content.innerHTML=renderSankey(buildFlows(data));
+      }
+    }
     modal.appendChild(card);
     modal.addEventListener('click',function(e){if(e.target===modal)modal.remove();});
     card.querySelector('[data-sankey-close]').addEventListener('click',function(){modal.remove();});
+    var radios=card.querySelectorAll('input[name="sankey-base"]');
+    for(var i=0;i<radios.length;i++){
+      radios[i].addEventListener('change',function(e){
+        if(e.target.checked){sankeyBase=e.target.value; rerender();}
+      });
+    }
+    rerender();
     document.body.appendChild(modal);
   }
   function ready(){
