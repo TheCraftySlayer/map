@@ -2372,6 +2372,91 @@ P17_NEW = """<head>
 })();</script>"""
 
 
+#  Patch 18: WORKLIST_CSV_FIX_V1 — fix the broken P5 "Worklist CSV ⇩" button.
+#
+#  P5's downloadWorklist iterates `nbhdLayer.eachLayer(...)`, but `nbhdLayer`
+#  is declared inside the body's IIFE — `typeof nbhdLayer` resolves to
+#  'undefined' from the patch's outer scope, so the export silently emits 0
+#  rows and the toast reports "No visible nbhds (seen 0)". The same bug was
+#  fixed for the "Map CSV ⬇" button in P16 by walking the Leaflet map's
+#  `_layers` to find the polygon layer by feature shape; this patch ports
+#  that approach into downloadWorklist.
+#
+#  Surgical replacement of the function body — the OLD anchor is unique to
+#  P5 (only `downloadWorklist` carries the "Iterates nbhdLayer (Leaflet) and
+#  exports a CSV of every visible feature." comment), so this patch is safe
+#  to apply on a body that has every other patch in this file already
+#  applied. Marker `/*WORKLIST_CSV_FIX_V1*/` blocks reapplication.
+P18_OLD = """  // ── Worklist CSV ──────────────────────────────────────────────────────────
+  // Iterates nbhdLayer (Leaflet) and exports a CSV of every visible feature.
+  // Falls back to all features if featureHidden() isn't defined yet.
+  function downloadWorklist(){
+    var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
+        'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
+    var hidden=window.featureHidden||function(){return false;};
+    var seen=0; var emitted=0;
+    try{
+      if(typeof nbhdLayer!=='undefined'&&nbhdLayer&&nbhdLayer.eachLayer){
+        nbhdLayer.eachLayer(function(lyr){
+          var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
+          if(hidden(p))return;
+          var r=headers.map(function(h){var v=p[h];
+            if(v==null)return ''; v=String(v);
+            if(/[",\\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+            return v;});
+          rows.push(r.join(',')); emitted++;
+        });
+      }
+    }catch(e){console.warn('worklist export:',e);}"""
+P18_NEW = """  // ── Worklist CSV ──────────────────────────────────────────────────────────
+  // WORKLIST_CSV_FIX_V1: walk the Leaflet map's _layers to find the polygon
+  // layer (any sub-layer whose features carry `nbhd`); the original P5 code
+  // looked up `nbhdLayer` as a global, but the body declares it inside an
+  // IIFE so the export silently emitted 0 rows. Same approach as P16.
+  function downloadWorklist(){/*WORKLIST_CSV_FIX_V1*/
+    var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
+        'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
+    var hidden=window.featureHidden||function(){return false;};
+    var seen=0; var emitted=0;
+    function _wlFindMap(){
+      if(typeof L==='undefined')return null;
+      for(var k in window){try{var v=window[k];
+        if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+      }catch(_){}} return null;
+    }
+    function _wlFindPolygonLayer(m){
+      if(!m||!m._layers)return null;
+      var hit=null;
+      for(var k in m._layers){
+        var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+        try{
+          lyr.eachLayer(function(sub){
+            if(hit)return;
+            if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null){
+              hit=lyr;
+            }
+          });
+        }catch(_){}
+        if(hit)return hit;
+      }
+      return null;
+    }
+    try{
+      var _wlMap=_wlFindMap(); var _wlPoly=_wlMap?_wlFindPolygonLayer(_wlMap):null;
+      if(_wlPoly&&_wlPoly.eachLayer){
+        _wlPoly.eachLayer(function(lyr){
+          var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
+          if(hidden(p))return;
+          var r=headers.map(function(h){var v=p[h];
+            if(v==null)return ''; v=String(v);
+            if(/[",\\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+            return v;});
+          rows.push(r.join(',')); emitted++;
+        });
+      }
+    }catch(e){console.warn('worklist export:',e);}"""
+
+
 PATCHES = [
     ("getNbhdColor: missing-as-zero", P1_OLD, P1_NEW),
     ("hiNbhd/rhNbhd: skip hidden", P2_OLD, P2_NEW),
@@ -2413,6 +2498,12 @@ PATCHES = [
     # because only .enc files exist on the server) and tame the
     # document.write parser-blocking warnings on cross-site Leaflet.
     ("BODY_CLEAN_V1: strip stale preloads + tame document.write warnings", P17_OLD, P17_NEW, "/*BODY_CLEAN_V1*/"),
+    # P18: fix the original P5 "Worklist CSV ⇩" button — same root cause
+    # P16 fixed for "Map CSV ⬇". Surgical swap of the downloadWorklist body
+    # so it walks the Leaflet map for the polygon layer instead of trying
+    # to read `nbhdLayer` from the patch's outer scope.
+    ("WORKLIST_CSV_FIX_V1: repair P5 worklist CSV (was emitting 0 rows)",
+     P18_OLD, P18_NEW, "/*WORKLIST_CSV_FIX_V1*/"),
 ]
 
 
