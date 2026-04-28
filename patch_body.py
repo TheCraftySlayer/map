@@ -2333,10 +2333,12 @@ try{
 #      We add `defer` + `crossorigin="anonymous"` attributes — Chrome
 #      stops warning once it can see the script will run async.
 #
-#  Anchored on the standalone `<head>` opening tag, which appears
-#  exactly once and never gets edited by the patch chain.
-P17_OLD = "<head>"
-P17_NEW = """<head>
+#  Anchored on the document's outer <html><head><meta charset...><title>
+#  prefix — the "Bernalillo County Assessor" title is unique to the
+#  document head and absent from the popup-window HTML templates inside
+#  this same body, which also contain `<head>` substrings.
+P17_OLD = '<html><head><meta charset="utf-8"><title>Bernalillo County Assessor'
+P17_NEW = """<html><head>
 <!-- BODY_CLEAN_V1: strip stale preloads + tame document.write warnings -->
 <script>/*BODY_CLEAN_V1*/(function(){
   try{
@@ -2369,7 +2371,118 @@ P17_NEW = """<head>
       return origWrite.call(document, html);
     };
   }catch(e){console.warn('BODY_CLEAN_V1:', e);}
-})();</script>"""
+})();</script>
+<meta charset="utf-8"><title>Bernalillo County Assessor"""
+
+
+#  Patch 18: WORKLIST_CSV_FIX_V1 — fix the broken P5 "Worklist CSV ⇩" button.
+#
+#  P5's downloadWorklist iterates `nbhdLayer.eachLayer(...)`, but `nbhdLayer`
+#  is declared inside the body's IIFE — `typeof nbhdLayer` resolves to
+#  'undefined' from the patch's outer scope, so the export silently emits 0
+#  rows and the toast reports "No visible nbhds (seen 0)". The same bug was
+#  fixed for the "Map CSV ⬇" button in P16 by walking the Leaflet map's
+#  `_layers` to find the polygon layer by feature shape; this patch ports
+#  that approach into downloadWorklist.
+#
+#  Surgical replacement of the function body — the OLD anchor is unique to
+#  P5 (only `downloadWorklist` carries the "Iterates nbhdLayer (Leaflet) and
+#  exports a CSV of every visible feature." comment), so this patch is safe
+#  to apply on a body that has every other patch in this file already
+#  applied. Marker `/*WORKLIST_CSV_FIX_V1*/` blocks reapplication.
+P18_OLD = """  // ── Worklist CSV ──────────────────────────────────────────────────────────
+  // Iterates nbhdLayer (Leaflet) and exports a CSV of every visible feature.
+  // Falls back to all features if featureHidden() isn't defined yet.
+  function downloadWorklist(){
+    var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
+        'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
+    var hidden=window.featureHidden||function(){return false;};
+    var seen=0; var emitted=0;
+    try{
+      if(typeof nbhdLayer!=='undefined'&&nbhdLayer&&nbhdLayer.eachLayer){
+        nbhdLayer.eachLayer(function(lyr){
+          var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
+          if(hidden(p))return;
+          var r=headers.map(function(h){var v=p[h];
+            if(v==null)return ''; v=String(v);
+            if(/[",\\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+            return v;});
+          rows.push(r.join(',')); emitted++;
+        });
+      }
+    }catch(e){console.warn('worklist export:',e);}"""
+P18_NEW = """  // ── Worklist CSV ──────────────────────────────────────────────────────────
+  // WORKLIST_CSV_FIX_V1: walk the Leaflet map's _layers to find the polygon
+  // layer (any sub-layer whose features carry `nbhd`); the original P5 code
+  // looked up `nbhdLayer` as a global, but the body declares it inside an
+  // IIFE so the export silently emitted 0 rows. Same approach as P16.
+  function downloadWorklist(){/*WORKLIST_CSV_FIX_V1*/
+    var rows=[]; var headers=['nbhd','parcels','outreach_need','hoh_gap','vf_gap',
+        'pct_hoh','pct_vet','pct_val_freeze','dpi','low_confidence','low_confidence_reason'];
+    var hidden=window.featureHidden||function(){return false;};
+    var seen=0; var emitted=0;
+    function _wlFindMap(){
+      if(typeof L==='undefined')return null;
+      for(var k in window){try{var v=window[k];
+        if(v&&typeof v==='object'&&typeof v.eachLayer==='function'&&typeof v.getBounds==='function')return v;
+      }catch(_){}} return null;
+    }
+    function _wlFindPolygonLayer(m){
+      if(!m||!m._layers)return null;
+      var hit=null;
+      for(var k in m._layers){
+        var lyr=m._layers[k]; if(!lyr||typeof lyr.eachLayer!=='function')continue;
+        try{
+          lyr.eachLayer(function(sub){
+            if(hit)return;
+            if(sub&&sub.feature&&sub.feature.properties&&sub.feature.properties.nbhd!=null){
+              hit=lyr;
+            }
+          });
+        }catch(_){}
+        if(hit)return hit;
+      }
+      return null;
+    }
+    try{
+      var _wlMap=_wlFindMap(); var _wlPoly=_wlMap?_wlFindPolygonLayer(_wlMap):null;
+      if(_wlPoly&&_wlPoly.eachLayer){
+        _wlPoly.eachLayer(function(lyr){
+          var p=lyr&&lyr.feature&&lyr.feature.properties; if(!p)return; seen++;
+          if(hidden(p))return;
+          var r=headers.map(function(h){var v=p[h];
+            if(v==null)return ''; v=String(v);
+            if(/[",\\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+            return v;});
+          rows.push(r.join(',')); emitted++;
+        });
+      }
+    }catch(e){console.warn('worklist export:',e);}"""
+
+
+#  Patch 19: CSV_DUPID_FIX_V1 — repair the deployed body's native CSV export.
+#
+#  The body has TWO buttons sharing id="exportCsvBtn": the top-right "Export
+#  CSV" (line 51, full outreach-scoring export) and a legend "Download CSV"
+#  (line 145, simple choropleth-data export). `document.getElementById`
+#  returns the first match in document order, so:
+#
+#    - The IIFE handler intended for the legend button (which produces
+#      `bernalillo_map_*.csv`) attaches to the top-right button instead.
+#    - The line-1981 handler intended for the top-right button (which
+#      produces `spatial_equity_*.csv`) also attaches to the top-right one.
+#    - Result: the top-right button fires both handlers (downloads the
+#      "wrong" file plus a second one the browser may silently block) and
+#      the legend "Download CSV" button has no handler — clicks do nothing.
+#
+#  Two surgical 3-tuple swaps. The legend button's id is renamed to
+#  `downloadCsvBtn`, and the IIFE's getElementById call is updated to match.
+#  Idempotent by 3-tuple semantics (OLD vanishes after apply).
+P19A_OLD = '<button id="exportCsvBtn" title="Download the current choropleth data as CSV"'
+P19A_NEW = '<button id="downloadCsvBtn" title="Download the current choropleth data as CSV"'
+
+P19B_OLD = "const btn=document.getElementById('exportCsvBtn');\n  if(!btn)return;"
+P19B_NEW = "const btn=document.getElementById('downloadCsvBtn');\n  if(!btn)return;"
 
 
 PATCHES = [
@@ -2413,6 +2526,19 @@ PATCHES = [
     # because only .enc files exist on the server) and tame the
     # document.write parser-blocking warnings on cross-site Leaflet.
     ("BODY_CLEAN_V1: strip stale preloads + tame document.write warnings", P17_OLD, P17_NEW, "/*BODY_CLEAN_V1*/"),
+    # P18: fix the original P5 "Worklist CSV ⇩" button — same root cause
+    # P16 fixed for "Map CSV ⬇". Surgical swap of the downloadWorklist body
+    # so it walks the Leaflet map for the polygon layer instead of trying
+    # to read `nbhdLayer` from the patch's outer scope.
+    ("WORKLIST_CSV_FIX_V1: repair P5 worklist CSV (was emitting 0 rows)",
+     P18_OLD, P18_NEW, "/*WORKLIST_CSV_FIX_V1*/"),
+    # P19: repair the deployed body's NATIVE CSV exports. Two buttons share
+    # id="exportCsvBtn" — getElementById always returns the first, so the
+    # legend "Download CSV" button has no handler at all and the top-right
+    # button gets two handlers attached. Rename the legend button's id and
+    # rewire its IIFE handler. Two 3-tuple swaps (legacy idempotency).
+    ("CSV_DUPID_FIX_V1a: rename legend Download-CSV button id", P19A_OLD, P19A_NEW),
+    ("CSV_DUPID_FIX_V1b: rewire legend Download-CSV handler", P19B_OLD, P19B_NEW),
 ]
 
 

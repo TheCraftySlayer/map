@@ -96,6 +96,7 @@ class TestExistingPatchesShape(unittest.TestCase):
             "MAP_EXT_V1", "PDF_EXPORT_V1", "INSIGHTS_V1", "TOOLS_V1",
             "REPORTS_V1", "ANNOTATE_V1", "COMPARE_V1", "DECIDE_V1", "VIZ_V1",
             "FIELD_V1", "PASTEVENTS_V1", "CHORO_CSV_V1", "BODY_CLEAN_V1",
+            "WORKLIST_CSV_FIX_V1",
         )
         for entry in patch_body.PATCHES:
             name = entry[0]
@@ -117,6 +118,56 @@ class TestExistingPatchesShape(unittest.TestCase):
         markers = [e[3] for e in patch_body.PATCHES if len(e) == 4]
         self.assertEqual(len(markers), len(set(markers)),
             "two patches share an idempotency marker")
+
+
+class TestWorklistCsvFix(unittest.TestCase):
+    """P18 must repair the P5 worklist CSV: drop the broken `typeof nbhdLayer`
+    guard and substitute the Leaflet _layers walk used by P16."""
+
+    def _by_name(self, prefix):
+        for entry in patch_body.PATCHES:
+            if entry[0].startswith(prefix):
+                return entry
+        return None
+
+    def test_p18_replaces_broken_global_lookup(self):
+        p5 = self._by_name("MAP_EXT_V1")
+        p18 = self._by_name("WORKLIST_CSV_FIX_V1")
+        self.assertIsNotNone(p5, "P5 (MAP_EXT_V1) missing from PATCHES")
+        self.assertIsNotNone(p18, "P18 (WORKLIST_CSV_FIX_V1) missing from PATCHES")
+
+        p5_new = p5[2]
+        p18_old, p18_new = p18[1], p18[2]
+
+        # P18's OLD anchor must be a substring of P5's NEW (otherwise P18
+        # would never find anything to swap once P5 has been applied).
+        self.assertIn(p18_old, p5_new,
+            "P18 OLD anchor not present in P5 NEW — patches don't compose")
+
+        # The broken global-lookup guard goes away in the fixed version.
+        self.assertIn("typeof nbhdLayer!=='undefined'", p18_old)
+        self.assertNotIn("typeof nbhdLayer!=='undefined'", p18_new)
+
+        # The fix uses the same shape as P16: walk the map's _layers.
+        self.assertIn("_layers", p18_new)
+        self.assertIn("nbhd", p18_new)
+
+    def test_p18_round_trips_against_synthetic_p5_body(self):
+        # Build a minimal seed that lets P5 then P18 both apply, and
+        # confirm the resulting body has the marker and lacks the
+        # broken guard.
+        text = "</body></html>\n"
+        # Filter the live PATCHES list to just P5 and P18 so the test
+        # doesn't depend on the rest of the chain.
+        keep = [e for e in patch_body.PATCHES
+                if e[0].startswith(("MAP_EXT_V1", "WORKLIST_CSV_FIX_V1"))]
+        self.assertEqual(len(keep), 2, "expected exactly P5 and P18 in PATCHES")
+        out = _run_patches(text, keep)
+        self.assertIn("/*WORKLIST_CSV_FIX_V1*/", out)
+        # The broken guard must not survive the chain.
+        self.assertNotIn("typeof nbhdLayer!=='undefined'", out)
+        # The fixed function should be the only downloadWorklist defn.
+        self.assertEqual(out.count("function downloadWorklist("), 1)
 
 
 if __name__ == "__main__":
