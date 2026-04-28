@@ -188,17 +188,23 @@ $('gateForm').addEventListener('submit',async e=>{
       return origFetch(url,init);
     };
 
-    // Pre-write rewrite — see comments in index.html for rationale.
+    // Pre-write rewrite of the body HTML.
+    //
+    // 1. Strip <link rel="preload"> for the JSON files. The fetch shim
+    //    above serves those URLs from in-memory plaintext; the preload
+    //    tags only hit the network and 404 (the real files are .enc).
+    //
+    // We DO NOT defer the cross-site Leaflet/markercluster <script> tags
+    // here. Earlier versions did, to silence a Chrome console warning
+    // about parser-blocking cross-site scripts, but the body's inline
+    // script calls init() as a microtask off _coreP.then — which can fire
+    // before deferred scripts have executed, leaving Leaflet's L
+    // undefined and crashing init() with "ReferenceError: L is not
+    // defined". The console warning is advisory; a broken map is not.
     let body=htmlText;
     body=body.replace(
       /<link[^>]*rel=["']preload["'][^>]*href=["'][^"']*data\/(?:core|layers)\.json["'][^>]*>/gi,
       '');
-    body=body.replace(
-      /<script(\s+[^>]*?src=["']https:\/\/cdnjs\.cloudflare\.com\/[^"']+["'])([^>]*)>/gi,
-      function(_, srcAttr, rest){
-        if(/\bdefer\b/.test(rest))return '<script'+srcAttr+rest+'>';
-        return '<script'+srcAttr+' defer crossorigin="anonymous"'+rest+'>';
-      });
 
     document.open();
     document.write(body);
